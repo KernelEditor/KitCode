@@ -77,7 +77,7 @@ describe('attachments', () => {
 
   it('converts an image returned by the platform clipboard reader', async () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
-    const runner = vi.fn(async () => png)
+    const runner = vi.fn(async (_command: string, _args: string[]) => png)
 
     await expect(loadClipboardImage('darwin', runner)).resolves.toMatchObject({
       type: 'image',
@@ -85,6 +85,9 @@ describe('attachments', () => {
       name: 'clipboard.png',
     })
     expect(runner).toHaveBeenCalledWith('osascript', expect.arrayContaining(['-l', 'JavaScript']))
+    const script = runner.mock.calls[0]?.[1].at(-1)
+    expect(script).toContain('ObjC.unwrap(value) !== undefined')
+    expect(script).toContain('NSPasteboardTypeFileURL')
   })
 })
 

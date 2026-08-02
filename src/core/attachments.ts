@@ -265,21 +265,61 @@ function runClipboardCommand(command: string, args: string[]): Promise<Buffer> {
 const MACOS_CLIPBOARD_SCRIPT = String.raw`
 ObjC.import('AppKit')
 ObjC.import('Foundation')
+
+function present(value) {
+  return value !== null && value !== undefined && ObjC.unwrap(value) !== undefined
+}
+
+function pngFromTiff(tiff) {
+  if (!present(tiff)) return null
+  const bitmap = $.NSBitmapImageRep.imageRepWithData(tiff)
+  if (!present(bitmap)) return null
+  return bitmap.representationUsingTypeProperties(
+    $.NSBitmapImageFileTypePNG,
+    $.NSDictionary.dictionary,
+  )
+}
+
 const pasteboard = $.NSPasteboard.generalPasteboard
-let data = pasteboard.dataForType($.NSPasteboardTypePNG)
-if (!data) {
-  const tiff = pasteboard.dataForType($.NSPasteboardTypeTIFF)
-  if (tiff) {
-    const bitmap = $.NSBitmapImageRep.imageRepWithData(tiff)
-    if (bitmap) {
-      data = bitmap.representationUsingTypeProperties(
-        $.NSBitmapImageFileTypePNG,
-        $.NSDictionary.dictionary,
-      )
+let data = null
+const directTypes = [
+  $.NSPasteboardTypePNG,
+  $('public.jpeg'),
+  $('com.compuserve.gif'),
+  $('public.webp'),
+  $('org.webmproject.webp'),
+]
+for (const type of directTypes) {
+  const candidate = pasteboard.dataForType(type)
+  if (present(candidate)) {
+    data = candidate
+    break
+  }
+}
+
+if (!present(data)) data = pngFromTiff(pasteboard.dataForType($.NSPasteboardTypeTIFF))
+
+if (!present(data)) {
+  const fileUrl = pasteboard.stringForType($.NSPasteboardTypeFileURL)
+  if (present(fileUrl)) {
+    const image = $.NSImage.alloc.initWithContentsOfURL($.NSURL.URLWithString(fileUrl))
+    if (present(image)) data = pngFromTiff(image.TIFFRepresentation)
+  }
+}
+
+if (!present(data)) {
+  const files = pasteboard.propertyListForType($.NSFilenamesPboardType)
+  if (present(files) && ObjC.unwrap(files.count) > 0) {
+    const image = $.NSImage.alloc.initWithContentsOfURL(
+      $.NSURL.fileURLWithPath(files.objectAtIndex(0)),
+    )
+    if (present(image)) {
+      data = pngFromTiff(image.TIFFRepresentation)
     }
   }
 }
-if (!data) throw new Error('no clipboard image')
+
+if (!present(data)) throw new Error('no clipboard image')
 $.NSFileHandle.fileHandleWithStandardOutput.writeData(data)
 `
 
