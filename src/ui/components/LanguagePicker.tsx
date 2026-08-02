@@ -1,15 +1,16 @@
-import { Box, Text, useInput } from 'ink'
+import { Box, Text } from 'ink'
 import { useState } from 'react'
 import { LANGS } from '../i18n'
 import type { Lang } from '../i18n'
 import { useTheme } from '../theme'
+import { useTerminalInput } from '../input'
 import { Logo } from './Logo'
 
 export function LanguagePicker({ onPick }: { onPick(lang: Lang): void }) {
   const theme = useTheme()
   const [cursor, setCursor] = useState(0)
 
-  useInput((char, key) => {
+  useTerminalInput((char, key) => {
     if (key.upArrow) return setCursor((index) => Math.max(0, index - 1))
     if (key.downArrow) return setCursor((index) => Math.min(LANGS.length - 1, index + 1))
     if (key.return) return onPick(LANGS[cursor]?.key ?? 'en')

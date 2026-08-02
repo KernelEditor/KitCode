@@ -1,5 +1,6 @@
-import { Box, Text, useInput } from 'ink'
+import { Box, Text } from 'ink'
 import { normalizeHotkey } from '../layout'
+import { useTerminalInput } from '../input'
 import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
 import type { PermissionPromptProps } from '../types'
@@ -11,7 +12,7 @@ const MAX_PREVIEW_CHARS = 20_000
 export function PermissionPrompt({ request, onDecide }: PermissionPromptProps) {
   const theme = useTheme()
   const strings = useStrings()
-  useInput((char, key) => {
+  useTerminalInput((char, key) => {
     const c = normalizeHotkey(char)
     if (c === 'y') onDecide('once')
     else if (c === 'a' && request.allowAlways !== false) onDecide('always')

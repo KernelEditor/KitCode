@@ -1,7 +1,8 @@
-import { Box, Text, useInput } from 'ink'
+import { Box, Text } from 'ink'
 import { useMemo, useState } from 'react'
 import { truncate } from '../diff'
 import { useStrings } from '../i18n'
+import { useTerminalInput } from '../input'
 import { useTheme } from '../theme'
 import { sanitizeTerminalText } from '../sanitize'
 import type { PickerProps } from '../types'
@@ -24,7 +25,7 @@ export function Picker({ title, items, onSelect, onCancel }: PickerProps) {
 
   const active = Math.min(cursor, Math.max(0, matches.length - 1))
 
-  useInput((char, key) => {
+  useTerminalInput((char, key) => {
     if (key.escape) return onCancel()
     if (key.return) {
       const chosen = matches[active]

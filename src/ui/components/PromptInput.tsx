@@ -1,9 +1,10 @@
-import { Box, Text, useInput } from 'ink'
-import TextInput from 'ink-text-input'
+import { Box, Text } from 'ink'
+import type { Key } from 'ink'
 import { memo, useEffect, useRef, useState } from 'react'
 import { matchCommands } from '../commands'
 import { moveInputHistory } from '../history'
 import { useStrings } from '../i18n'
+import { useTerminalInput } from '../input'
 import { useTheme } from '../theme'
 import { sanitizeTerminalText } from '../sanitize'
 import type { PromptInputProps } from '../types'
@@ -21,20 +22,37 @@ export const PromptInput = memo(function PromptInput({
 }: PromptInputProps) {
   const theme = useTheme()
   const strings = useStrings()
-  const [cursor, setCursor] = useState(0)
+  const safeValue = sanitizeTerminalText(value)
+  const [selectionCursor, setSelectionCursor] = useState(0)
+  const [inputCursor, setInputCursor] = useState(() => characters(safeValue).length)
   const [historyIndex, setHistoryIndex] = useState<number | null>(null)
   const historyDraft = useRef('')
+  const pendingValue = useRef<string | null>(null)
 
-  const suggestions = matchCommands(value)
+  const suggestions = matchCommands(safeValue)
   const open = suggestions.length > 0
-  const active = Math.min(cursor, Math.max(0, suggestions.length - 1))
+  const active = Math.min(selectionCursor, Math.max(0, suggestions.length - 1))
 
   useEffect(() => {
-    setCursor(0)
-  }, [value])
+    setSelectionCursor(0)
+  }, [safeValue])
 
-  const change = (next: string) => {
+  useEffect(() => {
+    const length = characters(safeValue).length
+    if (pendingValue.current === safeValue) {
+      pendingValue.current = null
+      setInputCursor((cursor) => clamp(cursor, 0, length))
+      return
+    }
+    // Values inserted by a picker or cleared by the parent are external to
+    // this input, so place the cursor at their end.
+    setInputCursor(length)
+  }, [safeValue])
+
+  const change = (next: string, cursor = characters(next).length) => {
     next = sanitizeTerminalText(next)
+    pendingValue.current = next
+    setInputCursor(clamp(cursor, 0, characters(next).length))
     setHistoryIndex(null)
     historyDraft.current = next
     onChange(next)
@@ -46,38 +64,79 @@ export const PromptInput = memo(function PromptInput({
     onSubmit(next)
   }
 
-  useInput(
-    (_char, key) => {
-      if (open) {
-        if (key.upArrow) return setCursor(Math.max(0, active - 1))
-        if (key.downArrow) return setCursor(Math.min(suggestions.length - 1, active + 1))
-        if (key.tab && !key.shift) {
-          const chosen = suggestions[active]
-          if (chosen) change(`/${chosen.name} `)
-          return
-        }
-        if (key.return) {
-          const chosen = suggestions[active]
-          if (chosen) submit(`/${chosen.name}`)
-        }
-        return
-      }
+  useTerminalInput((input, key) => {
+    if (open && key.upArrow) {
+      setSelectionCursor(Math.max(0, active - 1))
+      return
+    }
+    if (open && key.downArrow) {
+      setSelectionCursor(Math.min(suggestions.length - 1, active + 1))
+      return
+    }
+    if (open && key.tab && !key.shift) {
+      const chosen = suggestions[active]
+      if (chosen) change(`/${chosen.name} `)
+      return
+    }
+    if (open && key.return) {
+      const chosen = suggestions[active]
+      if (chosen) submit(`/${chosen.name}`)
+      return
+    }
 
-      const direction = key.upArrow ? 'previous' : key.downArrow ? 'next' : null
-      if (!direction) return
+    if (!open && (key.upArrow || key.downArrow)) {
       const moved = moveInputHistory(
         history,
         historyIndex,
-        value,
+        safeValue,
         historyDraft.current,
-        direction,
+        key.upArrow ? 'previous' : 'next',
       )
       historyDraft.current = moved.draft
       setHistoryIndex(moved.index)
-      if (moved.value !== value) onChange(moved.value)
-    },
-    { isActive: true },
-  )
+      setInputCursor(characters(moved.value).length)
+      if (moved.value !== safeValue) {
+        pendingValue.current = moved.value
+        onChange(moved.value)
+      }
+      return
+    }
+
+    if (key.tab || key.upArrow || key.downArrow || key.escape || key.pageUp || key.pageDown) {
+      return
+    }
+    if (key.return) {
+      submit(safeValue)
+      return
+    }
+
+    const valueCharacters = characters(safeValue)
+    const cursor = clamp(inputCursor, 0, valueCharacters.length)
+    if (key.leftArrow || key.rightArrow || key.home || key.end) {
+      setInputCursor(nextCursor(cursor, valueCharacters.length, key))
+      return
+    }
+    if (key.backspace) {
+      if (cursor > 0) {
+        valueCharacters.splice(cursor - 1, 1)
+        change(valueCharacters.join(''), cursor - 1)
+      }
+      return
+    }
+    if (key.delete) {
+      if (cursor < valueCharacters.length) {
+        valueCharacters.splice(cursor, 1)
+        change(valueCharacters.join(''), cursor)
+      }
+      return
+    }
+    if (input === '' || key.ctrl || key.meta) return
+
+    const inserted = characters(sanitizeTerminalText(input))
+    if (inserted.length === 0) return
+    valueCharacters.splice(cursor, 0, ...inserted)
+    change(valueCharacters.join(''), cursor + inserted.length)
+  })
 
   const start = Math.max(0, Math.min(active - WINDOW + 2, suggestions.length - WINDOW))
   const visible = suggestions.slice(start, start + WINDOW)
@@ -93,13 +152,7 @@ export const PromptInput = memo(function PromptInput({
       >
         <Text color={disabled ? 'gray' : theme.accent}>› </Text>
         {/* Input stays active while the agent runs; submitted messages queue. */}
-        <TextInput
-          key={historyIndex === null ? 'draft' : `history-${historyIndex}`}
-          value={sanitizeTerminalText(value)}
-          onChange={change}
-          onSubmit={open ? noop : submit}
-          placeholder={strings.placeholder}
-        />
+        <EditableText value={safeValue} cursor={inputCursor} placeholder={strings.placeholder} />
         {pending && pending > 0 ? <Text dimColor> · {strings.queued(pending)}</Text> : null}
       </Box>
 
@@ -127,4 +180,48 @@ export const PromptInput = memo(function PromptInput({
   )
 })
 
-function noop(): void {}
+function EditableText({
+  value,
+  cursor,
+  placeholder,
+}: {
+  value: string
+  cursor: number
+  placeholder: string
+}) {
+  const valueCharacters = characters(value)
+  const at = clamp(cursor, 0, valueCharacters.length)
+  if (valueCharacters.length === 0) {
+    const placeholderCharacters = characters(sanitizeTerminalText(placeholder))
+    return (
+      <Text>
+        <Text inverse>{placeholderCharacters[0] ?? ' '}</Text>
+        <Text color="gray">{placeholderCharacters.slice(1).join('')}</Text>
+      </Text>
+    )
+  }
+
+  return (
+    <Text>
+      {valueCharacters.slice(0, at).join('')}
+      <Text inverse>{valueCharacters[at] ?? ' '}</Text>
+      {valueCharacters.slice(at + 1).join('')}
+    </Text>
+  )
+}
+
+function nextCursor(cursor: number, length: number, key: Key): number {
+  if (key.home) return 0
+  if (key.end) return length
+  if (key.leftArrow) return Math.max(0, cursor - 1)
+  if (key.rightArrow) return Math.min(length, cursor + 1)
+  return cursor
+}
+
+function characters(value: string): string[] {
+  return [...value]
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(value, max))
+}

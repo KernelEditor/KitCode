@@ -1,4 +1,5 @@
-import { Box, Text, useInput } from 'ink'
+import { Box, Text } from 'ink'
+import { useTerminalInput } from '../input'
 import { normalizeHotkey } from '../layout'
 import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
@@ -8,7 +9,7 @@ import type { ConfirmProps } from '../types'
 export function Confirm({ title, body, danger, onAnswer }: ConfirmProps) {
   const theme = useTheme()
   const strings = useStrings()
-  useInput((char, key) => {
+  useTerminalInput((char, key) => {
     const c = normalizeHotkey(char)
     if (c === 'y') onAnswer(true)
     else if (c === 'n' || key.escape || key.return) onAnswer(false)

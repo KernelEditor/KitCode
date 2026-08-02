@@ -1,4 +1,4 @@
-import { Box, useApp, useInput } from 'ink'
+import { Box, useApp } from 'ink'
 import { execFile, execFileSync } from 'node:child_process'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from '../core/types'
@@ -16,6 +16,7 @@ import { Transcript } from './components/Transcript'
 import { appendInputHistory } from './history'
 import { LANGS, StringsContext, stringsFor } from './i18n'
 import type { Lang } from './i18n'
+import { useTerminalInput } from './input'
 import type { Runtime } from './runtime'
 import { PRESETS, ThemeContext, makeTheme, resolveAccent } from './theme'
 import { formatDuration } from './time'
@@ -595,7 +596,7 @@ export function App({
     [busy, handleSlash, runAgent],
   )
 
-  useInput((_char, key) => {
+  useTerminalInput((_char, key) => {
     if (key.tab && key.shift) {
       const next = runtime.cycleMode()
       notice('info', strings.modeChanged(strings.modeLabel[next] ?? next))
@@ -660,7 +661,7 @@ export function App({
 
   return shell(
     <Box flexDirection="column">
-      <Logo />
+      <Logo workspace={runtime.cwd} />
       <Transcript key={transcriptRevision} bubbles={transcript.bubbles} />
 
       {overlay.kind === 'permission' && (
