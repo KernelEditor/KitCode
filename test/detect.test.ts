@@ -100,4 +100,16 @@ describe('detectProvider', () => {
       }),
     ).rejects.toThrow(/HTTP 500.*upstream exploded/s)
   })
+
+  it('rejects an oversized model-list response before buffering it', async () => {
+    await expect(
+      detectProvider('https://api.example.com/v1', 'sk-test', {
+        fetchImpl: async () =>
+          new Response('small placeholder', {
+            status: 200,
+            headers: { 'content-length': '5000001' },
+          }),
+      }),
+    ).rejects.toThrow(/exceeded 5 MB/)
+  })
 })

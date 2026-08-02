@@ -26,7 +26,9 @@ export interface Tool {
   description: string
   inputSchema: JsonSchema
   defaultPermission: PermissionMode
+  permission?(input: unknown, ctx?: ToolContext): PermissionMode | undefined
   summarize(input: unknown): string
+  preview?(input: unknown, ctx: ToolContext): Promise<ToolDisplay | undefined>
   execute(input: unknown, ctx: ToolContext): Promise<ToolResult>
 }
 

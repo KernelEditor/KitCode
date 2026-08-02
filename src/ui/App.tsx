@@ -54,6 +54,7 @@ export function App({
   const [transcript, setTranscript] = useState(() =>
     warnings.reduce((state, text) => pushNotice(state, 'warn', text), fromHistory(initialHistory)),
   )
+  const [transcriptRevision, setTranscriptRevision] = useState(0)
   const [input, setInput] = useState('')
   const [promptHistory, setPromptHistory] = useState(() =>
     inputHistoryFromMessages(initialHistory),
@@ -210,7 +211,9 @@ export function App({
     }
     try {
       history.current = await runtime.run(history.current, hooks, controller.signal)
-      void runtime.persist(history.current)
+      void runtime
+        .persist(history.current)
+        .catch((error) => notice('error', error instanceof Error ? error.message : String(error)))
     } catch (error) {
       notice('error', error instanceof Error ? error.message : String(error))
     } finally {
@@ -266,8 +269,13 @@ export function App({
           history.current = []
           setPromptHistory([])
           setTranscript(emptyTranscript())
+          setTranscriptRevision((revision) => revision + 1)
           runtime.resetContext()
-          void runtime.persist([])
+          void runtime
+            .persist([])
+            .catch((error) =>
+              notice('error', error instanceof Error ? error.message : String(error)),
+            )
           return
 
         case 'resume': {
@@ -289,6 +297,7 @@ export function App({
                 strings.resumed(choice.slice(-6), restored.length),
               ),
             )
+            setTranscriptRevision((revision) => revision + 1)
           } catch (error) {
             notice('error', error instanceof Error ? error.message : String(error))
           }
@@ -316,6 +325,7 @@ export function App({
           history.current = []
           setPromptHistory([])
           setTranscript(emptyTranscript())
+          setTranscriptRevision((revision) => revision + 1)
           runtime.resetContext()
           setSetup(runtime.needsSetup())
           forceRender((n) => n + 1)
@@ -597,7 +607,7 @@ export function App({
   return shell(
     <Box flexDirection="column">
       <Logo />
-      <Transcript bubbles={transcript.bubbles} />
+      <Transcript key={transcriptRevision} bubbles={transcript.bubbles} />
 
       {overlay.kind === 'permission' && (
         <PermissionPrompt

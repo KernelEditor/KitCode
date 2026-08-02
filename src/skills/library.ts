@@ -1,4 +1,4 @@
-import { open, readFile, readdir } from 'node:fs/promises'
+import { open, readFile, readdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 
 export interface SkillMeta {
@@ -14,12 +14,16 @@ export interface Skill extends SkillMeta {
 
 const SKILL_FILE = 'SKILL.md'
 const FRONTMATTER_BYTES = 8192
+const MAX_SKILL_BYTES = 5_000_000
+const MAX_SKILLS_PER_ROOT = 500
 
 export async function discoverSkills(dirs: string[]): Promise<SkillMeta[]> {
   const byName = new Map<string, SkillMeta>()
   for (const root of dirs) {
     const entries = await readdir(root).catch(() => [])
-    const found = await Promise.all(entries.map((entry) => readMeta(path.join(root, entry))))
+    const found = await Promise.all(
+      entries.slice(0, MAX_SKILLS_PER_ROOT).map((entry) => readMeta(path.join(root, entry))),
+    )
     for (const meta of found) {
       if (meta && !byName.has(meta.name)) byName.set(meta.name, meta)
     }
@@ -28,6 +32,10 @@ export async function discoverSkills(dirs: string[]): Promise<SkillMeta[]> {
 }
 
 export async function loadSkill(meta: SkillMeta): Promise<Skill> {
+  const info = await stat(meta.file)
+  if (info.size > MAX_SKILL_BYTES) {
+    throw new Error(`Skill file exceeds the ${MAX_SKILL_BYTES / 1_000_000} MB limit: ${meta.file}`)
+  }
   const { body } = parseFrontmatter(await readFile(meta.file, 'utf8'))
   return { ...meta, body }
 }

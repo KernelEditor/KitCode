@@ -14,10 +14,12 @@ import type {
 import type { PermissionMode, Tool, ToolContext, ToolDisplay } from '../tools/types'
 import type { AgentHooks } from './types'
 import { sanitizeHistory } from './session'
+import type { TurnBudget } from './budget'
 
 const MAX_PAUSE_RESUMES = 5
 
 export const MAX_TURN_STEPS = 64
+export const MAX_TOOL_CALLS_PER_STEP = 32
 
 export interface ToolLookup {
   get(name: string): Tool | undefined
@@ -25,9 +27,9 @@ export interface ToolLookup {
 }
 
 export interface PermissionGate {
-  decide(tool: Tool): PermissionMode
+  decide(tool: Tool, requested?: PermissionMode): PermissionMode
   grantForSession(name: string): void
-  denyReason?(tool: Tool): string | undefined
+  denyReason?(tool: Tool, requested?: PermissionMode): string | undefined
 }
 
 export interface UsageSink {
@@ -46,16 +48,13 @@ export interface AgentConfig {
   maxTokens: number
   effort: Effort
   thinking: boolean
+  budget?: TurnBudget
 }
 
 interface StreamOutcome {
   content: ContentBlock[]
   stopReason: StopReason
   refusal?: RefusalInfo
-}
-
-type Previewable = {
-  preview(input: unknown, ctx: ToolContext): Promise<ToolDisplay | undefined>
 }
 
 export async function runTurn(
@@ -79,8 +78,25 @@ export async function runTurn(
       return messages
     }
 
+    const budgetDecision = cfg.budget?.beforeRequest({
+      modelRef: cfg.modelRef,
+      maxOutputTokens: cfg.maxTokens,
+      estimatedInputTokens: estimateRequestTokens(cfg, messages),
+    })
+    if (budgetDecision && !budgetDecision.allowed) {
+      hooks.onEvent({ type: 'notice', level: 'warn', text: budgetDecision.reason })
+      hooks.onEvent({ type: 'turn_end', stopReason: 'max_tokens' })
+      return messages
+    }
+
     hooks.onEvent({ type: 'turn_start' })
-    const outcome = await consumeStream(cfg, messages, hooks, signal)
+    const outcome = await consumeStream(
+      cfg,
+      messages,
+      hooks,
+      signal,
+      budgetDecision?.maxOutputTokens ?? cfg.maxTokens,
+    )
     messages.push({ role: 'assistant', content: outcome.content })
 
     if (outcome.stopReason === 'aborted') {
@@ -89,6 +105,16 @@ export async function runTurn(
     }
 
     if (outcome.stopReason === 'tool_use') {
+      const callCount = outcome.content.filter((block) => block.type === 'tool_use').length
+      if (callCount > MAX_TOOL_CALLS_PER_STEP) {
+        hooks.onEvent({
+          type: 'notice',
+          level: 'warn',
+          text: `The model returned ${callCount} tool calls at once; the limit is ${MAX_TOOL_CALLS_PER_STEP}. None were run. Ask it to split the work into smaller batches.`,
+        })
+        hooks.onEvent({ type: 'turn_end', stopReason: 'max_tokens' })
+        return sanitizeHistory(messages)
+      }
       const results = await runToolCalls(cfg, outcome.content, hooks, signal)
       if (results.length > 0) messages.push({ role: 'user', content: results })
       if (signal.aborted) {
@@ -130,13 +156,14 @@ async function consumeStream(
   messages: Message[],
   hooks: AgentHooks,
   signal: AbortSignal,
+  maxTokens: number,
 ): Promise<StreamOutcome> {
   const request: ChatRequest = {
     model: cfg.modelId,
     system: cfg.system,
     messages,
     tools: cfg.tools.schemas(),
-    maxTokens: cfg.maxTokens,
+    maxTokens,
     effort: cfg.effort,
     thinking: cfg.thinking,
     signal,
@@ -153,6 +180,7 @@ async function consumeStream(
         hooks.onEvent({ type: 'thinking_delta', text: event.text })
         break
       case 'usage':
+        cfg.budget?.record(cfg.modelRef, event.usage)
         cfg.usage.record(cfg.modelRef, event.usage)
         hooks.onEvent({ type: 'usage', model: cfg.modelRef, usage: event.usage })
         break
@@ -169,6 +197,21 @@ async function consumeStream(
   throw new Error(
     `"${cfg.provider.id}" ended the stream without completing the turn — nothing was generated. The endpoint answered, but not with a usable ${cfg.provider.kind} response.`,
   )
+}
+
+function estimateRequestTokens(cfg: AgentConfig, messages: Message[]): number {
+  let characters = cfg.system.length
+  try {
+    characters += JSON.stringify(messages).length
+    characters += JSON.stringify(cfg.tools.schemas()).length
+  } catch {
+    // Provider serialization will report malformed/cyclic data. Keep a small
+    // non-zero estimate here so the budget still has a conservative floor.
+    return Math.max(1, characters)
+  }
+  // One token per UTF-16 character deliberately overestimates ordinary code
+  // and prose, reserving room for input before an API request is sent.
+  return Math.max(1, characters)
 }
 
 async function runToolCalls(
@@ -209,11 +252,12 @@ async function runOneCall(
       })) !== 'deny',
   }
 
-  const gate = cfg.permissions.decide(tool)
+  const requestedPermission = requestedPermissionFor(tool, call.input, ctx)
+  const gate = cfg.permissions.decide(tool, requestedPermission)
   if (gate === 'deny') {
     return toolError(
       call.id,
-      cfg.permissions.denyReason?.(tool) ??
+      cfg.permissions.denyReason?.(tool, requestedPermission) ??
         `Tool "${tool.name}" is disabled by the user's configuration. Do not retry it; find another way or ask.`,
     )
   }
@@ -224,6 +268,7 @@ async function runOneCall(
       summary,
       input: call.input,
       display: await previewCall(tool, call.input, ctx),
+      allowAlways: canAlwaysApprove(tool),
     })
     if (decision === 'deny') {
       return toolError(call.id, 'The user declined this call. Do not retry it; ask how to proceed.')
@@ -264,10 +309,26 @@ async function previewCall(
   input: unknown,
   ctx: ToolContext,
 ): Promise<ToolDisplay | undefined> {
-  const preview = (tool as Partial<Previewable>).preview
+  const preview = tool.preview
   if (!preview) return undefined
   try {
     return await preview.call(tool, input, ctx)
+  } catch {
+    return undefined
+  }
+}
+
+function canAlwaysApprove(tool: Tool): boolean {
+  return tool.name !== 'bash' && tool.name !== 'task' && !tool.name.startsWith('mcp__')
+}
+
+function requestedPermissionFor(
+  tool: Tool,
+  input: unknown,
+  ctx: ToolContext,
+): PermissionMode | undefined {
+  try {
+    return tool.permission?.(input, ctx)
   } catch {
     return undefined
   }

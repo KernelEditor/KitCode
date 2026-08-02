@@ -2,7 +2,7 @@ import http from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
 import { afterEach, describe, expect, it } from 'vitest'
 import { detectProvider } from '../src/config/detect'
-import { runTurn } from '../src/core/agent'
+import { MAX_TOOL_CALLS_PER_STEP, runTurn } from '../src/core/agent'
 import type { AgentConfig } from '../src/core/agent'
 import type { AgentEvent, AgentHooks } from '../src/core/types'
 import { createAnthropicProvider } from '../src/providers/anthropic'
@@ -252,6 +252,27 @@ describe('runTurn refuses to fabricate a finished turn', () => {
 
     await runTurn(agentConfig(stubProvider([])), history, hooks, controller.signal)
     expect(events).toContainEqual({ type: 'turn_end', stopReason: 'aborted' })
+  })
+
+  it('does not execute an oversized batch of tool calls', async () => {
+    const { hooks, events } = recordingHooks()
+    const calls = Array.from({ length: MAX_TOOL_CALLS_PER_STEP + 1 }, (_, index) => ({
+      type: 'tool_use' as const,
+      id: `call_${index}`,
+      name: 'unknown',
+      input: {},
+    }))
+    const provider = stubProvider([
+      { type: 'done', stopReason: 'tool_use', content: calls },
+    ])
+    const history = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'go' }] }]
+
+    await expect(
+      runTurn(agentConfig(provider), history, hooks, new AbortController().signal),
+    ).resolves.toEqual(history)
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'notice', text: expect.stringContaining('None were run') }),
+    )
   })
 })
 

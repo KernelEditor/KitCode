@@ -6,7 +6,7 @@ import type { AgentHooks, PermissionDecision, PermissionRequest } from './types'
 
 export const TASK_TOOL_NAME = 'task'
 
-export const MAX_SUBAGENT_STEPS = 24
+export const MAX_SUBAGENT_STEPS = 12
 
 export const SUBAGENT_NO_ANSWER =
   'The subagent stopped without writing a final answer — it was interrupted or ended on a tool call. Nothing was reported back: do the work directly, or delegate it again with a narrower prompt.'

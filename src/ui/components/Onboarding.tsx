@@ -4,6 +4,7 @@ import TextInput from 'ink-text-input'
 import { useState } from 'react'
 import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
+import { sanitizeTerminalText } from '../sanitize'
 import { Logo } from './Logo'
 
 type Step = 'url' | 'key' | 'working'
@@ -23,7 +24,7 @@ export function Onboarding({ onSubmit }: { onSubmit(url: string, key: string): P
     try {
       await onSubmit(url.trim(), value.trim())
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(sanitizeTerminalText(cause instanceof Error ? cause.message : String(cause)))
       setKey('')
       setStep('key')
     }
@@ -58,7 +59,7 @@ export function Onboarding({ onSubmit }: { onSubmit(url: string, key: string): P
 
       {step === 'key' && (
         <Box flexDirection="column">
-          <Text dimColor>{url}</Text>
+          <Text dimColor>{sanitizeTerminalText(url)}</Text>
           <Box>
             <Text color={theme.accent}>{strings.apiKey}</Text>
             <TextInput value={key} onChange={setKey} onSubmit={submitKey} mask="•" />

@@ -1,8 +1,16 @@
 import { Box, Text } from 'ink'
-import { diffLines, type DiffLine, truncate } from '../diff'
+import { canRenderDiff, diffLines, MAX_RENDER_DIFF_CHARS, type DiffLine, truncate } from '../diff'
+import { sanitizeTerminalText } from '../sanitize'
 
 export function Diff({ before, after }: { before: string; after: string }) {
-  const { hunk, hidden } = diffLines(before, after)
+  if (!canRenderDiff(before, after)) {
+    return (
+      <Text dimColor>
+        Diff preview omitted: it exceeds {MAX_RENDER_DIFF_CHARS.toLocaleString()} characters.
+      </Text>
+    )
+  }
+  const { hunk, hidden } = diffLines(sanitizeTerminalText(before), sanitizeTerminalText(after))
   return <DiffHunk lines={hunk} hidden={hidden} />
 }
 
@@ -18,7 +26,7 @@ export function DiffHunk({ lines, hidden }: { lines: DiffLine[]; hidden: number 
           dimColor={line.kind === 'ctx'}
         >
           {line.kind === 'add' ? '+ ' : line.kind === 'del' ? '- ' : '  '}
-          {truncate(line.text, 110)}
+          {truncate(sanitizeTerminalText(line.text), 110)}
         </Text>
       ))}
       {hidden > 0 && <Text dimColor>  … {hidden} more lines</Text>}

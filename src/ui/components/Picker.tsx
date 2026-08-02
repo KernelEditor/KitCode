@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { truncate } from '../diff'
 import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
+import { sanitizeTerminalText } from '../sanitize'
 import type { PickerProps } from '../types'
 
 const WINDOW = 10
@@ -37,7 +38,7 @@ export function Picker({ title, items, onSelect, onCancel }: PickerProps) {
     }
     if (char && !key.ctrl && !key.meta) {
       setCursor(0)
-      setQuery((q) => q + char)
+      setQuery((q) => sanitizeTerminalText(q + char))
     }
   })
 
@@ -47,8 +48,8 @@ export function Picker({ title, items, onSelect, onCancel }: PickerProps) {
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.accent} paddingX={1}>
       <Text bold color={theme.accent}>
-        {title}
-        {query !== '' && <Text dimColor> / {query}</Text>}
+        {sanitizeTerminalText(title)}
+        {query !== '' && <Text dimColor> / {sanitizeTerminalText(query)}</Text>}
       </Text>
 
       {matches.length === 0 ? (
@@ -58,8 +59,10 @@ export function Picker({ title, items, onSelect, onCancel }: PickerProps) {
           const selected = start + index === active
           return (
             <Text key={item.key} color={selected ? theme.accent : undefined} inverse={selected}>
-              {truncate(item.label, 70)}
-              {item.hint && <Text dimColor> {truncate(item.hint, 34)}</Text>}
+              {truncate(sanitizeTerminalText(item.label), 70)}
+              {item.hint && (
+                <Text dimColor> {truncate(sanitizeTerminalText(item.hint), 34)}</Text>
+              )}
             </Text>
           )
         })

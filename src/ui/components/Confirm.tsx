@@ -2,6 +2,7 @@ import { Box, Text, useInput } from 'ink'
 import { normalizeHotkey } from '../layout'
 import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
+import { sanitizeTerminalText } from '../sanitize'
 import type { ConfirmProps } from '../types'
 
 export function Confirm({ title, body, danger, onAnswer }: ConfirmProps) {
@@ -21,9 +22,9 @@ export function Confirm({ title, body, danger, onAnswer }: ConfirmProps) {
       paddingX={1}
     >
       <Text bold color={danger ? theme.error : theme.warn}>
-        {title}
+        {sanitizeTerminalText(title)}
       </Text>
-      {body && <Text dimColor>{body}</Text>}
+      {body && <Text dimColor>{sanitizeTerminalText(body)}</Text>}
       <Text>
         <Text bold>y</Text> {strings.yes} · <Text bold>n</Text> {strings.noDefault}
       </Text>

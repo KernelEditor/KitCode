@@ -1,6 +1,7 @@
 import { redactSecrets } from '../providers/errors'
 import { modelInfoFromRaw } from '../providers/model-info'
 import type { ModelInfo } from '../providers/types'
+import { isAllowedEndpointUrl } from './schema'
 import type { ProviderConfig } from './schema'
 
 export interface DetectedProvider {
@@ -16,6 +17,7 @@ export interface DetectOptions {
 }
 
 export const DETECT_TIMEOUT_MS = 15_000
+const MAX_DETECT_BODY_BYTES = 5_000_000
 
 const anthropicHost = 'api.anthropic.com'
 const anthropicBaseUrl = 'https://api.anthropic.com'
@@ -27,6 +29,9 @@ export async function detectProvider(
 ): Promise<DetectedProvider> {
   const fetchImpl = withTimeout(opts.fetchImpl ?? fetch, opts.timeoutMs ?? DETECT_TIMEOUT_MS)
   const baseUrl = normaliseBaseUrl(rawUrl)
+  if (!isAllowedEndpointUrl(baseUrl)) {
+    throw new Error('API URL must use https; plain http is only allowed for localhost or 127.0.0.1.')
+  }
   const id = opts.name ?? providerIdFromUrl(baseUrl)
 
   if (hostname(baseUrl) === anthropicHost) {
@@ -122,7 +127,18 @@ async function probe(
   } catch (error) {
     return { ok: false, url, status: 0, body: undefined, text: describeThrown(error) }
   }
-  const text = await response.text().catch(() => '')
+  let text: string
+  try {
+    text = await boundedResponseText(response)
+  } catch (error) {
+    return {
+      ok: false,
+      url,
+      status: response.status,
+      body: undefined,
+      text: describeThrown(error),
+    }
+  }
   let body: unknown
   try {
     body = JSON.parse(text)
@@ -130,6 +146,34 @@ async function probe(
     body = undefined
   }
   return { ok: response.ok, url, status: response.status, body, text }
+}
+
+async function boundedResponseText(response: Response): Promise<string> {
+  const declared = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > MAX_DETECT_BODY_BYTES) {
+    await response.body?.cancel().catch(() => undefined)
+    throw new Error(`response exceeded ${MAX_DETECT_BODY_BYTES / 1_000_000} MB`)
+  }
+  if (!response.body) return ''
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let bytes = 0
+  let text = ''
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      bytes += value.byteLength
+      if (bytes > MAX_DETECT_BODY_BYTES) {
+        throw new Error(`response exceeded ${MAX_DETECT_BODY_BYTES / 1_000_000} MB`)
+      }
+      text += decoder.decode(value, { stream: true })
+    }
+    return text + decoder.decode()
+  } finally {
+    void reader.cancel().catch(() => undefined)
+  }
 }
 
 function withTimeout(fetchImpl: typeof fetch, timeoutMs: number): typeof fetch {

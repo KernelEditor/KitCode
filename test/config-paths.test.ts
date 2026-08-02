@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
@@ -7,8 +7,9 @@ const home = await mkdtemp(path.join(tmpdir(), 'freecode-cfg-home-'))
 process.env.FREECODE_HOME = home
 delete process.env.FREECODE_CONFIG
 
-const { authPath, configPath, resolveConfigLocation } = await import('../src/config/paths')
-const { configLocation, loadConfig, saveAuth, saveConfig } = await import('../src/config/store')
+const { authPath, configPath, homeDir, resolveConfigLocation, trustPath } = await import('../src/config/paths')
+const { configLocation, loadConfig, loadProjectConfig, loadRuntimeConfig, saveAuth, saveConfig } = await import('../src/config/store')
+const { isWorkspaceTrusted, revokeWorkspaceTrust, trustWorkspace } = await import('../src/config/trust')
 
 const workspace = await mkdtemp(path.join(tmpdir(), 'freecode-cfg-ws-'))
 const bare = await mkdtemp(path.join(tmpdir(), 'freecode-cfg-bare-'))
@@ -56,6 +57,30 @@ describe('loadConfig', () => {
     await expect(loadConfig(bare)).rejects.toThrow(broken)
     await rm(broken)
   })
+
+  it('can explicitly load a project config even when an env override is present', async () => {
+    process.env.FREECODE_CONFIG = path.join(home, 'explicit.json')
+    const config = await loadProjectConfig(workspace)
+    expect(config.effort).toBe('low')
+    expect(await configLocation()).toEqual({ path: projectFile, scope: 'project' })
+  })
+})
+
+describe('workspace trust', () => {
+  it('ignores executable project settings until the project root is trusted', async () => {
+    await revokeWorkspaceTrust(nested)
+    const untrusted = await loadRuntimeConfig(nested)
+    expect(untrusted.ignoredProject?.path).toBe(projectFile)
+    expect(untrusted.config.effort).toBe('xhigh')
+
+    const trustedRoot = await trustWorkspace(nested)
+    expect(trustedRoot).toBe(await realpath(workspace))
+    expect(await isWorkspaceTrusted(workspace)).toBe(true)
+    expect((await loadRuntimeConfig(nested)).config.effort).toBe('low')
+    expect((await stat(trustPath)).mode & 0o777).toBe(0o600)
+
+    await revokeWorkspaceTrust(workspace)
+  })
 })
 
 describe('saveConfig', () => {
@@ -79,6 +104,7 @@ describe('saveAuth', () => {
 
     expect(authPath.startsWith(home)).toBe(true)
     expect((await stat(authPath)).mode & 0o777).toBe(0o600)
+    expect((await stat(homeDir)).mode & 0o777).toBe(0o700)
     await expect(stat(path.join(workspace, 'auth.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises'
+import { chmod, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { cacheDir, ensureDir } from '../config/paths'
 import type { ModelInfo, Provider } from './types'
@@ -57,7 +57,8 @@ async function writeCache(file: string, models: ModelInfo[]): Promise<void> {
   const payload: ModelCache = { version: CACHE_VERSION, fetchedAt: Date.now(), models }
   try {
     await ensureDir(path.dirname(file))
-    await writeFile(file, JSON.stringify(payload), 'utf8')
+    await writeFile(file, JSON.stringify(payload), { encoding: 'utf8', mode: 0o600 })
+    await chmod(file, 0o600)
   } catch {
     return
   }

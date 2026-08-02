@@ -12,6 +12,12 @@ export interface DiffResult {
   removed: number
 }
 
+export const MAX_RENDER_DIFF_CHARS = 500_000
+
+export function canRenderDiff(before: string, after: string): boolean {
+  return before.length + after.length <= MAX_RENDER_DIFF_CHARS
+}
+
 export function diffLines(
   before: string,
   after: string,

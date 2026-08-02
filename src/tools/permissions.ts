@@ -5,15 +5,15 @@ export type AgentMode = 'normal' | 'accept' | 'plan'
 export const MODES: AgentMode[] = ['normal', 'accept', 'plan']
 
 export interface PermissionEngine {
-  resolve(tool: Tool): PermissionMode
-  decide(tool: Tool): PermissionMode
+  resolve(tool: Tool, requested?: PermissionMode): PermissionMode
+  decide(tool: Tool, requested?: PermissionMode): PermissionMode
   grantForSession(toolName: string): void
   bypass: {
     enable(): void
     disable(): void
     isEnabled(): boolean
   }
-  denyReason(tool: Tool): string | undefined
+  denyReason(tool: Tool, requested?: PermissionMode): string | undefined
   mode: {
     get(): AgentMode
     set(mode: AgentMode): void
@@ -31,13 +31,13 @@ export function createPermissionEngine(
   let bypassEnabled = false
   let current: AgentMode = 'normal'
 
-  const resolve = (tool: Tool): PermissionMode =>
-    configPermissions[tool.name] ?? tool.defaultPermission
+  const resolve = (tool: Tool, requested?: PermissionMode): PermissionMode =>
+    configPermissions[tool.name] ?? requested ?? tool.defaultPermission
 
   return {
     resolve,
-    decide(tool) {
-      const configured = resolve(tool)
+    decide(tool, requested) {
+      const configured = resolve(tool, requested)
       if (configured === 'deny') return 'deny'
       if (current === 'plan' && configured !== 'allow') return 'deny'
       if (configured === 'allow') return 'allow'
@@ -49,8 +49,8 @@ export function createPermissionEngine(
     grantForSession(toolName) {
       sessionGrants.add(toolName)
     },
-    denyReason(tool) {
-      const configured = resolve(tool)
+    denyReason(tool, requested) {
+      const configured = resolve(tool, requested)
       if (configured === 'deny' || configured === 'allow') return undefined
       return current === 'plan' ? PLAN_REFUSAL : undefined
     },

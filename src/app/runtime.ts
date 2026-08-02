@@ -2,9 +2,12 @@ import { detectProvider } from '../config/detect'
 import { formatModelRef, parseModelRef } from '../config/schema'
 import type { Config } from '../config/schema'
 import { projectSkillsDir, skillsDir } from '../config/paths'
-import { configLocation, loadAuth, loadConfig, saveAuth, saveConfig } from '../config/store'
+import { configLocation, loadAuth, loadRuntimeConfig, saveAuth, saveConfig } from '../config/store'
+import { canonicalWorkspace, isWorkspaceTrusted } from '../config/trust'
 import { runTurn } from '../core/agent'
 import type { AgentConfig, ToolLookup } from '../core/agent'
+import { createTurnBudget } from '../core/budget'
+import type { TurnBudget } from '../core/budget'
 import { buildSystemPrompt } from '../core/prompt'
 import {
   createSession,
@@ -26,8 +29,9 @@ import {
 } from '../core/usage'
 import { createMcpManager } from '../mcp/client'
 import { loadModels } from '../providers/catalog'
+import { pricingFor } from '../providers/pricing'
 import { createRegistry } from '../providers/registry'
-import type { Effort, Message, ModelInfo } from '../providers/types'
+import type { Effort, Message, ModelInfo, ModelPricing } from '../providers/types'
 import { createPermissionEngine } from '../tools/permissions'
 import type { AgentMode } from '../tools/permissions'
 import { builtinTools, createToolRegistry } from '../tools/registry'
@@ -56,18 +60,35 @@ export async function boot(options: {
   mode?: AgentMode
   modelRef?: string
 }): Promise<Boot> {
-  const config = await loadConfig()
+  const loadedConfig = await loadRuntimeConfig(options.cwd)
+  const config = loadedConfig.config
   const auth = await loadAuth()
   const location = await configLocation()
   const warnings: string[] = []
+  const workspaceRoot = await canonicalWorkspace(options.cwd)
+  const workspaceTrusted = await isWorkspaceTrusted(options.cwd)
+  if (loadedConfig.ignoredProject) {
+    warnings.push(
+      `Project config ignored until this workspace is trusted: ${loadedConfig.ignoredProject.path}. ` +
+        `Review it, then run: kitcode trust`,
+    )
+  }
 
   let registry = createRegistry(config, auth)
+  const modelPricing = new Map<string, ModelPricing>()
+  const rememberModels = (providerId: string, models: ModelInfo[]) => {
+    for (const model of models) {
+      if (model.pricing) modelPricing.set(formatModelRef(providerId, model.id), model.pricing)
+    }
+  }
+  const resolvePricing = (ref: string) => modelPricing.get(ref) ?? pricingFor(ref)
   const tools = createToolRegistry(builtinTools())
   const permissions = createPermissionEngine(config.permissions)
   if (options.bypass) permissions.bypass.enable()
   if (options.mode) permissions.mode.set(options.mode)
 
-  const skills = await discoverSkills([projectSkillsDir(options.cwd), skillsDir])
+  const skillRoots = workspaceTrusted ? [projectSkillsDir(workspaceRoot), skillsDir] : [skillsDir]
+  const skills = await discoverSkills(skillRoots)
   if (skills.length > 0) tools.register([createSkillTool(skills)])
 
   const mcp = createMcpManager(config.mcp)
@@ -86,7 +107,7 @@ export async function boot(options: {
       createSession(options.cwd, config.model ?? '')
   }
 
-  const usage = createUsageTracker(session.usage)
+  const usage = createUsageTracker(session.usage, resolvePricing)
   const system = buildSystemPrompt({
     cwd: options.cwd,
     toolNames: tools.list().map((tool) => tool.name),
@@ -108,10 +129,9 @@ export async function boot(options: {
     const parsed = parseModelRef(ref)
     if (!parsed) return null
     try {
-      const found = registry
-        .get(parsed.provider)
-        .knownModels()
-        .find((model) => model.id === parsed.model)
+      const models = registry.get(parsed.provider).knownModels()
+      rememberModels(parsed.provider, models)
+      const found = models.find((model) => model.id === parsed.model)
       return found?.contextWindow ?? null
     } catch {
       return null
@@ -149,6 +169,7 @@ export async function boot(options: {
     try {
       const provider = registry.get(parsed.provider)
       const models = await loadModels(provider)
+      rememberModels(parsed.provider, models)
       const found = models.find((m) => m.id === parsed.model)
       next = found?.contextWindow ?? next
     } catch {
@@ -162,11 +183,10 @@ export async function boot(options: {
 
   const agentConfigFor = (system: string, toolset: ToolLookup): AgentConfig => {
     const resolved = registry.resolve(modelRef)
-    const parsed = parseModelRef(modelRef)
     return {
       provider: resolved.provider,
       modelId: resolved.modelId,
-      modelRef: parsed ? parsed.model : modelRef,
+      modelRef,
       system,
       tools: toolset,
       permissions,
@@ -175,10 +195,17 @@ export async function boot(options: {
       maxTokens: config.maxTokens,
       effort: config.effort,
       thinking: config.thinking,
+      budget: activeBudget,
     }
   }
 
-  tools.register([createTaskTool(createSubagentRunner(agentConfigFor, tools))])
+  let activeBudget: TurnBudget | undefined
+
+  tools.register([
+    createTaskTool(createSubagentRunner(agentConfigFor, tools), config.budget.maxSubagentsPerTurn),
+  ])
+
+  let persistQueue: Promise<void> = Promise.resolve()
 
   const persistConfig = async (mutate: (draft: Config) => void) => {
     mutate(config)
@@ -192,6 +219,7 @@ export async function boot(options: {
 
     async addProvider(url, key) {
       const detected = await detectProvider(url, key)
+      rememberModels(detected.id, detected.models)
       config.providers[detected.id] = detected.config
       auth[detected.id] = key
 
@@ -222,6 +250,7 @@ export async function boot(options: {
 
     async useProvider(id) {
       const models = await loadModels(registry.get(id))
+      rememberModels(id, models)
       const chosen = preferredModel(models)
       if (!chosen) throw new Error(`"${id}" returned no models to switch to.`)
       const ref = formatModelRef(id, chosen)
@@ -353,6 +382,7 @@ export async function boot(options: {
       for (const providerId of Object.keys(config.providers)) {
         try {
           const models = await loadModels(registry.get(providerId))
+          rememberModels(providerId, models)
           for (const model of models) {
             items.push({
               key: formatModelRef(providerId, model.id),
@@ -385,8 +415,10 @@ export async function boot(options: {
       await savePrompt({ name, body })
     },
 
-    run(history, hooks, signal) {
+    async run(history, hooks, signal) {
       const requestModelRef = modelRef
+      const budget = createTurnBudget(config.budget, resolvePricing)
+      activeBudget = budget
       const trackedHooks: AgentHooks = {
         ...hooks,
         onEvent(event) {
@@ -397,15 +429,25 @@ export async function boot(options: {
           hooks.onEvent(event)
         },
       }
-      return runTurn(agentConfigFor(system, tools), history, trackedHooks, signal)
+      try {
+        return await runTurn(agentConfigFor(system, tools), history, trackedHooks, signal)
+      } finally {
+        if (activeBudget === budget) activeBudget = undefined
+      }
     },
 
     async persist(history) {
-      session.messages = history
-      session.usage = usage.entries()
-      session.model = modelRef
-      session.context = contextUsage
-      await saveSession(session)
+      const snapshot: SessionState = {
+        ...session,
+        messages: history,
+        usage: usage.entries(),
+        model: modelRef,
+        context: contextUsage,
+      }
+      session = snapshot
+      const save = persistQueue.catch(() => undefined).then(() => saveSession(snapshot))
+      persistQueue = save
+      await save
     },
   }
 
@@ -415,7 +457,13 @@ export async function boot(options: {
     runtime,
     history: session.messages,
     warnings,
-    shutdown: () => mcp.close(),
+    async shutdown() {
+      try {
+        await persistQueue
+      } finally {
+        await mcp.close()
+      }
+    },
   }
 }
 

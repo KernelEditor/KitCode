@@ -1,15 +1,18 @@
+import { existsSync } from 'node:fs'
 import { formatModelRef, parseModelRef } from '../config/schema'
 import { detectProvider } from '../config/detect'
-import { authPath } from '../config/paths'
+import { authPath, projectConfigPath } from '../config/paths'
 import {
   configLocation,
   initProjectConfig,
   loadAuth,
-  loadConfig,
+  loadProjectConfig,
+  loadRuntimeConfig,
   migrateLegacyHome,
   saveAuth,
   saveConfig,
 } from '../config/store'
+import { isWorkspaceTrusted, trustWorkspace } from '../config/trust'
 import type { ModelInfo } from '../providers/types'
 
 const PREFERRED = ['claude-opus-5', 'claude-sonnet-5', 'gpt-5', 'claude-opus-4-8']
@@ -22,9 +25,20 @@ export async function addProvider(
   options: { name?: string; local?: boolean } = {},
 ): Promise<void> {
   const cwd = process.cwd()
+  if (options.local) {
+    const existing = projectConfigPath(cwd)
+    if (existsSync(existing) && !(await isWorkspaceTrusted(cwd))) {
+      throw new Error(
+        `Project config already exists at ${existing}. Review it and run "kitcode trust" before adding a provider to it.`,
+      )
+    }
+  }
   const detected = await detectProvider(url, key, { name: options.name })
-  if (options.local) await initProjectConfig(cwd)
-  const config = await loadConfig(cwd)
+  if (options.local) {
+    await initProjectConfig(cwd)
+    await trustWorkspace(cwd)
+  }
+  const config = options.local ? await loadProjectConfig(cwd) : (await loadRuntimeConfig(cwd)).config
   const auth = await loadAuth()
   const migration = await migrateLegacyHome()
 

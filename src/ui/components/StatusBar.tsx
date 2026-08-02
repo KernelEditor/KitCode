@@ -5,6 +5,7 @@ import type { Effort } from '../../providers/types'
 import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
 import { formatDuration } from '../time'
+import { sanitizeTerminalText } from '../sanitize'
 import type { StatusBarProps } from '../types'
 
 const BAR_WIDTH = 12
@@ -137,8 +138,9 @@ function Segments({ items }: { items: ReactNode[] }) {
 }
 
 function shortModel(ref: string): string {
-  const slash = ref.lastIndexOf('/')
-  return slash === -1 ? ref : ref.slice(slash + 1)
+  const safe = sanitizeTerminalText(ref)
+  const slash = safe.lastIndexOf('/')
+  return slash === -1 ? safe : safe.slice(slash + 1)
 }
 
 // Coloured badge for the active model: inverse colour (accent background,

@@ -1,5 +1,6 @@
 import { addUsage, emptyUsage } from '../providers/types'
 import type { Usage } from '../providers/types'
+import type { ModelPricing } from '../providers/types'
 import { costOf, pricingFor } from '../providers/pricing'
 import type { UsageEntry } from './types'
 
@@ -19,7 +20,12 @@ export interface UsageTracker {
 
 type UsageSeed = Pick<UsageEntry, 'model' | 'usage' | 'requests'>
 
-export function createUsageTracker(initial: UsageSeed[] = []): UsageTracker {
+export type PricingResolver = (modelRef: string) => ModelPricing | undefined
+
+export function createUsageTracker(
+  initial: UsageSeed[] = [],
+  resolvePricing: PricingResolver = pricingFor,
+): UsageTracker {
   const byModel = new Map<string, { usage: Usage; requests: number }>(
     initial.map((entry) => [entry.model, { usage: entry.usage, requests: entry.requests }]),
   )
@@ -29,7 +35,7 @@ export function createUsageTracker(initial: UsageSeed[] = []): UsageTracker {
       model,
       usage,
       requests,
-      costUsd: costOf(usage, pricingFor(model)),
+      costUsd: costOf(usage, resolvePricing(model)),
     }))
 
   return {

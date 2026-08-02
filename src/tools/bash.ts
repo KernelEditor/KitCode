@@ -5,6 +5,7 @@ import type { Tool, ToolResult } from './types'
 const DEFAULT_TIMEOUT = 120_000
 const MAX_TIMEOUT = 600_000
 const MAX_OUTPUT = 100_000
+const MAX_COMMAND_CHARS = 20_000
 
 interface BashInput {
   command: string
@@ -18,7 +19,11 @@ export const bashTool: Tool = {
   inputSchema: {
     type: 'object',
     properties: {
-      command: { type: 'string', description: 'Shell command to run' },
+      command: {
+        type: 'string',
+        description: 'Shell command to run',
+        maxLength: MAX_COMMAND_CHARS,
+      },
       timeoutMs: {
         type: 'integer',
         description: `Timeout in milliseconds (default ${DEFAULT_TIMEOUT}, maximum ${MAX_TIMEOUT})`,
@@ -32,8 +37,17 @@ export const bashTool: Tool = {
   summarize(input) {
     return `bash(${brief((input as BashInput).command)})`
   },
+  async preview(input) {
+    return { kind: 'text', text: (input as BashInput).command }
+  },
   execute(input, ctx) {
     const { command, timeoutMs } = input as BashInput
+    if (command.length > MAX_COMMAND_CHARS) {
+      return Promise.resolve<ToolResult>({
+        content: `Command exceeds the ${MAX_COMMAND_CHARS} character limit.`,
+        isError: true,
+      })
+    }
     const requested = timeoutMs && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT
     const timeout = Math.min(requested, MAX_TIMEOUT)
     if (ctx.signal.aborted) {

@@ -5,6 +5,7 @@ import { matchCommands } from '../commands'
 import { moveInputHistory } from '../history'
 import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
+import { sanitizeTerminalText } from '../sanitize'
 import type { PromptInputProps } from '../types'
 
 const WINDOW = 6
@@ -33,6 +34,7 @@ export const PromptInput = memo(function PromptInput({
   }, [value])
 
   const change = (next: string) => {
+    next = sanitizeTerminalText(next)
     setHistoryIndex(null)
     historyDraft.current = next
     onChange(next)
@@ -93,7 +95,7 @@ export const PromptInput = memo(function PromptInput({
         {/* Input stays active while the agent runs; submitted messages queue. */}
         <TextInput
           key={historyIndex === null ? 'draft' : `history-${historyIndex}`}
-          value={value}
+          value={sanitizeTerminalText(value)}
           onChange={change}
           onSubmit={open ? noop : submit}
           placeholder={strings.placeholder}
@@ -101,7 +103,7 @@ export const PromptInput = memo(function PromptInput({
         {pending && pending > 0 ? <Text dimColor> · {strings.queued(pending)}</Text> : null}
       </Box>
 
-      {disabled && hint && <Text dimColor>  {hint}</Text>}
+      {disabled && hint && <Text dimColor>  {sanitizeTerminalText(hint)}</Text>}
 
       {open && (
         <Box flexDirection="column" marginLeft={2}>

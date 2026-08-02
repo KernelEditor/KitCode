@@ -1,4 +1,4 @@
-import { mkdir, stat } from 'node:fs/promises'
+import { chmod, mkdir, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -13,6 +13,8 @@ export const legacyHomeDir = path.join(os.homedir(), '.freecode')
 export const configPath = path.join(homeDir, 'config.json')
 
 export const authPath = path.join(homeDir, 'auth.json')
+
+export const trustPath = path.join(homeDir, 'trusted-workspaces.json')
 
 export const promptsDir = path.join(homeDir, 'prompts')
 
@@ -63,8 +65,15 @@ export async function resolveConfigLocation(cwd: string = process.cwd()): Promis
   return { path: configPath, scope: 'global' }
 }
 
-export async function ensureDir(dir: string): Promise<void> {
-  await mkdir(dir, { recursive: true })
+/** Root used for project trust and project-local skills. */
+export async function workspaceRootFor(cwd: string = process.cwd()): Promise<string> {
+  const project = await findProjectConfig(cwd)
+  return project ? path.dirname(project) : path.resolve(cwd)
+}
+
+export async function ensureDir(dir: string, mode = 0o700): Promise<void> {
+  await mkdir(dir, { recursive: true, mode })
+  await chmod(dir, mode)
 }
 
 async function isFile(file: string): Promise<boolean> {

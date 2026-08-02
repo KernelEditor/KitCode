@@ -1,5 +1,5 @@
-import { Box, Text } from 'ink'
-import { memo, useMemo } from 'react'
+import { Box, Static, Text } from 'ink'
+import { memo, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import Spinner from 'ink-spinner'
 import { diffLines, truncate } from '../diff'
@@ -9,9 +9,30 @@ import type { Bubble, TranscriptProps } from '../types'
 import { DiffHunk } from './Diff'
 
 export const Transcript = memo(function Transcript({ bubbles }: TranscriptProps) {
+  const liveAt = bubbles.findLastIndex(
+    (bubble) =>
+      (bubble.kind === 'assistant' && bubble.streaming) ||
+      (bubble.kind === 'tool' && bubble.state === 'running'),
+  )
+  const stableCount = liveAt === -1 ? bubbles.length : liveAt
+  const stableRef = useRef<Bubble[]>([])
+  if (stableRef.current.length < stableCount) {
+    stableRef.current = [
+      ...stableRef.current,
+      ...bubbles.slice(stableRef.current.length, stableCount),
+    ]
+  } else if (stableRef.current.length > stableCount) {
+    stableRef.current = bubbles.slice(0, stableCount)
+  }
+  const stable = stableRef.current
+  const live = liveAt === -1 ? [] : bubbles.slice(liveAt)
+
   return (
     <Box flexDirection="column" marginBottom={1}>
-      {bubbles.map((bubble) => (
+      {/* Completed bubbles are committed to native terminal scrollback once.
+          Only the active tail is reconciled during streaming. */}
+      <Static items={stable}>{(bubble) => <BubbleView key={bubble.id} bubble={bubble} />}</Static>
+      {live.map((bubble) => (
         <BubbleView key={bubble.id} bubble={bubble} />
       ))}
     </Box>

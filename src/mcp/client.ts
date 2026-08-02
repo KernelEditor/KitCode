@@ -4,6 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { CallToolResult, Tool as McpTool } from '@modelcontextprotocol/sdk/types.js'
 import type { McpServerConfig } from '../config/schema'
 import { expandEnvRecord } from '../config/store'
+import { redactSecrets } from '../providers/errors'
 import type { Tool } from '../tools/types'
 import { bridgeMcpTool } from './bridge'
 
@@ -19,6 +20,25 @@ export interface McpServerState {
 const clientInfo = { name: 'kitcode', version: '0.1.0' }
 const connectTimeoutMs = 15_000
 const stderrTailLimit = 400
+const maxToolPages = 20
+const maxTools = 256
+
+const inheritedEnvKeys = new Set([
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'SystemRoot',
+  'WINDIR',
+  'COMSPEC',
+  'PATHEXT',
+  'APPDATA',
+  'LOCALAPPDATA',
+])
 
 interface Session {
   client: Client
@@ -84,7 +104,7 @@ export function createMcpManager(servers: Record<string, McpServerConfig>) {
         name,
         status: 'error',
         toolCount: 0,
-        error: describeFailure(error, stderrTail()),
+        error: describeFailure(error, stderrTail(), configuredSecrets(config)),
       })
     }
   }
@@ -137,9 +157,12 @@ async function handshake(client: Client, transport: McpTransport): Promise<McpTo
   await client.connect(transport, { timeout: connectTimeoutMs })
   const collected: McpTool[] = []
   let cursor: string | undefined
+  let pages = 0
   do {
+    if (++pages > maxToolPages) throw new Error(`MCP tool listing exceeded ${maxToolPages} pages`)
     const page = await client.listTools({ cursor })
     collected.push(...page.tools)
+    if (collected.length > maxTools) throw new Error(`MCP server exposed more than ${maxTools} tools`)
     cursor = page.nextCursor
   } while (cursor)
   return collected
@@ -170,15 +193,20 @@ function captureStderr(transport: McpTransport): () => string {
   return () => tail.trim()
 }
 
-function describeFailure(error: unknown, stderr: string): string {
+function describeFailure(error: unknown, stderr: string, secrets: string[]): string {
   const message = error instanceof Error ? error.message : String(error)
-  return stderr ? `${message} — ${stderr}` : message
+  return redactSecrets(stderr ? `${message} — ${stderr}` : message, secrets)
 }
 
-function inheritedEnv(): Record<string, string> {
+function configuredSecrets(config: McpServerConfig): string[] {
+  const record = config.type === 'stdio' ? config.env : config.headers
+  return Object.values(expandEnvRecord(record)).filter((value) => value.length >= 4)
+}
+
+export function inheritedEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const env: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined) env[key] = value
+  for (const [key, value] of Object.entries(source)) {
+    if (value !== undefined && inheritedEnvKeys.has(key)) env[key] = value
   }
   return env
 }

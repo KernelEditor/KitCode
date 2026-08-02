@@ -2,6 +2,8 @@ import type { CallToolResult, ContentBlock, Tool as McpTool } from '@modelcontex
 import type { JsonSchema } from '../providers/types'
 import type { Tool, ToolResult } from '../tools/types'
 
+const MAX_RESULT_CHARS = 200_000
+
 export type McpToolCall = (
   tool: string,
   args: unknown,
@@ -16,7 +18,16 @@ export function bridgeMcpTool(server: string, descriptor: McpTool, call: McpTool
     inputSchema: inputSchemaOf(descriptor),
     defaultPermission: 'ask',
     summarize: (input) => `${server}:${tool}${argumentPreview(input)}`,
+    preview: async (input) => ({ kind: 'text', text: printableInput(input) }),
     execute: (input, ctx) => invoke(call, tool, input, ctx.signal),
+  }
+}
+
+function printableInput(input: unknown): string {
+  try {
+    return JSON.stringify(input, null, 2)
+  } catch {
+    return String(input)
   }
 }
 
@@ -36,9 +47,9 @@ async function invoke(
 
 function flattenResult(result: CallToolResult): string {
   const rendered = (result.content ?? []).map(renderPart).join('\n')
-  if (rendered) return rendered
-  if (result.structuredContent) return JSON.stringify(result.structuredContent)
-  return '(no content)'
+  const value = rendered || (result.structuredContent ? JSON.stringify(result.structuredContent) : '(no content)')
+  if (value.length <= MAX_RESULT_CHARS) return value
+  return `${value.slice(0, MAX_RESULT_CHARS)}\n... truncated MCP result at ${MAX_RESULT_CHARS} characters`
 }
 
 function renderPart(part: ContentBlock): string {

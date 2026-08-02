@@ -21,7 +21,7 @@ OpenAI-compatible providers, including OpenRouter and local model servers.
 - filename and content search;
 - shell commands with approval prompts;
 - `normal`, `accept`, and `plan` modes;
-- persistent and resumable sessions;
+- persistent and resumable sessions with native terminal scrollback;
 - input history with the `↑` and `↓` keys;
 - queued messages while the agent is working;
 - token, cost, and context-window indicators;
@@ -79,7 +79,9 @@ http://localhost:11434/v1
 | `kitcode --mode <normal\|accept\|plan>` | Select the initial agent mode. |
 | `kitcode sessions` | List saved sessions. |
 | `kitcode ask "question"` | Run one request without the TUI. |
-| `kitcode add <url> <key>` | Add an API provider. |
+| `kitcode add <url>` | Add a provider; the key is entered in a hidden prompt. |
+| `kitcode add <url> --key-env <name>` | Read the provider key from an environment variable. |
+| `kitcode trust` | Enable this workspace's project config and skills. |
 | `kitcode config` | Show the config and key locations. |
 | `kitcode config --local` | Create a project config at `./kitcode.json`. |
 | `kitcode prompt list` | List saved prompts. |
@@ -123,7 +125,9 @@ Messages entered while the agent is running are queued and processed in order.
 - `accept` — file edits are accepted automatically;
 - `plan` — the agent explores the project and returns a plan without changing files.
 
-The lower status panel shows the active mode, model, usage, and a left-to-right context meter.
+The lower status panel shows the active mode, model, usage, and a left-to-right context capsule on
+the right. Completed output is committed to normal terminal scrollback, so it remains smooth to
+scroll while a response is streaming.
 
 ## Configuration
 
@@ -155,9 +159,18 @@ Minimal manual provider configuration:
 }
 ```
 
-The main settings are `model`, `effort`, `thinking`, `maxTokens`, `theme`, `permissions`,
-`providers`, and `mcp`. Manual editing is usually unnecessary: add a provider during onboarding
-or with `/login`.
+The main settings are `model`, `effort`, `thinking`, `maxTokens`, `budget`, `theme`, `permissions`,
+`providers`, and `mcp`. `budget` controls per-message limits for model requests, tokens, estimated
+cost (when model pricing is available), and subagents. Manual editing is usually unnecessary: add
+a provider during onboarding or with `/login`.
+
+Project settings and project skills are enabled after reviewing the workspace and running:
+
+```sh
+kitcode trust
+```
+
+Run `kitcode trust --revoke` to return to global settings and skills for that workspace.
 
 ## MCP and skills
 

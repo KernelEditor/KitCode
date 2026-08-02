@@ -13,6 +13,8 @@ const PERMANENT_STATUS = new Set([400, 401, 403, 404, 405, 422])
 
 const SECRET =
   /Bearer\s+\S+|\b(?:sk|pk|rk|xai|gsk|ghp|gho|hf|nvapi|glpat)[-_][A-Za-z0-9._-]{4,}|\b[A-Za-z0-9]{32,}\b/g
+const NAMED_SECRET =
+  /((?:["']?)(?:authorization|x-api-key|api[-_ ]?key|access[-_ ]?token|refresh[-_ ]?token|token|secret|password|cookie|set-cookie)(?:["']?)\s*[:=]\s*)(?:Bearer\s+\S+|"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;}\]]+)/gi
 
 const CONNECTION_REASONS: Record<string, string> = {
   ENOTFOUND: 'the hostname does not resolve',
@@ -147,7 +149,7 @@ function describeStatus(status: number, providerId: string, error: unknown): str
   const after = wait === undefined ? undefined : `retry after ${wait}s`
 
   if (status === 401) {
-    return `The API key for "${providerId}" was rejected (401) — re-run: kitcode add <url> <key>`
+    return `The API key for "${providerId}" was rejected (401) — re-run: kitcode add <url>`
   }
   if (status === 403) {
     return `The API key for "${providerId}" is valid but has no access to this model (403)${detail}`
@@ -266,8 +268,12 @@ function oneLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim()
 }
 
-export function redactSecrets(text: string): string {
-  return text.replace(SECRET, '[redacted]')
+export function redactSecrets(text: string, knownSecrets: Iterable<string> = []): string {
+  let safe = text.replace(NAMED_SECRET, '$1[redacted]').replace(SECRET, '[redacted]')
+  for (const secret of knownSecrets) {
+    if (secret.length >= 4) safe = safe.split(secret).join('[redacted]')
+  }
+  return safe
 }
 
 function prop(value: unknown, key: string): unknown {

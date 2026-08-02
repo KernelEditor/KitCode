@@ -4,9 +4,11 @@ import type { AgentMode } from './tools/permissions'
 import { addProvider } from './app/add'
 import { ask } from './app/ask'
 import { showConfig } from './app/configcmd'
+import { readApiKey } from './app/secret'
 import { listSessions, shortSessionId } from './core/session'
 import { startTui } from './app/tui'
 import { deletePrompt, listPrompts } from './prompts/library'
+import { revokeWorkspaceTrust, trustWorkspace } from './config/trust'
 
 const program = new Command()
 
@@ -42,6 +44,17 @@ program
   })
 
 program
+  .command('trust')
+  .description('trust this workspace so its project config and skills can be loaded')
+  .option('--revoke', 'remove trust for this workspace')
+  .action(async (options: { revoke?: boolean }) => {
+    const workspace = options.revoke
+      ? await revokeWorkspaceTrust(process.cwd())
+      : await trustWorkspace(process.cwd())
+    console.log(`${options.revoke ? 'trust removed' : 'workspace trusted'}: ${workspace}`)
+  })
+
+program
   .command('sessions')
   .description('list past chats')
   .action(async () => {
@@ -61,12 +74,17 @@ program
 
 program
   .command('add')
-  .description('detect a provider from a base URL plus API key and write the config')
+  .description('detect and add a provider; the API key is read securely')
   .argument('<url>', 'API base URL, e.g. https://openrouter.ai/api/v1')
-  .argument('<key>', 'API key')
   .option('--name <name>', 'override the derived provider id')
   .option('--local', 'write ./kitcode.json in this directory instead of the global config')
-  .action(async (url: string, key: string, options: { name?: string; local?: boolean }) => {
+  .option('--key-env <name>', 'read the API key from this environment variable')
+  .option('--key-stdin', 'read the API key from stdin')
+  .action(async (
+    url: string,
+    options: { name?: string; local?: boolean; keyEnv?: string; keyStdin?: boolean },
+  ) => {
+    const key = await readApiKey(options)
     await addProvider(url, key, options)
   })
 

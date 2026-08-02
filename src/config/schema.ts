@@ -1,16 +1,27 @@
 import { z } from 'zod'
 
-const httpUrl = z.string().refine(
-  (value) => {
-    try {
-      const { protocol } = new URL(value)
-      return protocol === 'http:' || protocol === 'https:'
-    } catch {
-      return false
-    }
-  },
-  { message: 'must be an absolute http(s) URL, e.g. https://api.example.com/v1' },
-)
+export function isAllowedEndpointUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    if (url.username || url.password) return false
+    if (url.protocol === 'https:') return true
+    if (url.protocol !== 'http:') return false
+    const host = url.hostname.toLowerCase()
+    return (
+      host === 'localhost' ||
+      host.endsWith('.localhost') ||
+      host === '[::1]' ||
+      host === '::1' ||
+      /^127(?:\.\d{1,3}){3}$/.test(host)
+    )
+  } catch {
+    return false
+  }
+}
+
+const httpUrl = z.string().refine(isAllowedEndpointUrl, {
+  message: 'must use https, except for localhost/127.0.0.1 development endpoints',
+})
 
 export const providerKindSchema = z.enum(['anthropic', 'openai'])
 
@@ -49,6 +60,13 @@ export const themeSchema = z.object({
 
 export const langSchema = z.enum(['en', 'ru'])
 
+export const budgetSchema = z.object({
+  maxRequestsPerTurn: z.number().int().min(1).max(256).default(32),
+  maxTokensPerTurn: z.number().int().min(1_000).max(10_000_000).default(1_000_000),
+  maxCostUsdPerTurn: z.number().positive().max(1_000).default(5),
+  maxSubagentsPerTurn: z.number().int().min(0).max(16).default(3),
+})
+
 export const configSchema = z.object({
   version: z.literal(1).default(1),
   model: z.string().optional(),
@@ -57,6 +75,12 @@ export const configSchema = z.object({
   effort: effortSchema.default('xhigh'),
   thinking: z.boolean().default(true),
   maxTokens: z.number().int().positive().max(200_000).default(64_000),
+  budget: budgetSchema.default({
+    maxRequestsPerTurn: 32,
+    maxTokensPerTurn: 1_000_000,
+    maxCostUsdPerTurn: 5,
+    maxSubagentsPerTurn: 3,
+  }),
   providers: z.record(z.string(), providerConfigSchema).default({}),
   permissions: z.record(z.string(), permissionModeSchema).default({}),
   mcp: z.record(z.string(), mcpServerSchema).default({}),

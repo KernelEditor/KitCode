@@ -5,7 +5,7 @@ import type { Tool, ToolResult } from './types'
 
 const MAX_PROGRESS_LINES = 10
 
-export const MAX_SUBAGENTS_PER_TURN = 8
+export const MAX_SUBAGENTS_PER_TURN = 3
 
 const DESCRIPTION = [
   'Hand one self-contained sub-task to a subagent that works in its own fresh context and reports back a single summary.',
@@ -15,7 +15,7 @@ const DESCRIPTION = [
   'It runs to completion and you receive only its final message.',
 ].join(' ')
 
-export function createTaskTool(runner: SubagentRunner): Tool {
+export function createTaskTool(runner: SubagentRunner, maxSubagents = MAX_SUBAGENTS_PER_TURN): Tool {
   const spawnsPerTurn = new WeakMap<AbortSignal, number>()
 
   return {
@@ -30,7 +30,7 @@ export function createTaskTool(runner: SubagentRunner): Tool {
       required: ['description', 'prompt'],
       additionalProperties: false,
     },
-    defaultPermission: 'allow',
+    defaultPermission: 'ask',
     summarize(input) {
       return `task(${brief(field(input, 'description'))})`
     },
@@ -42,9 +42,9 @@ export function createTaskTool(runner: SubagentRunner): Tool {
 
       const spawned = (spawnsPerTurn.get(ctx.signal) ?? 0) + 1
       spawnsPerTurn.set(ctx.signal, spawned)
-      if (spawned > MAX_SUBAGENTS_PER_TURN) {
+      if (spawned > maxSubagents) {
         return {
-          content: `Already delegated ${MAX_SUBAGENTS_PER_TURN} subagents while answering this message, which is the limit. Do the remaining work yourself with the tools you have.`,
+          content: `Already delegated ${maxSubagents} subagents while answering this message, which is the limit. Do the remaining work yourself with the tools you have.`,
           isError: true,
         }
       }

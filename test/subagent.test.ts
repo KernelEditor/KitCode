@@ -331,6 +331,6 @@ describe('task tool', () => {
     expect(task.summarize({ description: 'find all callers of foo', prompt: 'x' })).toBe(
       'task(find all callers of foo)',
     )
-    expect(task.defaultPermission).toBe('allow')
+    expect(task.defaultPermission).toBe('ask')
   })
 })

@@ -54,7 +54,7 @@ function apiKey(id: string, entry: ProviderConfig, auth: AuthFile): string {
   if (key) return key
   throw new Error(
     `No API key for provider "${id}"${entry.keyEnv ? ` (env ${entry.keyEnv} is unset)` : ''}. ` +
-      `Add one with — run: kitcode add ${entry.baseUrl} <key>`,
+      `Add one with: kitcode add ${entry.baseUrl}`,
   )
 }
 
@@ -62,6 +62,6 @@ function unknownProviderMessage(id: string, known: string[]): string {
   const configured = known.length > 0 ? known.join(', ') : 'none'
   return (
     `Unknown provider "${id}". Configured providers: ${configured}. ` +
-    `Add it with — run: kitcode add <url> <key>`
+    `Add it with: kitcode add <url>`
   )
 }

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -7,6 +7,7 @@ import { bashTool } from '../src/tools/bash'
 import { editTool } from '../src/tools/edit'
 import { grepTool } from '../src/tools/grep'
 import { createPermissionEngine } from '../src/tools/permissions'
+import { readTool } from '../src/tools/read'
 import { resolveInside } from '../src/tools/safepath'
 import type { Tool, ToolContext } from '../src/tools/types'
 import { writeTool } from '../src/tools/write'
@@ -53,6 +54,12 @@ describe('resolveInside', () => {
       await rm(outside, { recursive: true, force: true })
     }
   })
+
+  it('recognizes a harmless-looking symlink to a credential file as sensitive', async () => {
+    await writeFile(join(cwd, '.env'), 'TOKEN=private\n')
+    await symlink(join(cwd, '.env'), join(cwd, 'config.txt'))
+    expect(readTool.permission?.({ path: 'config.txt' }, context())).toBe('ask')
+  })
 })
 
 describe('grep', () => {
@@ -83,6 +90,13 @@ describe('grep', () => {
     const result = await grepTool.execute({ pattern: 'needle' }, context())
     expect(result.content).toBe('text.txt:1: needle')
   })
+
+  it('times out a catastrophic regular expression outside the main process', async () => {
+    await writeFile(join(cwd, 'evil.txt'), `${'a'.repeat(100_000)}!\n`)
+    const result = await grepTool.execute({ pattern: '(a+)+$' }, context())
+    expect(result.isError).toBe(true)
+    expect(result.content).toMatch(/time limit/)
+  }, 2_000)
 })
 
 describe('bash', () => {
@@ -156,6 +170,26 @@ describe('write', () => {
     const result = await writeTool.execute({ path: bin, content: 'not binary' }, context())
     expect(result.isError).toBe(true)
     expect(result.content).toContain('binary')
+  })
+})
+
+describe('file size limits', () => {
+  it('rejects oversized reads before loading the file into memory', async () => {
+    const file = join(cwd, 'huge.txt')
+    await writeFile(file, '')
+    await truncate(file, 5_000_001)
+    const result = await readTool.execute({ path: 'huge.txt' }, context())
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('limited to 5 MB')
+  })
+
+  it('rejects oversized write content', async () => {
+    const result = await writeTool.execute(
+      { path: 'huge.txt', content: 'x'.repeat(5_000_001) },
+      context(),
+    )
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('5 MB')
   })
 })
 

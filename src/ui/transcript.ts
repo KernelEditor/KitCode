@@ -1,6 +1,9 @@
 import type { AgentEvent } from '../core/types'
 import type { Message } from '../providers/types'
+import type { ToolDisplay } from '../tools/types'
 import type { Bubble } from './types'
+import { canRenderDiff, MAX_RENDER_DIFF_CHARS } from './diff'
+import { sanitizeTerminalText } from './sanitize'
 
 export interface TranscriptState {
   bubbles: Bubble[]
@@ -13,7 +16,10 @@ export function emptyTranscript(): TranscriptState {
 
 export function pushUser(state: TranscriptState, text: string): TranscriptState {
   const id = `u${state.seq}`
-  return { bubbles: [...state.bubbles, { kind: 'user', id, text }], seq: state.seq + 1 }
+  return {
+    bubbles: [...state.bubbles, { kind: 'user', id, text: sanitizeTerminalText(text) }],
+    seq: state.seq + 1,
+  }
 }
 
 export function pushNotice(
@@ -22,18 +28,24 @@ export function pushNotice(
   text: string,
 ): TranscriptState {
   const id = `n${state.seq}`
-  return { bubbles: [...state.bubbles, { kind: 'notice', id, level, text }], seq: state.seq + 1 }
+  return {
+    bubbles: [...state.bubbles, { kind: 'notice', id, level, text: sanitizeTerminalText(text) }],
+    seq: state.seq + 1,
+  }
 }
 
 export function applyEvent(state: TranscriptState, event: AgentEvent): TranscriptState {
   switch (event.type) {
     case 'text_delta':
-      return appendToAssistant(state, (bubble) => ({ ...bubble, text: bubble.text + event.text }))
+      return appendToAssistant(state, (bubble) => ({
+        ...bubble,
+        text: bubble.text + sanitizeTerminalText(event.text),
+      }))
 
     case 'thinking_delta':
       return appendToAssistant(state, (bubble) => ({
         ...bubble,
-        thinking: bubble.thinking + event.text,
+        thinking: bubble.thinking + sanitizeTerminalText(event.text),
       }))
 
     case 'tool_start':
@@ -43,8 +55,8 @@ export function applyEvent(state: TranscriptState, event: AgentEvent): Transcrip
           {
             kind: 'tool',
             id: event.id,
-            name: event.name,
-            summary: event.summary,
+            name: sanitizeTerminalText(event.name),
+            summary: sanitizeTerminalText(event.summary),
             state: 'running',
             content: '',
           },
@@ -60,8 +72,8 @@ export function applyEvent(state: TranscriptState, event: AgentEvent): Transcrip
             ? {
                 ...bubble,
                 state: event.isError ? 'error' : 'ok',
-                content: event.content,
-                display: event.display,
+                content: sanitizeTerminalText(event.content),
+                display: sanitizeDisplay(event.display),
               }
             : bubble,
         ),
@@ -130,7 +142,7 @@ export function fromHistory(messages: Message[]): TranscriptState {
   for (const message of messages) {
     for (const block of message.content) {
       if (block.type === 'text') {
-        const text = block.text.trim()
+        const text = sanitizeTerminalText(block.text).trim()
         if (text === '') continue
         state =
           message.role === 'user'
@@ -149,8 +161,8 @@ export function fromHistory(messages: Message[]): TranscriptState {
             {
               kind: 'tool',
               id: block.id,
-              name: block.name,
-              summary: block.name,
+              name: sanitizeTerminalText(block.name),
+              summary: sanitizeTerminalText(block.name),
               state: 'ok',
               content: '',
             },
@@ -162,7 +174,11 @@ export function fromHistory(messages: Message[]): TranscriptState {
           ...state,
           bubbles: state.bubbles.map((bubble) =>
             bubble.kind === 'tool' && bubble.id === block.toolUseId
-              ? { ...bubble, state: block.isError ? 'error' : 'ok', content: block.content }
+              ? {
+                  ...bubble,
+                  state: block.isError ? 'error' : 'ok',
+                  content: sanitizeTerminalText(block.content),
+                }
               : bubble,
           ),
         }
@@ -171,4 +187,28 @@ export function fromHistory(messages: Message[]): TranscriptState {
   }
 
   return state
+}
+
+function sanitizeDisplay(display: ToolDisplay | undefined): ToolDisplay | undefined {
+  if (!display) return undefined
+  if (display.kind === 'text') return { ...display, text: sanitizeTerminalText(display.text) }
+  if (display.kind === 'list') {
+    return {
+      ...display,
+      title: sanitizeTerminalText(display.title),
+      items: display.items.map(sanitizeTerminalText),
+    }
+  }
+  if (!canRenderDiff(display.before, display.after)) {
+    return {
+      kind: 'text',
+      text: `Diff for ${sanitizeTerminalText(display.path)} omitted from the transcript because it exceeds ${MAX_RENDER_DIFF_CHARS.toLocaleString()} characters.`,
+    }
+  }
+  return {
+    ...display,
+    path: sanitizeTerminalText(display.path),
+    before: sanitizeTerminalText(display.before),
+    after: sanitizeTerminalText(display.after),
+  }
 }

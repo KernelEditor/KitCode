@@ -5,6 +5,8 @@ import { ensureDir, sessionsDir } from '../config/paths'
 import type { Message, Usage } from '../providers/types'
 import type { ContextUsage, SessionState, UsageEntry } from './types'
 
+const MAX_SESSION_BYTES = 50_000_000
+
 export interface SessionSummary {
   id: string
   cwd: string
@@ -28,6 +30,7 @@ export function createSession(cwd: string, model: string): SessionState {
 }
 
 export async function saveSession(state: SessionState): Promise<void> {
+  assertSessionId(state.id)
   state.updatedAt = new Date().toISOString()
   await ensureDir(sessionsDir)
   const file = path.join(sessionsDir, `${state.id}.json`)
@@ -36,17 +39,26 @@ export async function saveSession(state: SessionState): Promise<void> {
   const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
   // Sessions can contain large tool outputs; compact JSON cuts serialization
   // and disk work on the hot path immediately after a turn finishes.
-  await writeFile(temp, JSON.stringify(state), 'utf8')
+  await writeFile(temp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 })
   await rename(temp, file)
 }
 
 export async function loadSession(id: string): Promise<SessionState> {
+  assertSessionId(id)
   const file = path.join(sessionsDir, `${id}.json`)
   let raw: string
   try {
+    const info = await stat(file)
+    if (info.size > MAX_SESSION_BYTES) {
+      throw new Error(`Session exceeds the ${MAX_SESSION_BYTES / 1_000_000} MB load limit: ${file}`)
+    }
     raw = await readFile(file, 'utf8')
-  } catch {
-    throw new Error(`No session found at ${file}`)
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Session exceeds')) throw error
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(`No session found at ${file}`)
+    }
+    throw new Error(`Could not read session ${file}: ${(error as Error).message}`)
   }
   const state = readState(raw)
   if (!state) throw new Error(`Session file is not readable as a session: ${file}`)
@@ -109,10 +121,13 @@ async function filesByRecency(): Promise<string[]> {
       .map(async (name) => {
         const file = path.join(sessionsDir, name)
         const info = await stat(file).catch(() => null)
-        return { file, at: info?.mtimeMs ?? 0 }
+        return { file, at: info?.mtimeMs ?? 0, size: info?.size ?? 0 }
       }),
   )
-  return dated.sort((a, b) => b.at - a.at).map((entry) => entry.file)
+  return dated
+    .filter((entry) => entry.size <= MAX_SESSION_BYTES)
+    .sort((a, b) => b.at - a.at)
+    .map((entry) => entry.file)
 }
 
 function readState(raw: string): SessionState | null {
@@ -185,4 +200,10 @@ export async function resolveSessionId(query: string): Promise<string> {
         .map((entry) => `  ${shortSessionId(entry.id)}  ${entry.updatedAt}  ${entry.cwd}`)
         .join('\n'),
   )
+}
+
+function assertSessionId(id: string): void {
+  if (!/^[A-Za-z0-9._-]{1,240}$/.test(id) || id.includes('..')) {
+    throw new Error(`Invalid session id: ${id}`)
+  }
 }

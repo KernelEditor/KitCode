@@ -6,6 +6,7 @@ export interface PermissionRequest {
   summary: string
   input: unknown
   display?: ToolDisplay
+  allowAlways?: boolean
 }
 
 export type PermissionDecision = 'once' | 'always' | 'deny'

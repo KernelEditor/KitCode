@@ -2,9 +2,11 @@ import { readFile, stat } from 'node:fs/promises'
 import { resolveInside } from './safepath'
 import { brief } from './summary'
 import type { Tool } from './types'
+import { isSensitivePath } from './sensitive'
 
 const MAX_LINES = 2000
 const MAX_CHARS = 200_000
+const MAX_FILE_BYTES = 5_000_000
 
 interface ReadInput {
   path: string
@@ -27,6 +29,12 @@ export const readTool: Tool = {
     additionalProperties: false,
   },
   defaultPermission: 'allow',
+  permission(input, ctx) {
+    const target = (input as Partial<ReadInput> | null)?.path
+    if (isSensitivePath(target)) return 'ask'
+    const safe = ctx && target ? resolveInside(ctx.cwd, target) : undefined
+    return safe?.ok && isSensitivePath(safe.relative) ? 'ask' : undefined
+  },
   summarize(input) {
     return `read(${brief((input as ReadInput).path)})`
   },
@@ -39,6 +47,12 @@ export const readTool: Tool = {
     if (!info) return { content: `File not found: ${path}`, isError: true }
     if (info.isDirectory()) {
       return { content: `${path} is a directory, not a file. Use glob to list its contents.`, isError: true }
+    }
+    if (info.size > MAX_FILE_BYTES) {
+      return {
+        content: `${path} is ${(info.size / 1_000_000).toFixed(1)} MB; read is limited to ${MAX_FILE_BYTES / 1_000_000} MB per file. Use grep or another targeted tool instead.`,
+        isError: true,
+      }
     }
 
     const buffer = await readFile(safe.path)

@@ -1,4 +1,4 @@
-import { readFile, readdir, unlink, writeFile } from 'node:fs/promises'
+import { chmod, readFile, readdir, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { ensureDir, promptsDir } from '../config/paths'
 
@@ -25,11 +25,17 @@ export async function savePrompt(input: {
     body: input.body.trim(),
   }
   await ensureDir(promptsDir)
-  await writeFile(path.join(promptsDir, `${slug}.md`), serialize(prompt), 'utf8')
+  const file = path.join(promptsDir, `${slug}.md`)
+  await writeFile(file, serialize(prompt), {
+    encoding: 'utf8',
+    mode: 0o600,
+  })
+  await chmod(file, 0o600)
   return prompt
 }
 
 export async function getPrompt(slug: string): Promise<SavedPrompt | null> {
+  assertSlug(slug)
   try {
     return parse(slug, await readFile(path.join(promptsDir, `${slug}.md`), 'utf8'))
   } catch (error) {
@@ -57,6 +63,7 @@ export async function listPrompts(): Promise<SavedPrompt[]> {
 }
 
 export async function deletePrompt(slug: string): Promise<boolean> {
+  assertSlug(slug)
   try {
     await unlink(path.join(promptsDir, `${slug}.md`))
     return true
@@ -86,6 +93,12 @@ function slugify(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+function assertSlug(slug: string): void {
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+    throw new Error(`Invalid prompt id: ${slug}`)
+  }
 }
 
 function serialize(prompt: SavedPrompt): string {

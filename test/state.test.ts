@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -7,7 +7,7 @@ import type { Message } from '../src/providers/types'
 const home = await mkdtemp(path.join(tmpdir(), 'freecode-state-'))
 process.env.FREECODE_HOME = home
 
-const { promptsDir } = await import('../src/config/paths')
+const { promptsDir, sessionsDir } = await import('../src/config/paths')
 const { sanitizeHistory, createSession, saveSession, loadSession } = await import(
   '../src/core/session'
 )
@@ -135,6 +135,13 @@ describe('prompt library', () => {
     expect(await deletePrompt('ship-it')).toBe(true)
     expect(await deletePrompt('ship-it')).toBe(false)
   })
+
+  it('rejects path traversal ids and stores prompts privately', async () => {
+    const saved = await savePrompt({ name: 'Private prompt', body: 'hello' })
+    await expect(getPrompt('../auth')).rejects.toThrow(/Invalid prompt id/)
+    await expect(deletePrompt('../../config')).rejects.toThrow(/Invalid prompt id/)
+    expect((await stat(path.join(promptsDir, `${saved.slug}.md`))).mode & 0o777).toBe(0o600)
+  })
 })
 
 describe('usage tracker', () => {
@@ -220,6 +227,10 @@ describe('usage tracker', () => {
 })
 
 describe('saveSession', () => {
+  it('rejects traversal in a direct session id', async () => {
+    await expect(loadSession('../../auth')).rejects.toThrow(/Invalid session id/)
+  })
+
   it('round-trips the exact usage behind the context meter', async () => {
     const session = createSession('/tmp', 'provider/model')
     session.context = {
@@ -229,6 +240,7 @@ describe('saveSession', () => {
 
     await saveSession(session)
     expect((await loadSession(session.id)).context).toEqual(session.context)
+    expect((await stat(path.join(sessionsDir, `${session.id}.json`))).mode & 0o777).toBe(0o600)
   })
 
   it('concurrent writes for the same session both finish without clobbering', async () => {
