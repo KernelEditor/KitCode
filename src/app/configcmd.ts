@@ -4,17 +4,12 @@ import {
   initProjectConfig,
   loadProjectConfig,
   loadRuntimeConfig,
-  migrateLegacyHome,
   saveConfig,
 } from '../config/store'
 import { trustWorkspace } from '../config/trust'
 
 export async function showConfig(options: { local?: boolean } = {}): Promise<void> {
-  const migration = await migrateLegacyHome()
   const cwd = process.cwd()
-  if (migration.migrated) {
-    console.log(`migrated ${migration.from} -> ${migration.to} (old copy left in place)`)
-  }
 
   if (options.local) {
     const current = (await loadRuntimeConfig(cwd)).config

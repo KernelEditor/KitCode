@@ -3,16 +3,16 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
-const home = await mkdtemp(path.join(tmpdir(), 'freecode-cfg-home-'))
-process.env.FREECODE_HOME = home
-delete process.env.FREECODE_CONFIG
+const home = await mkdtemp(path.join(tmpdir(), 'kitcode-cfg-home-'))
+process.env.KITCODE_HOME = home
+delete process.env.KITCODE_CONFIG
 
 const { authPath, configPath, homeDir, resolveConfigLocation, trustPath } = await import('../src/config/paths')
 const { configLocation, loadConfig, loadProjectConfig, loadRuntimeConfig, saveAuth, saveConfig } = await import('../src/config/store')
 const { isWorkspaceTrusted, revokeWorkspaceTrust, trustWorkspace } = await import('../src/config/trust')
 
-const workspace = await mkdtemp(path.join(tmpdir(), 'freecode-cfg-ws-'))
-const bare = await mkdtemp(path.join(tmpdir(), 'freecode-cfg-bare-'))
+const workspace = await mkdtemp(path.join(tmpdir(), 'kitcode-cfg-ws-'))
+const bare = await mkdtemp(path.join(tmpdir(), 'kitcode-cfg-bare-'))
 const nested = path.join(workspace, 'packages', 'app', 'src')
 const projectFile = path.join(workspace, 'kitcode.json')
 
@@ -20,7 +20,7 @@ await mkdir(nested, { recursive: true })
 await writeFile(projectFile, `${JSON.stringify({ version: 1, effort: 'low' }, null, 2)}\n`, 'utf8')
 
 afterEach(() => {
-  delete process.env.FREECODE_CONFIG
+  delete process.env.KITCODE_CONFIG
 })
 
 afterAll(async () => {
@@ -34,14 +34,14 @@ describe('resolveConfigLocation', () => {
     expect(await resolveConfigLocation(nested)).toEqual({ path: projectFile, scope: 'project' })
   })
 
-  it('lets FREECODE_CONFIG win over a project file', async () => {
+  it('lets KITCODE_CONFIG win over a project file', async () => {
     const override = path.join(home, 'explicit.json')
-    process.env.FREECODE_CONFIG = override
+    process.env.KITCODE_CONFIG = override
 
     expect(await resolveConfigLocation(nested)).toEqual({ path: override, scope: 'env' })
   })
 
-  it('falls back to the global config under FREECODE_HOME', async () => {
+  it('falls back to the global config under KITCODE_HOME', async () => {
     const location = await resolveConfigLocation(bare)
 
     expect(location).toEqual({ path: configPath, scope: 'global' })
@@ -59,7 +59,7 @@ describe('loadConfig', () => {
   })
 
   it('can explicitly load a project config even when an env override is present', async () => {
-    process.env.FREECODE_CONFIG = path.join(home, 'explicit.json')
+    process.env.KITCODE_CONFIG = path.join(home, 'explicit.json')
     const config = await loadProjectConfig(workspace)
     expect(config.effort).toBe('low')
     expect(await configLocation()).toEqual({ path: projectFile, scope: 'project' })
@@ -106,16 +106,5 @@ describe('saveAuth', () => {
     expect((await stat(authPath)).mode & 0o777).toBe(0o600)
     expect((await stat(homeDir)).mode & 0o777).toBe(0o700)
     await expect(stat(path.join(workspace, 'auth.json'))).rejects.toMatchObject({ code: 'ENOENT' })
-  })
-})
-
-describe('legacy name', () => {
-  it('still finds a freecode.json left over from the old name', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'kitcode-legacy-'))
-    await writeFile(path.join(dir, 'freecode.json'), JSON.stringify({ version: 1 }))
-    const { resolveConfigLocation } = await import('../src/config/paths')
-    const found = await resolveConfigLocation(dir)
-    expect(found.scope).toBe('project')
-    expect(found.path).toBe(path.join(dir, 'freecode.json'))
   })
 })

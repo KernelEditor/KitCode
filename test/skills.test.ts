@@ -36,7 +36,7 @@ let projectRoot: string
 let globalRoot: string
 
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'freecode-skills-'))
+  root = await mkdtemp(join(tmpdir(), 'kitcode-skills-'))
   projectRoot = join(root, 'project')
   globalRoot = join(root, 'global')
   await mkdir(projectRoot, { recursive: true })

@@ -72,6 +72,11 @@ export const diagnosticsSchema = z.object({
   commands: z.array(z.string().trim().min(1).max(20_000)).max(8).default([]),
 })
 
+export const updatesSchema = z.object({
+  // The updater is intentionally opt-in while the canonical repository is private.
+  checkOnStart: z.boolean().default(false),
+})
+
 export const configSchema = z.object({
   version: z.literal(1).default(1),
   model: z.string().optional(),
@@ -87,6 +92,7 @@ export const configSchema = z.object({
     maxSubagentsPerTurn: 3,
   }),
   diagnostics: diagnosticsSchema.default({ autoRun: true, commands: [] }),
+  updates: updatesSchema.default({ checkOnStart: false }),
   providers: z.record(z.string(), providerConfigSchema).default({}),
   permissions: z.record(z.string(), permissionModeSchema).default({}),
   mcp: z.record(z.string(), mcpServerSchema).default({}),

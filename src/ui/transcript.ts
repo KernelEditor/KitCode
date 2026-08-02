@@ -1,5 +1,6 @@
 import type { AgentEvent } from '../core/types'
 import type { Message } from '../providers/types'
+import { attachmentLabel } from '../core/attachments'
 import type { ToolDisplay } from '../tools/types'
 import type { Bubble } from './types'
 import { canRenderDiff, MAX_RENDER_DIFF_CHARS } from './diff'
@@ -87,6 +88,7 @@ export function applyEvent(state: TranscriptState, event: AgentEvent): Transcrip
 
     case 'turn_start':
     case 'usage':
+    case 'rate_limits':
       return state
   }
 }
@@ -140,20 +142,31 @@ export function fromHistory(messages: Message[]): TranscriptState {
   let state = emptyTranscript()
 
   for (const message of messages) {
+    if (message.role === 'user') {
+      const displayed = message.content
+        .flatMap((block) => {
+          if (block.type === 'text') return [block.text]
+          const label = attachmentLabel(block)
+          return label ? [`📎 ${label}`] : []
+        })
+        .map((value) => sanitizeTerminalText(value).trim())
+        .filter(Boolean)
+        .join('\n')
+      if (displayed) state = pushUser(state, displayed)
+    }
     for (const block of message.content) {
       if (block.type === 'text') {
+        if (message.role === 'user') continue
         const text = sanitizeTerminalText(block.text).trim()
         if (text === '') continue
         state =
-          message.role === 'user'
-            ? pushUser(state, text)
-            : {
-                bubbles: [
-                  ...state.bubbles,
-                  { kind: 'assistant', id: `a${state.seq}`, text, thinking: '', streaming: false },
-                ],
-                seq: state.seq + 1,
-              }
+          {
+            bubbles: [
+              ...state.bubbles,
+              { kind: 'assistant', id: `a${state.seq}`, text, thinking: '', streaming: false },
+            ],
+            seq: state.seq + 1,
+          }
       } else if (block.type === 'tool_use') {
         state = {
           bubbles: [
@@ -181,6 +194,23 @@ export function fromHistory(messages: Message[]): TranscriptState {
                 }
               : bubble,
           ),
+        }
+      } else if ((block.type === 'image' || block.type === 'file') && message.role === 'assistant') {
+        const label = attachmentLabel(block)
+        if (label) {
+          state = {
+            bubbles: [
+              ...state.bubbles,
+              {
+                kind: 'assistant',
+                id: `a${state.seq}`,
+                text: `📎 ${sanitizeTerminalText(label)}`,
+                thinking: '',
+                streaming: false,
+              },
+            ],
+            seq: state.seq + 1,
+          }
         }
       }
     }

@@ -7,6 +7,7 @@ import { expandEnvRecord } from '../config/store'
 import { redactSecrets } from '../providers/errors'
 import type { Tool } from '../tools/types'
 import { bridgeMcpTool } from './bridge'
+import { KITCODE_VERSION } from '../version'
 
 export type McpStatus = 'connected' | 'connecting' | 'error' | 'disabled'
 
@@ -17,7 +18,7 @@ export interface McpServerState {
   error?: string
 }
 
-const clientInfo = { name: 'kitcode', version: '0.1.0' }
+const clientInfo = { name: 'kitcode', version: KITCODE_VERSION }
 const connectTimeoutMs = 15_000
 const stderrTailLimit = 400
 const maxToolPages = 20

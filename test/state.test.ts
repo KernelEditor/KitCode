@@ -1,16 +1,23 @@
-import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { Message } from '../src/providers/types'
 
-const home = await mkdtemp(path.join(tmpdir(), 'freecode-state-'))
-process.env.FREECODE_HOME = home
+const home = await mkdtemp(path.join(tmpdir(), 'kitcode-state-'))
+process.env.KITCODE_HOME = home
 
 const { promptsDir, sessionsDir } = await import('../src/config/paths')
-const { sanitizeHistory, createSession, saveSession, loadSession } = await import(
-  '../src/core/session'
-)
+const {
+  sanitizeHistory,
+  createSession,
+  saveSession,
+  loadSession,
+  listSessions,
+  renameSession,
+  deleteSession,
+  exportSession,
+} = await import('../src/core/session')
 const { getPrompt, listPrompts, savePrompt, searchPrompts, deletePrompt } = await import(
   '../src/prompts/library'
 )
@@ -260,5 +267,38 @@ describe('saveSession', () => {
       // Either "A" or "B" wins, but the file is intact (not empty/corrupt).
       text: expect.stringMatching(/^[AB]$/),
     })
+  })
+
+  it('renames, lists, exports and deletes a session without exporting raw images or thinking', async () => {
+    const session = createSession('/tmp/project', 'provider/model')
+    session.messages = [
+      user(
+        { type: 'text', text: 'Use key sk-export-secret-1234567890 carefully' },
+        { type: 'image', mediaType: 'image/png', data: 'very-large-base64', name: 'screen.png' },
+      ),
+      assistant(
+        { type: 'thinking', text: 'private reasoning' },
+        { type: 'text', text: 'Done.' },
+      ),
+    ]
+    await saveSession(session)
+
+    const renamed = await renameSession(session.id, 'Release review')
+    expect(renamed.title).toBe('Release review')
+    expect((await listSessions(100)).find((entry) => entry.id === session.id)?.title).toBe(
+      'Release review',
+    )
+
+    const exported = await exportSession(session.id, home)
+    const markdown = await readFile(exported.path, 'utf8')
+    expect(markdown).toContain('# Release review')
+    expect(markdown).toContain('[Image attached: screen.png]')
+    expect(markdown).toContain('[redacted]')
+    expect(markdown).not.toContain('very-large-base64')
+    expect(markdown).not.toContain('private reasoning')
+    expect((await stat(exported.path)).mode & 0o777).toBe(0o600)
+
+    expect(await deleteSession(session.id)).toBe(session.id)
+    await expect(loadSession(session.id)).rejects.toThrow(/No session found/)
   })
 })

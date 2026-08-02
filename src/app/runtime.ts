@@ -1,6 +1,8 @@
 import { detectProvider } from '../config/detect'
 import { formatModelRef, parseModelRef } from '../config/schema'
 import type { Config } from '../config/schema'
+import path from 'node:path'
+import { mkdir } from 'node:fs/promises'
 import { projectSkillsDir, skillsDir } from '../config/paths'
 import {
   configLocation,
@@ -18,12 +20,22 @@ import type { TurnBudget } from '../core/budget'
 import { beginCheckpoint, undoLatestCheckpoint } from '../core/checkpoint'
 import type { FileCheckpoint } from '../core/checkpoint'
 import { runAutomaticDiagnostics } from '../core/diagnostics'
+import { loadAttachment } from '../core/attachments'
+import {
+  compactCutIndex,
+  compactHistory,
+  estimateCompactTokens,
+  shouldAutoCompact,
+} from '../core/compact'
 import { buildSystemPrompt } from '../core/prompt'
 import {
   createSession,
+  deleteSession as deleteStoredSession,
+  exportSession as exportStoredSession,
   latestSessionFor,
   listSessions,
   loadSession,
+  renameSession as renameStoredSession,
   resolveSessionId,
   saveSession,
   shortSessionId,
@@ -42,7 +54,8 @@ import { fetchProviderBalance } from '../providers/balance'
 import { loadModels } from '../providers/catalog'
 import { pricingFor } from '../providers/pricing'
 import { createRegistry } from '../providers/registry'
-import type { Effort, Message, ModelInfo, ModelPricing } from '../providers/types'
+import { formatRateLimits } from '../providers/rate-limits'
+import type { Effort, Message, ModelInfo, ModelPricing, RateLimits } from '../providers/types'
 import { createPermissionEngine } from '../tools/permissions'
 import type { AgentMode } from '../tools/permissions'
 import { builtinTools, createToolRegistry } from '../tools/registry'
@@ -53,6 +66,8 @@ import { createTaskTool } from '../tools/task'
 import type { Lang } from '../ui/i18n'
 import type { Runtime } from '../ui/runtime'
 import type { PickerItem } from '../ui/types'
+import { checkForUpdates } from '../core/update'
+import { KITCODE_COMMIT, KITCODE_VERSION } from '../version'
 
 const PREFERRED = ['claude-opus-5', 'claude-sonnet-5', 'gpt-5', 'claude-opus-4-8']
 
@@ -78,6 +93,7 @@ export async function boot(options: {
   const warnings: string[] = []
   const workspaceRoot = await canonicalWorkspace(options.cwd)
   const workspaceTrusted = await isWorkspaceTrusted(options.cwd)
+  const startupUpdate = config.updates.checkOnStart ? checkForUpdates() : null
   if (loadedConfig.ignoredProject) {
     warnings.push(
       `Project config ignored until this workspace is trusted: ${loadedConfig.ignoredProject.path}. ` +
@@ -141,6 +157,7 @@ export async function boot(options: {
   let contextUsage: ContextUsage | undefined =
     session.context?.model === modelRef ? session.context : undefined
   let modelContextWindow: number | null = null
+  let latestRateLimits: { model: string; limits: RateLimits } | undefined
   const contextListeners = new Set<() => void>()
 
   const notifyContext = () => {
@@ -166,6 +183,7 @@ export async function boot(options: {
     discoveredWindow?: number,
   ) => {
     modelRef = ref
+    if (latestRateLimits?.model !== ref) latestRateLimits = undefined
     contextUsage = restoredContext?.model === ref ? restoredContext : undefined
     modelContextWindow = discoveredWindow ?? knownContextWindow(ref)
     notifyContext()
@@ -236,6 +254,41 @@ export async function boot(options: {
     await saveConfig(config)
   }
 
+  const compactWithBudget = async (
+    history: Message[],
+    signal: AbortSignal,
+    budget: TurnBudget,
+  ) => {
+    if (compactCutIndex(history) <= 0) {
+      return { history, compacted: false as const, removedMessages: 0 }
+    }
+    const resolved = registry.resolve(modelRef)
+    const budgetDecision = budget.beforeRequest({
+      modelRef,
+      maxOutputTokens: Math.min(4_096, config.maxTokens),
+      estimatedInputTokens: estimateCompactTokens(history),
+    })
+    if (!budgetDecision.allowed) throw new Error(budgetDecision.reason)
+    const result = await compactHistory({
+      provider: resolved.provider,
+      model: resolved.modelId,
+      history,
+      maxTokens: budgetDecision.maxOutputTokens,
+      signal,
+    })
+    if (result.usage) {
+      budget.record(modelRef, result.usage)
+      usage.record(modelRef, result.usage)
+    }
+    if (result.rateLimits) latestRateLimits = { model: modelRef, limits: result.rateLimits }
+    if (result.compacted) {
+      contextUsage = undefined
+      session.context = undefined
+      notifyContext()
+    }
+    return result
+  }
+
   const runtime: Runtime = {
     cwd: options.cwd,
 
@@ -287,29 +340,88 @@ export async function boot(options: {
       return ref
     },
 
-    async logout() {
-      const providerId = parseModelRef(modelRef)?.provider
-      if (!providerId) return undefined
+    async logout(providerId) {
+      const provider = config.providers[providerId]
+      if (!provider) throw new Error(`Provider "${providerId}" is not configured.`)
+      const previousKey = auth[providerId]
+      const previousModel = config.model
+      const previousActiveModel = modelRef
+      const wasActive = parseModelRef(modelRef)?.provider === providerId
+      const configuredWasRemoved = parseModelRef(config.model ?? '')?.provider === providerId
 
       delete config.providers[providerId]
       delete auth[providerId]
-      config.model = undefined
-      activateModel('')
-
-      await saveConfig(config)
-      await saveAuth(auth)
+      if (configuredWasRemoved) {
+        config.model =
+          !wasActive && config.providers[parseModelRef(modelRef)?.provider ?? ''] ? modelRef : undefined
+      }
       registry = createRegistry(config, auth)
-      return providerId
+
+      let nextModel: string | undefined
+      if (wasActive) {
+        if (config.model) {
+          try {
+            registry.resolve(config.model)
+            nextModel = config.model
+          } catch {
+            config.model = undefined
+          }
+        }
+        if (!nextModel) {
+          for (const remaining of Object.keys(config.providers)) {
+            try {
+              const models = await loadModels(registry.get(remaining))
+              rememberModels(remaining, models)
+              const chosen = preferredModel(models)
+              if (!chosen) continue
+              nextModel = formatModelRef(remaining, chosen)
+              config.model = nextModel
+              break
+            } catch {
+              // Logging out must still work if another provider is temporarily offline.
+            }
+          }
+        }
+      }
+
+      try {
+        await saveConfig(config)
+        await saveAuth(auth)
+      } catch (error) {
+        config.providers[providerId] = provider
+        if (previousKey !== undefined) auth[providerId] = previousKey
+        config.model = previousModel
+        registry = createRegistry(config, auth)
+        if (wasActive) activateModel(previousActiveModel)
+        await Promise.allSettled([saveConfig(config), saveAuth(auth)])
+        throw error
+      }
+
+      if (wasActive) {
+        activateModel(nextModel ?? '')
+        if (nextModel) void refreshModelContextWindow()
+      }
+      return { removed: providerId, wasActive, ...(nextModel ? { nextModel } : {}) }
     },
 
     sessionId: () => session.id,
+
+    async newSession() {
+      await persistQueue.catch(() => undefined)
+      session = createSession(options.cwd, modelRef)
+      usage.reset()
+      contextUsage = undefined
+      latestRateLimits = undefined
+      notifyContext()
+      return session.id
+    },
 
     async listSessionItems() {
       const entries = await listSessions(30)
       return entries.map((entry) => ({
         key: entry.id,
-        label: `${shortSessionId(entry.id)}  ${entry.updatedAt.slice(0, 16).replace('T', ' ')}`,
-        hint: `${entry.messageCount} msgs · ${entry.cwd}`,
+        label: entry.title || `${shortSessionId(entry.id)}  ${entry.updatedAt.slice(0, 16).replace('T', ' ')}`,
+        hint: `${entry.updatedAt.slice(0, 16).replace('T', ' ')} · ${entry.messageCount} msgs · ${entry.cwd}`,
       }))
     },
 
@@ -320,6 +432,37 @@ export async function boot(options: {
       activateModel(loaded.model || modelRef, loaded.context)
       void refreshModelContextWindow()
       return loaded.messages
+    },
+
+    async renameSession(id, title) {
+      await persistQueue.catch(() => undefined)
+      const renamed = await renameStoredSession(id, title)
+      if (renamed.id === session.id) session = renamed
+      return renamed.title ?? shortSessionId(renamed.id)
+    },
+
+    async deleteSession(id) {
+      await persistQueue.catch(() => undefined)
+      const resolved = await resolveSessionId(id)
+      const wasActive = resolved === session.id
+      await deleteStoredSession(resolved)
+      if (!wasActive) return { id: resolved, wasActive: false }
+
+      session = createSession(options.cwd, modelRef)
+      usage.restore([])
+      contextUsage = undefined
+      latestRateLimits = undefined
+      notifyContext()
+      return { id: resolved, wasActive: true, newSessionId: session.id }
+    },
+
+    async exportSession(id, destination) {
+      await persistQueue.catch(() => undefined)
+      const target = destination
+        ? path.resolve(options.cwd, destination)
+        : path.join(options.cwd, '.kitcode-exports')
+      if (!destination) await mkdir(target, { recursive: true, mode: 0o700 })
+      return (await exportStoredSession(id, target)).path
     },
 
     configPath: () => location.path,
@@ -425,9 +568,30 @@ export async function boot(options: {
       syncMcpTools()
     },
 
+    async setMcpEnabled(name, enabled) {
+      const existing = config.mcp[name]
+      if (!existing) throw new Error(`MCP server "${name}" does not exist.`)
+      const previous = existing.enabled
+      existing.enabled = enabled
+      try {
+        await saveConfig(config)
+        await mcp.reconnect(name)
+      } catch (error) {
+        existing.enabled = previous
+        await saveConfig(config).catch(() => undefined)
+        await mcp.reconnect(name).catch(() => undefined)
+        throw error
+      }
+      syncMcpTools()
+      const state = mcp.state(name)
+      if (!state) throw new Error(`MCP server "${name}" disappeared.`)
+      return state
+    },
+
     modelContext: () => {
-      const used = contextUsage?.model === modelRef ? contextTokens(contextUsage.usage) : 0
-      return { window: modelContextWindow, used }
+      const exact = contextUsage?.model === modelRef
+      const used = exact && contextUsage ? contextTokens(contextUsage.usage) : 0
+      return { window: modelContextWindow, used, exact }
     },
 
     subscribeContext(listener) {
@@ -446,6 +610,11 @@ export async function boot(options: {
 
     usageLine: () => formatUsageCompact(usage),
     usageReport: () => formatUsageBreakdown(usage),
+    rateLimitsReport() {
+      if (!latestRateLimits || latestRateLimits.model !== modelRef) return null
+      const lines = formatRateLimits(latestRateLimits.limits)
+      return lines.length > 0 ? `rate limits\n${lines.join('\n')}` : null
+    },
     async providerBalance() {
       const providerId = parseModelRef(modelRef)?.provider
       if (!providerId) return null
@@ -494,21 +663,96 @@ export async function boot(options: {
       await savePrompt({ name, body })
     },
 
+    async loadAttachment(requestedPath) {
+      return (await loadAttachment(options.cwd, requestedPath)).block
+    },
+
+    async compact(history, signal) {
+      return compactWithBudget(history, signal, createTurnBudget(config.budget, resolvePricing))
+    },
+
+    async checkerReport() {
+      const providerId = parseModelRef(modelRef)?.provider
+      const provider = providerId ? config.providers[providerId] : undefined
+      const states = mcp.states()
+      const lines = [
+        `KitCode ${KITCODE_VERSION} · ${KITCODE_COMMIT.slice(0, 12)}`,
+        `updates: ${config.updates.checkOnStart ? 'enabled' : 'disabled'}`,
+        `runtime: Node ${process.versions.node} · ${process.platform}/${process.arch}`,
+        `workspace: ${options.cwd}`,
+        `config: ${location.path}`,
+        `session: ${shortSessionId(session.id)} · ${session.messages.length} messages`,
+        `model: ${modelRef || 'not selected'}`,
+      ]
+      if (providerId && provider) {
+        lines.push(
+          `provider: ${provider.label ?? providerId} · ${provider.type} · ${provider.baseUrl}`,
+        )
+        try {
+          const models = await registry.get(providerId).listModels()
+          rememberModels(providerId, models)
+          lines.push(`provider check: ok · ${models.length} models`)
+        } catch (error) {
+          lines.push(`provider check: failed · ${error instanceof Error ? error.message : String(error)}`)
+        }
+      } else {
+        lines.push('provider check: not configured')
+      }
+      const context = runtime.modelContext()
+      lines.push(
+        `context: ${context.exact ? context.used : 'unknown'} / ${context.window ?? 'unknown'}`,
+        `MCP: ${states.filter((state) => state.status === 'connected').length} connected · ${states.filter((state) => state.status === 'disabled').length} disabled · ${states.filter((state) => state.status === 'error').length} failed`,
+      )
+      return lines.join('\n')
+    },
+
+    startupUpdateCheck: () => startupUpdate,
+
     async run(history, hooks, signal) {
       // A server may have closed while KitCode was idle. Refresh the live MCP
       // schemas before building the next prompt so disconnected tools vanish.
       syncMcpTools()
-      const requestModelRef = modelRef
+      let requestHistory = history
       const budget = createTurnBudget(config.budget, resolvePricing)
+      const previousContext = runtime.modelContext()
+      if (shouldAutoCompact(previousContext.used, previousContext.window)) {
+        hooks.onEvent({ type: 'notice', level: 'info', text: 'Context is 80% full; compacting older messages…' })
+        try {
+          const result = await compactWithBudget(requestHistory, signal, budget)
+          if (result.compacted) {
+            requestHistory = result.history
+            hooks.onEvent({
+              type: 'notice',
+              level: 'info',
+              text: `Compacted older context; kept the latest conversation (${result.removedMessages} messages replaced).`,
+            })
+          }
+        } catch (error) {
+          if (signal.aborted) return history
+          hooks.onEvent({
+            type: 'notice',
+            level: 'warn',
+            text: `Automatic context compaction failed; continuing with the original context: ${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
+      }
+      const requestModelRef = modelRef
       const checkpoint = beginCheckpoint({ cwd: options.cwd, sessionId: session.id })
       activeBudget = budget
       activeCheckpoint = checkpoint
       const trackedHooks: AgentHooks = {
         ...hooks,
         onEvent(event) {
+          if (event.type === 'turn_start') {
+            contextUsage = undefined
+            notifyContext()
+          }
           if (event.type === 'usage') {
             contextUsage = { model: requestModelRef, usage: event.usage }
             notifyContext()
+          }
+          if (event.type === 'rate_limits') {
+            latestRateLimits = { model: requestModelRef, limits: event.limits }
           }
           hooks.onEvent(event)
         },
@@ -516,7 +760,7 @@ export async function boot(options: {
       try {
         const next = await runTurn(
           agentConfigFor(mainSystemPrompt(), tools),
-          history,
+          requestHistory,
           trackedHooks,
           signal,
         )

@@ -15,7 +15,7 @@ import { writeTool } from '../src/tools/write'
 let cwd: string
 
 beforeEach(async () => {
-  cwd = await mkdtemp(join(tmpdir(), 'freecode-tools-'))
+  cwd = await mkdtemp(join(tmpdir(), 'kitcode-tools-'))
 })
 
 afterEach(async () => {
@@ -42,7 +42,7 @@ describe('resolveInside', () => {
   })
 
   it('rejects a symlink pointing outside the root even when its target is missing', async () => {
-    const outside = await mkdtemp(join(tmpdir(), 'freecode-outside-'))
+    const outside = await mkdtemp(join(tmpdir(), 'kitcode-outside-'))
     try {
       await symlink(join(outside, 'ghost.txt'), join(cwd, 'escape'))
       expect(resolveInside(cwd, 'escape').ok).toBe(false)

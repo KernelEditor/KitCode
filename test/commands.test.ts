@@ -27,9 +27,15 @@ describe('matchCommands', () => {
 
   it('advertises MCP server addition in the command menu', () => {
     expect(COMMANDS.find((command) => command.name === 'mcp')?.args).toContain('add')
-    expect(names('/mcp ')).toEqual(['mcp add', 'mcp list', 'mcp delete'])
+    expect(names('/mcp ')).toEqual([
+      'mcp add',
+      'mcp list',
+      'mcp delete',
+      'mcp enable',
+      'mcp disable',
+    ])
     expect(names('/mcp a')).toEqual(['mcp add'])
-    expect(names('/mcp d')).toEqual(['mcp delete'])
+    expect(names('/mcp d')).toEqual(['mcp delete', 'mcp disable'])
   })
 
   it('ignores plain text', () => {

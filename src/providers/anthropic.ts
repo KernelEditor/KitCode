@@ -9,6 +9,7 @@ import {
   toProviderError,
 } from './errors'
 import { pricingFor } from './pricing'
+import { parseRateLimits } from './rate-limits'
 import type {
   ChatRequest,
   ContentBlock,
@@ -103,9 +104,13 @@ async function* streamTurn(
     if (isUserAbort(error, req.signal)) {
       const partial = stream.currentMessage
       if (partial) yield { type: 'usage', usage: toUsage(partial.usage) }
+      const limits = parseRateLimits(capture.headers())
+      if (limits) yield { type: 'rate_limits', limits }
       yield { type: 'done', stopReason: 'aborted', content: partialContent(thinking, text) }
       return
     }
+    const limits = parseRateLimits(capture.headers())
+    if (limits) yield { type: 'rate_limits', limits }
     if (events === 0 && capture.succeeded() && !isConnectionFailure(error)) {
       throw await invalidStreamError(providerId, capture, error)
     }
@@ -121,6 +126,8 @@ async function* streamTurn(
     }
   }
   yield { type: 'usage', usage: toUsage(final.usage) }
+  const limits = parseRateLimits(capture.headers())
+  if (limits) yield { type: 'rate_limits', limits }
   yield {
     type: 'done',
     stopReason,
@@ -173,6 +180,15 @@ function toBlockParams(block: ContentBlock): Anthropic.ContentBlockParam[] {
           is_error: block.isError,
         },
       ]
+    case 'image':
+      return [
+        {
+          type: 'image',
+          source: { type: 'base64', media_type: block.mediaType, data: block.data },
+        },
+      ]
+    case 'file':
+      return [{ type: 'text', text: `[Attached file: ${block.name}]\n${block.text}` }]
   }
 }
 

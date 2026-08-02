@@ -9,13 +9,14 @@ import { listSessions, shortSessionId } from './core/session'
 import { startTui } from './app/tui'
 import { deletePrompt, listPrompts } from './prompts/library'
 import { revokeWorkspaceTrust, trustWorkspace } from './config/trust'
+import { KITCODE_VERSION } from './version'
 
 const program = new Command()
 
 program
   .name('kitcode')
   .description('Terminal coding agent with a config you never have to write by hand')
-  .version('0.1.0')
+  .version(KITCODE_VERSION)
   .option('-c, --continue', 'resume the most recent session for this directory')
   .option('-r, --resume <id>', 'reopen a past chat by id (any unique part of it works)')
   .option('--cwd <path>', 'run in this directory instead of the current one')
@@ -68,6 +69,7 @@ program
         `${shortSessionId(entry.id)}  ${entry.updatedAt.slice(0, 16).replace('T', ' ')}  ` +
           `${String(entry.messageCount).padStart(3)} msgs  ${entry.cwd}`,
       )
+      if (entry.title) console.log(`  ${entry.title}`)
     }
     console.log('\nreopen one with: kitcode -r <id>')
   })

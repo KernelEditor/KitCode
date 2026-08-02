@@ -8,7 +8,6 @@ import {
   loadAuth,
   loadProjectConfig,
   loadRuntimeConfig,
-  migrateLegacyHome,
   saveAuth,
   saveConfig,
 } from '../config/store'
@@ -40,7 +39,6 @@ export async function addProvider(
   }
   const config = options.local ? await loadProjectConfig(cwd) : (await loadRuntimeConfig(cwd)).config
   const auth = await loadAuth()
-  const migration = await migrateLegacyHome()
 
   config.providers[detected.id] = detected.config
   auth[detected.id] = key
@@ -69,7 +67,6 @@ export async function addProvider(
 
   rows.push(['config', `${location.path} (${location.scope})`])
   rows.push(['key', `${authPath} — mode 0600, never written into a project directory`])
-  if (migration.migrated) rows.push(['migrated', `copied ${migration.from} into ${migration.to}`])
   rows.push(['next', 'run kitcode to start a session; /model switches models'])
 
   for (const [label, value] of rows) console.log(label.padEnd(LABEL_WIDTH) + value)

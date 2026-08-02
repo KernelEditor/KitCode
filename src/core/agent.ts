@@ -191,6 +191,9 @@ async function consumeStream(
         cfg.usage.record(cfg.modelRef, event.usage)
         hooks.onEvent({ type: 'usage', model: cfg.modelRef, usage: event.usage })
         break
+      case 'rate_limits':
+        hooks.onEvent({ type: 'rate_limits', model: cfg.modelRef, limits: event.limits })
+        break
       case 'tool_call':
         break
       case 'done':
@@ -209,7 +212,11 @@ async function consumeStream(
 function estimateRequestTokens(cfg: AgentConfig, messages: Message[]): number {
   let characters = cfg.system.length
   try {
-    characters += JSON.stringify(messages).length
+    characters += JSON.stringify(messages, (_key, value) =>
+      typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'image'
+        ? `[image:${'#'.repeat(2_000)}]`
+        : value,
+    ).length
     characters += JSON.stringify(cfg.tools.schemas()).length
   } catch {
     // Provider serialization will report malformed/cyclic data. Keep a small

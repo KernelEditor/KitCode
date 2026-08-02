@@ -83,18 +83,22 @@ export function toProviderError(error: unknown, providerId: string): ProviderErr
 export interface ResponseCapture {
   fetch: (input: Parameters<typeof fetch>[0], init?: RequestInit) => Promise<Response>
   succeeded(): boolean
+  headers(): Headers | null
   head(): Promise<string>
 }
 
 export function captureResponseHead(): ResponseCapture {
   let ok = false
+  let responseHeaders: Headers | null = null
   let head: Promise<string> = Promise.resolve('')
   return {
     succeeded: () => ok,
+    headers: () => responseHeaders,
     head: () => head,
     fetch: async (input, init) => {
       const response = await fetch(input, init)
       ok = response.ok
+      responseHeaders = new Headers(response.headers)
       if (!response.body) {
         head = Promise.resolve('')
         return response

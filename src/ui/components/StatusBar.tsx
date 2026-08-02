@@ -199,16 +199,16 @@ function tokens(count: number): string {
 function ContextMeter({
   context,
 }: {
-  context: { window: number | null; used: number }
+  context: { window: number | null; used: number; exact: boolean }
 }) {
   const theme = useTheme()
-  const { window: win, used } = context
-  if (win === null || win <= 0) {
+  const { window: win, used, exact } = context
+  if (!exact || win === null || win <= 0) {
     return (
       <Text>
         <Text dimColor>ctx ? </Text>
         <Text color="gray">▐{'░'.repeat(BAR_WIDTH)}▌</Text>
-        <Text dimColor> {tokens(used)}</Text>
+        <Text dimColor> {exact ? tokens(used) : '?'}{win && win > 0 ? `/${tokens(win)}` : ''}</Text>
       </Text>
     )
   }

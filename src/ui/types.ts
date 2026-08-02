@@ -31,7 +31,7 @@ export interface StatusView {
   sessionMs: number
   turnMs: number | null
   /** Model context window and tokens used by the most recent request. */
-  context: { window: number | null; used: number }
+  context: { window: number | null; used: number; exact: boolean }
 }
 
 export interface PickerItem {
@@ -57,6 +57,7 @@ export interface PromptInputProps {
   pending?: number
   hint?: string
   history: string[]
+  attachments?: string[]
 }
 
 export interface PermissionPromptProps {

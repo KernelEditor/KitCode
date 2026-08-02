@@ -36,7 +36,9 @@ export interface Strings {
   sessionFor: (elapsed: string) => string
   workingFor: (elapsed: string) => string
   titleProvider: string
+  titleLogout: string
   titleSessions: string
+  titleSessionAction: string
   resumed: (id: string, count: number) => string
   sessionsEmpty: string
   providerSet: (id: string, model: string) => string
@@ -67,7 +69,25 @@ export interface Strings {
   mcpDeleteFailed: (name: string, error: string) => string
   mcpNotFound: (name: string) => string
   mcpTools: (count: number) => string
+  mcpEnabled: (name: string, tools: number) => string
+  mcpDisabled: (name: string) => string
+  mcpToggleFailed: (name: string, error: string) => string
   mcpState: Record<string, string>
+  attachUsage: string
+  attachmentAdded: (name: string) => string
+  attachmentsCleared: string
+  compactNothing: string
+  compactDone: (count: number) => string
+  sessionRenameUsage: string
+  sessionRenamed: (title: string) => string
+  sessionDeleteAsk: string
+  sessionDeleted: (id: string) => string
+  sessionExported: (path: string) => string
+  sessionActionResume: string
+  sessionActionRename: string
+  sessionActionDelete: string
+  sessionActionExport: string
+  updateAvailable: (version: string, url: string) => string
   accentSet: (name: string, hex: string) => string
   reasoning: (on: boolean) => string
   effortSet: (value: string) => string
@@ -101,6 +121,8 @@ export interface Strings {
   titlePrompts: string
   titleLang: string
   titleMcpDelete: string
+  titleMcpEnable: string
+  titleMcpDisable: string
   modeLabel: Record<string, string>
   modeChanged: (label: string) => string
 
@@ -136,7 +158,9 @@ const en: Strings = {
   sessionFor: (elapsed) => `up ${elapsed}`,
   workingFor: (elapsed) => `working ${elapsed}`,
   titleProvider: 'Provider',
+  titleLogout: 'Sign out of a provider',
   titleSessions: 'Resume a session',
+  titleSessionAction: 'Session action',
   resumed: (id, count) => `Resumed ${id} — ${count} messages restored`,
   sessionsEmpty: 'No saved sessions yet.',
   providerSet: (id, model) => `Provider: ${id} · model ${model}`,
@@ -157,7 +181,7 @@ const en: Strings = {
   mcpStatus: (connected, failed) => `MCP: ${connected} connected, ${failed} failed`,
   mcpEmpty: 'No MCP servers configured.',
   mcpAddUsage:
-    'List: /mcp list · Delete: /mcp delete [name]\nRemote: /mcp add <name> <https://url>\nLocal: /mcp add <name> -- <command> [args]',
+    'List: /mcp list · Enable/disable: /mcp enable|disable [name] · Delete: /mcp delete [name]\nRemote: /mcp add <name> <https://url>\nLocal: /mcp add <name> -- <command> [args]',
   mcpAddInvalidName: 'MCP name may contain only letters, numbers, _ and - (up to 64 chars).',
   mcpAddInvalidUrl: 'MCP URL must use HTTPS (HTTP is allowed only for localhost).',
   mcpAddHttpArgs: 'An HTTP MCP accepts one URL and no command arguments.',
@@ -169,12 +193,30 @@ const en: Strings = {
   mcpDeleteFailed: (name, error) => `Could not remove MCP "${name}": ${error}`,
   mcpNotFound: (name) => `MCP server "${name}" was not found.`,
   mcpTools: (count) => `${count} tools`,
+  mcpEnabled: (name, tools) => `MCP "${name}" enabled · ${tools} tools`,
+  mcpDisabled: (name) => `MCP "${name}" disabled.`,
+  mcpToggleFailed: (name, error) => `Could not change MCP "${name}": ${error}`,
   mcpState: {
     connected: 'connected',
     connecting: 'connecting',
     error: 'error',
     disabled: 'disabled',
   },
+  attachUsage: 'Usage: /attach <image-or-text-file> · /attach clear',
+  attachmentAdded: (name) => `Attached for the next message: ${name}`,
+  attachmentsCleared: 'Pending attachments cleared.',
+  compactNothing: 'Not enough older conversation to compact yet.',
+  compactDone: (count) => `Context compacted · ${count} older messages replaced with a summary.`,
+  sessionRenameUsage: 'Type the title after the command: /sessions rename <id> <title>',
+  sessionRenamed: (title) => `Session renamed to "${title}".`,
+  sessionDeleteAsk: 'The saved chat file will be deleted. This cannot be undone.',
+  sessionDeleted: (id) => `Session ${id} deleted.`,
+  sessionExported: (path) => `Session exported to ${path}`,
+  sessionActionResume: 'resume',
+  sessionActionRename: 'rename',
+  sessionActionDelete: 'delete',
+  sessionActionExport: 'export Markdown',
+  updateAvailable: (version, url) => `A newer KitCode build is available (${version}): ${url}`,
   accentSet: (name, hex) => `Accent: ${name} (${hex})`,
   reasoning: (on) => `Reasoning ${on ? 'on' : 'off'}`,
   effortSet: (value) => `Effort: ${value}`,
@@ -210,6 +252,8 @@ const en: Strings = {
   titlePrompts: 'Saved prompts',
   titleLang: 'Language',
   titleMcpDelete: 'Remove an MCP server',
+  titleMcpEnable: 'Enable an MCP server',
+  titleMcpDisable: 'Disable an MCP server',
   modeLabel: { normal: 'normal', accept: 'auto-accept edits', plan: 'plan only' },
   modeChanged: (label) => `Mode: ${label}  (shift+tab to cycle)`,
 
@@ -217,7 +261,7 @@ const en: Strings = {
     model: 'switch model',
     login: 'add a provider (url + key)',
     provider: 'switch between configured providers',
-    logout: 'sign out and remove the current provider',
+    logout: 'choose a provider to sign out from',
     effort: 'set reasoning depth',
     thinking: 'toggle reasoning',
     theme: 'change the accent colour',
@@ -230,6 +274,16 @@ const en: Strings = {
     'mcp add': 'connect and save an MCP server',
     'mcp list': 'list MCP servers and connection status',
     'mcp delete': 'disconnect and remove an MCP server',
+    'mcp enable': 'enable and connect an MCP server',
+    'mcp disable': 'disconnect without removing an MCP server',
+    attach: 'attach an image or text file to the next message',
+    compact: 'summarize older context and keep recent turns',
+    checker: 'check local setup without spending model tokens',
+    sessions: 'search and manage saved sessions',
+    'sessions list': 'list saved sessions',
+    'sessions rename': 'rename a saved session',
+    'sessions delete': 'delete a saved session',
+    'sessions export': 'export a session to Markdown',
     config: 'show where the config lives',
     resume: 'reopen a past chat',
     undo: 'undo file edits from the latest message',
@@ -268,7 +322,9 @@ const ru: Strings = {
   sessionFor: (elapsed) => `в работе ${elapsed}`,
   workingFor: (elapsed) => `думает ${elapsed}`,
   titleProvider: 'Провайдер',
+  titleLogout: 'Выбрать API для выхода',
   titleSessions: 'Восстановить сессию',
+  titleSessionAction: 'Действие с сессией',
   resumed: (id, count) => `Сессия ${id} восстановлена — сообщений: ${count}`,
   sessionsEmpty: 'Сохранённых сессий пока нет.',
   providerSet: (id, model) => `Провайдер: ${id} · модель ${model}`,
@@ -289,7 +345,7 @@ const ru: Strings = {
   mcpStatus: (connected, failed) => `MCP: подключено ${connected}, с ошибкой ${failed}`,
   mcpEmpty: 'MCP-серверы пока не добавлены.',
   mcpAddUsage:
-    'Список: /mcp list · Удалить: /mcp delete [имя]\nУдалённый: /mcp add <имя> <https://url>\nЛокальный: /mcp add <имя> -- <команда> [аргументы]',
+    'Список: /mcp list · Вкл/выкл: /mcp enable|disable [имя] · Удалить: /mcp delete [имя]\nУдалённый: /mcp add <имя> <https://url>\nЛокальный: /mcp add <имя> -- <команда> [аргументы]',
   mcpAddInvalidName: 'Имя MCP: только буквы, цифры, _ и - (до 64 символов).',
   mcpAddInvalidUrl: 'URL MCP должен использовать HTTPS (HTTP разрешён только для localhost).',
   mcpAddHttpArgs: 'Для HTTP MCP укажи один URL без аргументов команды.',
@@ -301,12 +357,30 @@ const ru: Strings = {
   mcpDeleteFailed: (name, error) => `Не удалось удалить MCP «${name}»: ${error}`,
   mcpNotFound: (name) => `MCP-сервер «${name}» не найден.`,
   mcpTools: (count) => `инструментов: ${count}`,
+  mcpEnabled: (name, tools) => `MCP «${name}» включён · инструментов: ${tools}`,
+  mcpDisabled: (name) => `MCP «${name}» выключен.`,
+  mcpToggleFailed: (name, error) => `Не удалось изменить MCP «${name}»: ${error}`,
   mcpState: {
     connected: 'подключён',
     connecting: 'подключается',
     error: 'ошибка',
     disabled: 'отключён',
   },
+  attachUsage: 'Использование: /attach <картинка-или-текстовый-файл> · /attach clear',
+  attachmentAdded: (name) => `Прикреплено к следующему сообщению: ${name}`,
+  attachmentsCleared: 'Ожидающие вложения убраны.',
+  compactNothing: 'Пока недостаточно старых сообщений для сжатия контекста.',
+  compactDone: (count) => `Контекст сжат · старых сообщений заменено сводкой: ${count}.`,
+  sessionRenameUsage: 'Допиши название: /sessions rename <id> <название>',
+  sessionRenamed: (title) => `Сессия переименована в «${title}».`,
+  sessionDeleteAsk: 'Файл сохранённого чата будет удалён без возможности восстановления.',
+  sessionDeleted: (id) => `Сессия ${id} удалена.`,
+  sessionExported: (path) => `Сессия экспортирована: ${path}`,
+  sessionActionResume: 'открыть',
+  sessionActionRename: 'переименовать',
+  sessionActionDelete: 'удалить',
+  sessionActionExport: 'экспортировать Markdown',
+  updateAvailable: (version, url) => `Доступна новая версия KitCode (${version}): ${url}`,
   accentSet: (name, hex) => `Цвет: ${name} (${hex})`,
   reasoning: (on) => `Размышления ${on ? 'включены' : 'выключены'}`,
   effortSet: (value) => `Глубина: ${value}`,
@@ -342,6 +416,8 @@ const ru: Strings = {
   titlePrompts: 'Сохранённые промты',
   titleLang: 'Язык',
   titleMcpDelete: 'Удалить MCP-сервер',
+  titleMcpEnable: 'Включить MCP-сервер',
+  titleMcpDisable: 'Выключить MCP-сервер',
   modeLabel: { normal: 'обычный', accept: 'правки без спроса', plan: 'только план' },
   modeChanged: (label) => `Режим: ${label}  (shift+tab — переключить)`,
 
@@ -349,7 +425,7 @@ const ru: Strings = {
     model: 'сменить модель',
     login: 'добавить провайдера (url + ключ)',
     provider: 'переключиться между провайдерами',
-    logout: 'выйти и удалить текущего провайдера',
+    logout: 'выбрать провайдера и удалить его ключ',
     effort: 'глубина размышлений',
     thinking: 'включить/выключить размышления',
     theme: 'сменить цвет акцента',
@@ -362,6 +438,16 @@ const ru: Strings = {
     'mcp add': 'подключить и сохранить MCP-сервер',
     'mcp list': 'список MCP-серверов и их статус',
     'mcp delete': 'отключить и удалить MCP-сервер',
+    'mcp enable': 'включить и подключить MCP-сервер',
+    'mcp disable': 'отключить MCP без удаления',
+    attach: 'прикрепить картинку или текстовый файл к сообщению',
+    compact: 'сжать старый контекст, сохранив последние ходы',
+    checker: 'проверить настройку без траты токенов модели',
+    sessions: 'поиск и управление сохранёнными сессиями',
+    'sessions list': 'список сохранённых сессий',
+    'sessions rename': 'переименовать сессию',
+    'sessions delete': 'удалить сессию',
+    'sessions export': 'экспортировать сессию в Markdown',
     config: 'где лежит конфиг',
     resume: 'открыть прошлый чат',
     undo: 'откатить правки файлов из последнего сообщения',

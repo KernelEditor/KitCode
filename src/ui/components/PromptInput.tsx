@@ -19,6 +19,7 @@ export const PromptInput = memo(function PromptInput({
   pending,
   hint,
   history,
+  attachments = [],
 }: PromptInputProps) {
   const theme = useTheme()
   const strings = useStrings()
@@ -155,6 +156,12 @@ export const PromptInput = memo(function PromptInput({
         <EditableText value={safeValue} cursor={inputCursor} placeholder={strings.placeholder} />
         {pending && pending > 0 ? <Text dimColor> · {strings.queued(pending)}</Text> : null}
       </Box>
+
+      {attachments.length > 0 && (
+        <Text dimColor>
+          {'  '}📎 {attachments.map(sanitizeTerminalText).join(' · ')}
+        </Text>
+      )}
 
       {disabled && hint && <Text dimColor>  {sanitizeTerminalText(hint)}</Text>}
 

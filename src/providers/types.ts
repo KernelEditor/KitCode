@@ -48,7 +48,27 @@ export interface ToolResultBlock {
   isError?: boolean
 }
 
-export type ContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | ToolResultBlock
+export interface ImageBlock {
+  type: 'image'
+  mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+  data: string
+  name: string
+}
+
+export interface FileBlock {
+  type: 'file'
+  mediaType: string
+  text: string
+  name: string
+}
+
+export type ContentBlock =
+  | TextBlock
+  | ThinkingBlock
+  | ToolUseBlock
+  | ToolResultBlock
+  | ImageBlock
+  | FileBlock
 
 export type MessageRole = 'user' | 'assistant'
 
@@ -88,11 +108,25 @@ export interface RefusalInfo {
   explanation?: string | null
 }
 
+export interface RateLimitBucket {
+  limit?: number
+  remaining?: number
+  reset?: string
+}
+
+export interface RateLimits {
+  requests?: RateLimitBucket
+  tokens?: RateLimitBucket
+  inputTokens?: RateLimitBucket
+  outputTokens?: RateLimitBucket
+}
+
 export type StreamEvent =
   | { type: 'text_delta'; text: string }
   | { type: 'thinking_delta'; text: string }
   | { type: 'tool_call'; id: string; name: string; input: unknown }
   | { type: 'usage'; usage: Usage }
+  | { type: 'rate_limits'; limits: RateLimits }
   | { type: 'done'; stopReason: StopReason; content: ContentBlock[]; refusal?: RefusalInfo }
 
 export type ProviderKind = 'anthropic' | 'openai'

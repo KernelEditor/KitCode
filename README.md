@@ -22,13 +22,17 @@ OpenAI-compatible providers, including OpenRouter and local model servers.
 - shell commands with approval prompts;
 - `normal`, `accept`, and `plan` modes;
 - persistent and resumable sessions with native terminal scrollback;
+- searchable session management with rename, delete, and Markdown export;
 - input history with the `↑` and `↓` keys;
 - queued messages while the agent is working;
-- token, estimated cost, and context-window indicators;
+- image and UTF-8 text attachments;
+- manual and automatic context compaction;
+- token, estimated cost, exact context-window, and provider rate-limit indicators;
 - automatic file checkpoints with `/undo`;
 - detected project checks after file edits;
 - model and provider switching from the TUI;
-- MCP servers, skills, and subagents;
+- live MCP add, enable, disable, and delete operations, plus skills and subagents;
+- a local `/checker` report for the runtime, provider, session, context, and MCP setup;
 - English and Russian interfaces with configurable accents.
 
 ## Requirements
@@ -97,17 +101,24 @@ Press `/` to open the command list.
 | --- | --- |
 | `/model` | Select a model. |
 | `/provider` | Switch providers. |
-| `/login` · `/logout` | Add or remove the current provider. |
+| `/login` · `/logout [provider]` | Add a provider or choose exactly which provider to remove. |
 | `/effort` · `/thinking` | Configure reasoning depth and output. |
 | `/resume` · `/clear` | Resume a session or start a new one. |
+| `/sessions` | Search sessions, then resume, rename, delete, or export one. |
+| `/sessions rename <id> <title>` | Give a saved session a title. |
+| `/sessions export <id> [path]` | Export a session to a private Markdown file (default: `.kitcode-exports/`). |
+| `/attach <path>` · `/attach clear` | Attach a supported image or UTF-8 text file to the next message. |
+| `/compact` | Replace older conversation context with a concise model-generated summary. |
 | `/undo` | Undo built-in file edits from the latest message. |
-| `/usage` | Show tokens, requests, cost, and provider-reported balance or key limit when available. |
+| `/usage` | Show tokens, requests, cost, balance/key limits, and response rate-limit headers when available. |
+| `/checker` | Check the local setup and provider model listing without sending a paid chat request. |
 | `/prompt` | Insert a saved prompt. |
 | `/prompt save <name>` | Save the latest message as a prompt. |
 | `/skills` | Show discovered skills. |
 | `/mcp add <name> <https://url>` | Add and connect a remote MCP server. |
 | `/mcp add <name> -- <command> [args]` | Add and connect a local MCP server. |
 | `/mcp list` | Show configured MCP servers and connection status. |
+| `/mcp enable <name>` · `/mcp disable <name>` | Connect or disconnect an MCP server without removing it. |
 | `/mcp delete <name>` | Disconnect and remove an MCP server. |
 | `/theme` · `/lang` | Change the accent or interface language. |
 | `/config` | Show the active config. |
@@ -133,8 +144,13 @@ Messages entered while the agent is running are queued and processed in order.
 - `plan` — the agent explores the project and returns a plan without changing files.
 
 The lower status panel shows the active mode, model, and usage. A left-to-right context capsule
-stays on the right, with the connected MCP count below it. Completed output is committed to
+stays on the right, changing from green to yellow at 60% and red at 85%, with the connected MCP
+count below it. `ctx ?` means the provider has not returned exact usage for the current model yet.
+Completed output is committed to
 normal terminal scrollback, so it remains smooth to scroll while a response is streaming.
+
+When exact usage reaches 80% of a known context window, KitCode automatically summarizes older
+turns while keeping the latest three user turns. `/compact` runs the same operation manually.
 
 Before the built-in `write` and `edit` tools change a file, KitCode creates a private checkpoint.
 `/undo` restores the latest checkpoint and leaves files with newer manual changes untouched.
@@ -172,12 +188,13 @@ Minimal manual provider configuration:
 }
 ```
 
-The main settings are `model`, `effort`, `thinking`, `maxTokens`, `budget`, `diagnostics`, `theme`,
-`permissions`, `providers`, and `mcp`. `budget` controls local per-message safety limits for model
+The main settings are `model`, `effort`, `thinking`, `maxTokens`, `budget`, `diagnostics`, `updates`,
+`theme`, `permissions`, `providers`, and `mcp`. `budget` controls local per-message safety limits for model
 requests, tokens, estimated cost (when model pricing is available), and subagents. These values are
 not the provider's account balance or rate limits. `diagnostics.autoRun`
 enables checks after file edits; `diagnostics.commands` can replace automatic detection with up to
-eight explicit commands. Manual editing is usually unnecessary: add a provider during onboarding
+eight explicit commands. The GitHub startup check is present but disabled by default with
+`updates.checkOnStart: false`; no update request is made in that state. Manual editing is usually unnecessary: add a provider during onboarding
 or with `/login`.
 
 Project settings and project skills are enabled after reviewing the workspace and running:
@@ -197,6 +214,8 @@ immediately without a restart:
 /mcp add docs https://mcp.example.com/mcp
 /mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem .
 /mcp list
+/mcp disable filesystem
+/mcp enable filesystem
 /mcp delete filesystem
 ```
 
@@ -221,6 +240,9 @@ config file:
 
 A skill is a directory containing a `SKILL.md` file. Global skills live in
 `~/.kitcode/skills`; project skills live in `./.kitcode/skills`.
+
+Attachments support PNG, JPEG, GIF, and WebP images up to 10 MB, plus UTF-8 text files up to
+256 KB. File contents are sent only when the attachment is submitted with a message.
 
 ## Development
 

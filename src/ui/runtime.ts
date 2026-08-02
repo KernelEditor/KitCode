@@ -4,7 +4,10 @@ import type { McpServerConfig } from '../config/schema'
 import type { McpServerState } from '../mcp/client'
 import type { ProviderBalance } from '../providers/balance'
 import type { Effort, Message } from '../providers/types'
+import type { ContentBlock } from '../providers/types'
 import type { UsageSummary } from '../core/usage'
+import type { CompactResult } from '../core/compact'
+import type { UpdateCheck } from '../core/update'
 import type { Lang } from './i18n'
 import type { PickerItem } from './types'
 
@@ -15,11 +18,19 @@ export interface Runtime {
   currentProviderId(): string | undefined
   listProviderItems(): PickerItem[]
   useProvider(id: string): Promise<string>
-  logout(): Promise<string | undefined>
+  logout(providerId: string): Promise<{
+    removed: string
+    wasActive: boolean
+    nextModel?: string
+  }>
   configPath(): string
   sessionId(): string
+  newSession(): Promise<string>
   listSessionItems(): Promise<PickerItem[]>
   resumeSession(id: string): Promise<Message[]>
+  renameSession(id: string, title: string): Promise<string>
+  deleteSession(id: string): Promise<{ id: string; wasActive: boolean; newSessionId?: string }>
+  exportSession(id: string, destination?: string): Promise<string>
   listSkills(): { name: string; description: string }[]
   getModelRef(): string
   setModelRef(ref: string): Promise<void>
@@ -39,19 +50,25 @@ export interface Runtime {
   mcpServers(): McpServerState[]
   addMcpServer(name: string, config: McpServerConfig): Promise<McpServerState>
   removeMcpServer(name: string): Promise<void>
+  setMcpEnabled(name: string, enabled: boolean): Promise<McpServerState>
   /** Context-window size and exact usage of the most recent request. */
-  modelContext(): { window: number | null; used: number }
+  modelContext(): { window: number | null; used: number; exact: boolean }
   subscribeContext(listener: () => void): () => void
   resetContext(): void
   undoLastCheckpoint(): Promise<UndoResult>
   usageLine(): string
   usageReport(): string
+  rateLimitsReport(): string | null
   providerBalance(): Promise<ProviderBalance[] | null>
   usageParts(): UsageSummary
   listModelItems(): Promise<PickerItem[]>
   listPromptItems(): Promise<PickerItem[]>
   readPrompt(slug: string): Promise<string>
   savePrompt(name: string, body: string): Promise<void>
+  loadAttachment(path: string): Promise<ContentBlock>
+  compact(history: Message[], signal: AbortSignal): Promise<CompactResult>
+  checkerReport(): Promise<string>
+  startupUpdateCheck(): Promise<UpdateCheck> | null
   run(history: Message[], hooks: AgentHooks, signal: AbortSignal): Promise<Message[]>
   persist(history: Message[]): Promise<void>
 }

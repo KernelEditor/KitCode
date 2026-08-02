@@ -1,4 +1,4 @@
-import type { Message, StopReason, Usage } from '../providers/types'
+import type { Message, RateLimits, StopReason, Usage } from '../providers/types'
 import type { ToolDisplay } from '../tools/types'
 
 export interface PermissionRequest {
@@ -18,6 +18,7 @@ export type AgentEvent =
   | { type: 'tool_start'; id: string; name: string; summary: string }
   | { type: 'tool_end'; id: string; isError: boolean; content: string; display?: ToolDisplay }
   | { type: 'usage'; model: string; usage: Usage }
+  | { type: 'rate_limits'; model: string; limits: RateLimits }
   | { type: 'turn_end'; stopReason: StopReason }
   | { type: 'notice'; level: 'info' | 'warn' | 'error'; text: string }
 
@@ -42,6 +43,7 @@ export interface ContextUsage {
 
 export interface SessionState {
   id: string
+  title?: string
   cwd: string
   createdAt: string
   updatedAt: string

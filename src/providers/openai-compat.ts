@@ -9,6 +9,7 @@ import {
 } from './errors'
 import { modelInfoFromRaw } from './model-info'
 import { pricingFor } from './pricing'
+import { parseRateLimits } from './rate-limits'
 import { emptyUsage } from './types'
 import type {
   ChatRequest,
@@ -74,6 +75,7 @@ async function* streamTurn(
   let finishReason: string | null = null
   let aborted = false
   let usage = emptyUsage()
+  let sawUsage = false
   let recognised = 0
   const calls = new Map<number, PartialCall>()
   const capture = captureResponseHead()
@@ -92,7 +94,10 @@ async function* streamTurn(
     )
 
     for await (const chunk of stream) {
-      if (chunk.usage) usage = toUsage(chunk.usage)
+      if (chunk.usage) {
+        usage = toUsage(chunk.usage)
+        sawUsage = true
+      }
       if (!Array.isArray(chunk.choices)) continue
       recognised += 1
       const choice = chunk.choices[0]
@@ -111,13 +116,19 @@ async function* streamTurn(
       for (const call of delta.tool_calls ?? []) accumulate(calls, call)
     }
   } catch (error) {
-    if (!isUserAbort(error, req.signal)) throw toProviderError(error, providerId)
+    if (!isUserAbort(error, req.signal)) {
+      const limits = parseRateLimits(capture.headers())
+      if (limits) yield { type: 'rate_limits', limits }
+      throw toProviderError(error, providerId)
+    }
     aborted = true
   }
 
   const content = toContentBlocks(thinking, text, calls)
   if (aborted || req.signal?.aborted) {
-    yield { type: 'usage', usage }
+    if (sawUsage) yield { type: 'usage', usage }
+    const limits = parseRateLimits(capture.headers())
+    if (limits) yield { type: 'rate_limits', limits }
     yield { type: 'done', stopReason: 'aborted', content }
     return
   }
@@ -129,7 +140,9 @@ async function* streamTurn(
       yield { type: 'tool_call', id: block.id, name: block.name, input: block.input }
     }
   }
-  yield { type: 'usage', usage }
+  if (sawUsage) yield { type: 'usage', usage }
+  const limits = parseRateLimits(capture.headers())
+  if (limits) yield { type: 'rate_limits', limits }
   yield { type: 'done', stopReason: resolveStop(finishReason, calls.size > 0), content }
 }
 
@@ -210,8 +223,24 @@ function toUserMessages(content: ContentBlock[]): OpenAI.Chat.ChatCompletionMess
       out.push({ role: 'tool', tool_call_id: block.toolUseId, content: block.content })
     }
   }
-  const text = joinText(content)
-  if (text) out.push({ role: 'user', content: text })
+  const parts: OpenAI.Chat.ChatCompletionContentPart[] = []
+  for (const block of content) {
+    if (block.type === 'text') parts.push({ type: 'text', text: block.text })
+    if (block.type === 'file') {
+      parts.push({ type: 'text', text: `[Attached file: ${block.name}]\n${block.text}` })
+    }
+    if (block.type === 'image') {
+      parts.push({
+        type: 'image_url',
+        image_url: { url: `data:${block.mediaType};base64,${block.data}` },
+      })
+    }
+  }
+  if (parts.length === 1 && parts[0]?.type === 'text') {
+    out.push({ role: 'user', content: parts[0].text })
+  } else if (parts.length > 0) {
+    out.push({ role: 'user', content: parts })
+  }
   return out
 }
 

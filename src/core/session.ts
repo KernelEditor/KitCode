@@ -1,14 +1,16 @@
 import { randomBytes } from 'node:crypto'
-import { readFile, readdir, rename, stat, writeFile } from 'node:fs/promises'
+import { readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { ensureDir, sessionsDir } from '../config/paths'
-import type { Message, Usage } from '../providers/types'
+import { redactSecrets } from '../providers/errors'
+import type { ContentBlock, Message, Usage } from '../providers/types'
 import type { ContextUsage, SessionState, UsageEntry } from './types'
 
 const MAX_SESSION_BYTES = 50_000_000
 
 export interface SessionSummary {
   id: string
+  title?: string
   cwd: string
   model: string
   updatedAt: string
@@ -73,6 +75,7 @@ export async function listSessions(limit = 20): Promise<SessionSummary[]> {
     if (state) {
       summaries.push({
         id: state.id,
+        title: state.title,
         cwd: state.cwd,
         model: state.model,
         updatedAt: state.updatedAt,
@@ -81,6 +84,46 @@ export async function listSessions(limit = 20): Promise<SessionSummary[]> {
     }
   }
   return summaries
+}
+
+export async function renameSession(query: string, title: string): Promise<SessionState> {
+  const id = await resolveSessionId(query)
+  const trimmed = title.trim().replace(/[\r\n\0-\x1f\x7f]+/g, ' ').slice(0, 120)
+  if (!trimmed) throw new Error('Give the session a non-empty title.')
+  const state = await loadSession(id)
+  state.title = trimmed
+  await saveSession(state)
+  return state
+}
+
+export async function deleteSession(query: string): Promise<string> {
+  const id = await resolveSessionId(query)
+  assertSessionId(id)
+  await unlink(path.join(sessionsDir, `${id}.json`)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') throw new Error(`Session no longer exists: ${id}`)
+    throw error
+  })
+  return id
+}
+
+export async function exportSession(
+  query: string,
+  destination: string,
+): Promise<{ id: string; path: string }> {
+  const id = await resolveSessionId(query)
+  const state = await loadSession(id)
+  const target = await resolveExportTarget(destination, state)
+  await writeFile(target, renderSessionMarkdown(state), {
+    encoding: 'utf8',
+    mode: 0o600,
+    flag: 'wx',
+  }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'EEXIST') {
+      throw new Error(`Export already exists; choose another path: ${target}`)
+    }
+    throw error
+  })
+  return { id, path: target }
 }
 
 export async function latestSessionFor(cwd: string): Promise<SessionState | null> {
@@ -142,6 +185,7 @@ function readState(raw: string): SessionState | null {
   if (typeof state.id !== 'string' || !Array.isArray(state.messages)) return null
   return {
     id: state.id,
+    title: typeof state.title === 'string' ? state.title.slice(0, 120) : undefined,
     cwd: typeof state.cwd === 'string' ? state.cwd : '',
     createdAt: typeof state.createdAt === 'string' ? state.createdAt : '',
     updatedAt: typeof state.updatedAt === 'string' ? state.updatedAt : '',
@@ -150,6 +194,60 @@ function readState(raw: string): SessionState | null {
     usage: Array.isArray(state.usage) ? (state.usage as UsageEntry[]) : [],
     context: readContextUsage(state.context),
   }
+}
+
+async function resolveExportTarget(destination: string, state: SessionState): Promise<string> {
+  const resolved = path.resolve(destination)
+  const info = await stat(resolved).catch(() => null)
+  if (info?.isDirectory()) {
+    return path.join(resolved, exportFileName(state))
+  }
+  if (info) throw new Error(`Export destination is not a directory: ${resolved}`)
+  const parent = await stat(path.dirname(resolved)).catch(() => null)
+  if (!parent?.isDirectory()) throw new Error(`Export directory does not exist: ${path.dirname(resolved)}`)
+  return resolved
+}
+
+function exportFileName(state: SessionState): string {
+  const title = state.title
+    ?.toLowerCase()
+    .replace(/[^a-z0-9а-яё]+/giu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48)
+  return `kitcode-session-${title || shortSessionId(state.id)}.md`
+}
+
+function renderSessionMarkdown(state: SessionState): string {
+  const lines = [
+    `# ${state.title || `KitCode session ${shortSessionId(state.id)}`}`,
+    '',
+    `- Session: ${state.id}`,
+    `- Workspace: ${state.cwd}`,
+    `- Model: ${state.model || 'unknown'}`,
+    `- Updated: ${state.updatedAt}`,
+    '',
+  ]
+  for (const message of state.messages) {
+    const rendered = renderMessage(message.content)
+    if (!rendered) continue
+    lines.push(`## ${message.role === 'user' ? 'User' : 'Assistant'}`, '', rendered, '')
+  }
+  return `${redactSecrets(lines.join('\n')).trimEnd()}\n`
+}
+
+function renderMessage(content: ContentBlock[]): string {
+  const sections: string[] = []
+  for (const block of content) {
+    if (block.type === 'text') sections.push(block.text)
+    else if (block.type === 'image') sections.push(`[Image attached: ${block.name}]`)
+    else if (block.type === 'file') sections.push(`[File attached: ${block.name}]\n\n${block.text}`)
+    else if (block.type === 'tool_use') sections.push(`> Tool: ${block.name}`)
+    else if (block.type === 'tool_result') {
+      sections.push(`> Tool result${block.isError ? ' (error)' : ''}:\n> ${block.content.replace(/\n/g, '\n> ')}`)
+    }
+    // Private model thinking is deliberately not included in exports.
+  }
+  return sections.join('\n\n').trim()
 }
 
 function readContextUsage(value: unknown): ContextUsage | undefined {

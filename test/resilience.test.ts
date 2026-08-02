@@ -97,6 +97,33 @@ async function failure(promise: Promise<unknown>): Promise<unknown> {
 }
 
 describe('transient provider faults', () => {
+  it('forwards provider rate-limit headers with a successful streamed response', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, {
+        'content-type': 'text/event-stream',
+        'x-ratelimit-limit-requests': '100',
+        'x-ratelimit-remaining-requests': '87',
+        'x-ratelimit-reset-requests': '2s',
+      })
+      res.write(sseChunk({ role: 'assistant', content: 'ok' }, 'stop'))
+      res.write('data: [DONE]\n\n')
+      res.end()
+    })
+    const provider = createOpenAiProvider({
+      id: 'limited',
+      apiKey: 'sk-test',
+      baseUrl: `${baseUrl}/v1`,
+    })
+
+    const events = await collect(provider.stream(chatRequest()))
+
+    expect(events).toContainEqual({
+      type: 'rate_limits',
+      limits: { requests: { limit: 100, remaining: 87, reset: '2s' } },
+    })
+    expect(events.some((event) => event.type === 'usage')).toBe(false)
+  })
+
   it('retries a 503 and hands the caller a normal streamed result', async () => {
     const seen: string[] = []
     const baseUrl = await startServer((req, res) => {

@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { chmod, cp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { z } from 'zod'
 import type { ConfigLocation } from './paths'
@@ -9,8 +8,6 @@ import {
   configPath,
   ensureDir,
   homeDir,
-  homeOverridden,
-  legacyHomeDir,
   projectConfigPath,
   resolveConfigLocation,
 } from './paths'
@@ -20,55 +17,17 @@ import { isWorkspaceTrusted } from './trust'
 
 let active: ConfigLocation | undefined
 
-export interface HomeMigration {
-  migrated: boolean
-  from?: string
-  to?: string
-}
-
-let homeMigration: Promise<HomeMigration> | undefined
-
-export function migrateLegacyHome(): Promise<HomeMigration> {
-  homeMigration ??= copyLegacyHome()
-  return homeMigration
-}
-
-async function copyLegacyHome(): Promise<HomeMigration> {
-  if (homeOverridden) {
-    return { migrated: false }
-  }
-  if (existsSync(homeDir)) {
-    await hardenDefaultHome()
-    return { migrated: false }
-  }
-  if (!existsSync(legacyHomeDir)) return { migrated: false }
-  await cp(legacyHomeDir, homeDir, { recursive: true })
-  await hardenDefaultHome()
-  return { migrated: true, from: legacyHomeDir, to: homeDir }
-}
-
-async function hardenDefaultHome(): Promise<void> {
-  await chmod(homeDir, 0o700)
-  try {
-    await chmod(authPath, 0o600)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-  }
-}
-
 export async function configLocation(): Promise<ConfigLocation> {
   active ??= await resolveConfigLocation()
   return active
 }
 
 export async function loadConfig(cwd?: string): Promise<Config> {
-  await migrateLegacyHome()
   const location = await resolveConfigLocation(cwd)
   return loadConfigAt(location)
 }
 
 export async function loadProjectConfig(dir: string): Promise<Config> {
-  await migrateLegacyHome()
   return loadConfigAt({ path: projectConfigPath(dir), scope: 'project' })
 }
 
@@ -79,7 +38,6 @@ export interface RuntimeConfigLoad {
 
 /** Load executable project settings only after the workspace was explicitly trusted. */
 export async function loadRuntimeConfig(cwd: string): Promise<RuntimeConfigLoad> {
-  await migrateLegacyHome()
   const location = await resolveConfigLocation(cwd)
   if (location.scope === 'project' && !(await isWorkspaceTrusted(cwd))) {
     const ignoredProject = location
@@ -99,7 +57,6 @@ async function loadConfigAt(location: ConfigLocation): Promise<Config> {
 }
 
 export async function saveConfig(config: Config): Promise<void> {
-  await migrateLegacyHome()
   const location = await configLocation()
   await writeJsonAtomic(location.path, config)
 }
@@ -113,7 +70,7 @@ export async function initProjectConfig(dir: string): Promise<ConfigLocation> {
 }
 
 export async function loadAuth(): Promise<AuthFile> {
-  await migrateLegacyHome()
+  await hardenPrivateHome()
   const raw = await readJson(authPath)
   if (raw === undefined) return {}
   await chmod(authPath, 0o600)
@@ -123,8 +80,15 @@ export async function loadAuth(): Promise<AuthFile> {
 }
 
 export async function saveAuth(auth: AuthFile): Promise<void> {
-  await migrateLegacyHome()
   await writeJsonAtomic(authPath, auth, 0o600)
+}
+
+async function hardenPrivateHome(): Promise<void> {
+  try {
+    await chmod(homeDir, 0o700)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+  }
 }
 
 export function resolveApiKey(

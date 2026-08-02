@@ -2,10 +2,11 @@ import { Box, useApp } from 'ink'
 import { execFile, execFileSync } from 'node:child_process'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from '../core/types'
+import { attachmentLabel } from '../core/attachments'
 import { parseMcpAddArgs } from '../mcp/add'
 import type { McpAddError } from '../mcp/add'
 import type { McpServerState } from '../mcp/client'
-import type { Effort, Message } from '../providers/types'
+import type { ContentBlock, Effort, Message } from '../providers/types'
 import { COMMANDS, closestCommand } from './commands'
 import { Confirm } from './components/Confirm'
 import { LanguagePicker } from './components/LanguagePicker'
@@ -30,7 +31,20 @@ const STREAM_FRAME_MS = 50
 
 // Slash commands that affect conversation state and must wait until the agent
 // finishes the current turn before running.
-const NEEDS_IDLE = new Set<string>(['clear', 'resume', 'logout', 'bypass', 'undo'])
+const NEEDS_IDLE = new Set<string>([
+  'clear',
+  'resume',
+  'sessions',
+  'logout',
+  'bypass',
+  'undo',
+  'compact',
+  'checker',
+])
+
+type QueuedItem =
+  | { kind: 'command'; line: string }
+  | { kind: 'message'; text: string; content: ContentBlock[] }
 
 type Overlay =
   | { kind: 'none' }
@@ -64,7 +78,8 @@ export function App({
   )
   const [busy, setBusy] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
-  const queueRef = useRef<string[]>([])
+  const queueRef = useRef<QueuedItem[]>([])
+  const [attachments, setAttachments] = useState<ContentBlock[]>([])
   const [overlay, setOverlay] = useState<Overlay>({ kind: 'none' })
   const [accent, setAccent] = useState(runtime.getAccent())
   const [lang, setLang] = useState<Lang | undefined>(runtime.getLang())
@@ -179,6 +194,20 @@ export function App({
     [flushTranscriptEvents],
   )
 
+  useEffect(() => {
+    const check = runtime.startupUpdateCheck()
+    if (!check) return
+    let active = true
+    void check.then((result) => {
+      if (active && result.status === 'available') {
+        notice('info', strings.updateAvailable(result.latest.slice(0, 12), result.url))
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [notice, runtime, strings])
+
   const ask = useCallback(
     (title: string, body?: string, danger?: boolean) =>
       new Promise<boolean>((resolve) => {
@@ -268,7 +297,11 @@ export function App({
 
   const handleSlash = useCallback(
     async (line: string) => {
-      const [command = '', ...rest] = line.slice(1).split(/\s+/)
+      const body = line.slice(1).trim()
+      const firstSpace = body.search(/\s/)
+      const command = (firstSpace === -1 ? body : body.slice(0, firstSpace)).toLowerCase()
+      const rawRest = firstSpace === -1 ? '' : body.slice(firstSpace).trim()
+      const rest = rawRest ? rawRest.split(/\s+/) : []
       setInput('')
 
       switch (command) {
@@ -289,11 +322,14 @@ export function App({
           return
 
         case 'clear':
+          await runtime.newSession()
           history.current = []
+          setAttachments([])
           setPromptHistory([])
           setTranscript(emptyTranscript())
           setTranscriptRevision((revision) => revision + 1)
-          runtime.resetContext()
+          sessionStart.current = Date.now()
+          turns.current = 0
           void runtime
             .persist([])
             .catch((error) =>
@@ -321,6 +357,99 @@ export function App({
               ),
             )
             setTranscriptRevision((revision) => revision + 1)
+            sessionStart.current = Date.now()
+            turns.current = 0
+          } catch (error) {
+            notice('error', error instanceof Error ? error.message : String(error))
+          }
+          forceRender((n) => n + 1)
+          return
+        }
+
+        case 'sessions': {
+          const items = await runtime.listSessionItems()
+          if (items.length === 0) {
+            notice('info', strings.sessionsEmpty)
+            return
+          }
+
+          let action: string | undefined = rest[0]?.toLowerCase()
+          if (action === 'list') {
+            notice(
+              'info',
+              items.map((item) => `${item.label}${item.hint ? ` — ${item.hint}` : ''}`).join('\n'),
+            )
+            return
+          }
+
+          let id = action ? rest[1] : undefined
+          if (!id) id = (await pick(strings.titleSessions, items)) ?? undefined
+          if (!id) return
+          const matches = items.filter((item) => item.key === id || item.key.includes(id as string))
+          if (matches.length !== 1) {
+            notice('warn', `No saved session matches "${id}".`)
+            return
+          }
+          id = matches[0]?.key ?? id
+
+          if (!action) {
+            action =
+              (await pick(strings.titleSessionAction, [
+                { key: 'resume', label: strings.sessionActionResume },
+                { key: 'rename', label: strings.sessionActionRename },
+                { key: 'delete', label: strings.sessionActionDelete },
+                { key: 'export', label: strings.sessionActionExport },
+              ])) ?? undefined
+          }
+          if (!action) return
+
+          try {
+            if (action === 'resume') {
+              const restored = await runtime.resumeSession(id)
+              history.current = restored
+              setAttachments([])
+              setPromptHistory(inputHistoryFromMessages(restored))
+              setTranscript(
+                pushNotice(fromHistory(restored), 'info', strings.resumed(id.slice(-6), restored.length)),
+              )
+              setTranscriptRevision((revision) => revision + 1)
+              sessionStart.current = Date.now()
+              turns.current = 0
+            } else if (action === 'rename') {
+              const title = rest.slice(2).join(' ').trim()
+              if (!title) {
+                setInput(`/sessions rename ${id} `)
+                notice('info', strings.sessionRenameUsage)
+                return
+              }
+              notice('info', strings.sessionRenamed(await runtime.renameSession(id, title)))
+            } else if (action === 'delete') {
+              if (!(await ask(`${strings.sessionActionDelete}: ${id.slice(-6)}?`, strings.sessionDeleteAsk, true))) {
+                return
+              }
+              const result = await runtime.deleteSession(id)
+              const deletedMessage = strings.sessionDeleted(result.id.slice(-6))
+              if (result.wasActive) {
+                history.current = []
+                setAttachments([])
+                setPromptHistory([])
+                setTranscript(pushNotice(emptyTranscript(), 'info', deletedMessage))
+                setTranscriptRevision((revision) => revision + 1)
+                sessionStart.current = Date.now()
+                turns.current = 0
+                void runtime.persist([]).catch((error) =>
+                  notice('error', error instanceof Error ? error.message : String(error)),
+                )
+              } else {
+                notice('info', deletedMessage)
+              }
+            } else if (action === 'export') {
+              const destination = unquoteArg(rest.slice(2).join(' ').trim()) || undefined
+              notice('info', strings.sessionExported(await runtime.exportSession(id, destination)))
+            } else {
+              notice('warn', 'Usage: /sessions [list|rename|delete|export]')
+              return
+            }
           } catch (error) {
             notice('error', error instanceof Error ? error.message : String(error))
           }
@@ -365,19 +494,45 @@ export function App({
           return
 
         case 'logout': {
-          const current = runtime.currentProviderId()
-          if (!current) {
+          const providers = runtime.listProviderItems()
+          if (providers.length === 0) {
             notice('warn', strings.logoutNothing)
             return
           }
-          if (!(await ask(strings.logoutAsk(current), strings.logoutAskBody, true))) return
-          const removed = await runtime.logout()
-          if (removed) notice('info', strings.loggedOut(removed))
-          history.current = []
-          setPromptHistory([])
-          setTranscript(emptyTranscript())
-          setTranscriptRevision((revision) => revision + 1)
-          runtime.resetContext()
+          let providerId: string | undefined = rest[0]
+          if (!providerId) {
+            providerId =
+              providers.length === 1
+                ? providers[0]?.key
+                : ((await pick(strings.titleLogout, providers)) ?? undefined)
+          }
+          if (!providerId) return
+          if (!providers.some((provider) => provider.key === providerId)) {
+            notice('warn', `Provider "${providerId}" is not configured.`)
+            return
+          }
+          if (!(await ask(strings.logoutAsk(providerId), strings.logoutAskBody, true))) return
+          try {
+            const result = await runtime.logout(providerId)
+            const message = `${strings.loggedOut(result.removed)}${result.nextModel ? `\n${strings.modelSet(result.nextModel)}` : ''}`
+            if (result.wasActive) {
+              await runtime.newSession()
+              history.current = []
+              setAttachments([])
+              setPromptHistory([])
+              setTranscript(pushNotice(emptyTranscript(), 'info', message))
+              setTranscriptRevision((revision) => revision + 1)
+              sessionStart.current = Date.now()
+              turns.current = 0
+              void runtime.persist([]).catch((error) =>
+                notice('error', error instanceof Error ? error.message : String(error)),
+              )
+            } else {
+              notice('info', message)
+            }
+          } catch (error) {
+            notice('error', error instanceof Error ? error.message : String(error))
+          }
           setSetup(runtime.needsSetup())
           forceRender((n) => n + 1)
           return
@@ -421,6 +576,7 @@ export function App({
             'info',
             [
               runtime.usageReport(),
+              runtime.rateLimitsReport(),
               ...balanceLines,
               strings.sessionSummary(
                 formatDuration(Date.now() - sessionStart.current),
@@ -525,6 +681,56 @@ export function App({
             return
           }
 
+          if (action === 'enable' || action === 'disable') {
+            const states = runtime.mcpServers()
+            const enabling = action === 'enable'
+            const candidates = states.filter((state) =>
+              enabling ? state.status === 'disabled' : state.status !== 'disabled',
+            )
+            let name: string | undefined = rest[1]
+            if (!name) {
+              if (candidates.length === 0) {
+                notice('info', strings.mcpEmpty)
+                return
+              }
+              name =
+                (await pick(
+                  enabling ? strings.titleMcpEnable : strings.titleMcpDisable,
+                  candidates.map((state) => ({
+                    key: state.name,
+                    label: state.name,
+                    hint: strings.mcpState[state.status] ?? state.status,
+                  })),
+                )) ?? undefined
+            }
+            if (!name) return
+            if (!states.some((state) => state.name === name)) {
+              notice('warn', strings.mcpNotFound(name))
+              return
+            }
+            try {
+              const state = await runtime.setMcpEnabled(name, enabling)
+              if (enabling && state.status === 'error') {
+                notice('error', strings.mcpToggleFailed(name, state.error ?? 'connection failed'))
+              } else {
+                notice(
+                  'info',
+                  enabling ? strings.mcpEnabled(name, state.toolCount) : strings.mcpDisabled(name),
+                )
+              }
+            } catch (error) {
+              notice(
+                'error',
+                strings.mcpToggleFailed(
+                  name,
+                  error instanceof Error ? error.message : String(error),
+                ),
+              )
+            }
+            forceRender((n) => n + 1)
+            return
+          }
+
           if (action && action !== 'list') {
             notice('warn', strings.mcpAddUsage)
             return
@@ -543,6 +749,78 @@ export function App({
           )
           return
         }
+
+        case 'attach': {
+          if (rawRest.toLowerCase() === 'clear') {
+            setAttachments([])
+            notice('info', strings.attachmentsCleared)
+            return
+          }
+          if (!rawRest) {
+            notice('info', strings.attachUsage)
+            return
+          }
+          if (attachments.length >= 8) {
+            notice('warn', 'At most 8 attachments can be queued for one message.')
+            return
+          }
+          try {
+            const block = await runtime.loadAttachment(rawRest)
+            setAttachments((current) => [...current, block])
+            notice('info', strings.attachmentAdded(attachmentLabel(block) ?? 'attachment'))
+          } catch (error) {
+            notice('error', error instanceof Error ? error.message : String(error))
+          }
+          return
+        }
+
+        case 'compact': {
+          const controller = new AbortController()
+          abort.current = controller
+          setBusy(true)
+          setTurnStart(Date.now())
+          try {
+            const result = await runtime.compact(history.current, controller.signal)
+            if (!result.compacted) {
+              notice('info', strings.compactNothing)
+            } else {
+              history.current = result.history
+              setPromptHistory(inputHistoryFromMessages(result.history))
+              setTranscript(
+                pushNotice(fromHistory(result.history), 'info', strings.compactDone(result.removedMessages)),
+              )
+              setTranscriptRevision((revision) => revision + 1)
+              await runtime.persist(result.history)
+            }
+          } catch (error) {
+            if (!controller.signal.aborted) {
+              notice('error', error instanceof Error ? error.message : String(error))
+            }
+          } finally {
+            abort.current = null
+            setBusy(false)
+            setTurnStart(null)
+            const queue = queueRef.current
+            if (queue.length > 0) {
+              const [next, ...remaining] = queue
+              queueRef.current = remaining
+              setPendingCount(remaining.length)
+              if (next) queueMicrotask(() => enqueueNext(next))
+            } else {
+              setPendingCount(0)
+            }
+          }
+          forceRender((n) => n + 1)
+          return
+        }
+
+        case 'checker':
+          try {
+            notice('info', await runtime.checkerReport())
+          } catch (error) {
+            notice('error', error instanceof Error ? error.message : String(error))
+          }
+          return
 
         case 'theme': {
           const requested = rest[0]
@@ -649,19 +927,17 @@ export function App({
         }
       }
     },
-    [applyAccent, ask, exit, notice, pick, runtime, strings],
+    [applyAccent, ask, attachments, exit, notice, pick, runtime, strings],
   )
 
   const enqueueNext = useCallback(
-    (raw: string) => {
-      const text = raw.trim()
-      if (!text) return
-      if (text.startsWith('/')) {
-        void handleSlash(text)
+    (item: QueuedItem) => {
+      if (item.kind === 'command') {
+        void handleSlash(item.line)
         return
       }
-      setTranscript((state) => pushUser(state, text))
-      history.current = [...history.current, { role: 'user', content: [{ type: 'text', text }] }]
+      setTranscript((state) => pushUser(state, userDisplay(item.text, item.content)))
+      history.current = [...history.current, { role: 'user', content: item.content }]
       void runAgent()
     },
     [handleSlash, runAgent],
@@ -670,31 +946,37 @@ export function App({
   const submit = useCallback(
     (raw: string) => {
       const text = raw.trim()
-      if (!text) return
       if (text.startsWith('/')) {
         // Slash commands can run even while busy (e.g. /effort, /thinking);
         // queue-impacting commands defer until idle.
         setInput('')
         if (busy && slashNeedsIdle(text)) {
-          queueRef.current = [...queueRef.current, text]
+          queueRef.current = [...queueRef.current, { kind: 'command', line: text }]
           setPendingCount(queueRef.current.length)
           return
         }
         void handleSlash(text)
         return
       }
-      setPromptHistory((state) => appendInputHistory(state, text))
+      if (!text && attachments.length === 0) return
+      if (text) setPromptHistory((state) => appendInputHistory(state, text))
       setInput('')
+      const content: ContentBlock[] = [
+        ...(text ? ([{ type: 'text', text }] as ContentBlock[]) : []),
+        ...attachments,
+      ]
+      setAttachments([])
+      const item: QueuedItem = { kind: 'message', text, content }
       if (busy) {
-        queueRef.current = [...queueRef.current, text]
+        queueRef.current = [...queueRef.current, item]
         setPendingCount(queueRef.current.length)
         return
       }
-      setTranscript((state) => pushUser(state, text))
-      history.current = [...history.current, { role: 'user', content: [{ type: 'text', text }] }]
+      setTranscript((state) => pushUser(state, userDisplay(text, content)))
+      history.current = [...history.current, { role: 'user', content }]
       void runAgent()
     },
-    [busy, handleSlash, runAgent],
+    [attachments, busy, handleSlash, runAgent],
   )
 
   useTerminalInput((_char, key) => {
@@ -814,6 +1096,10 @@ export function App({
           pending={pendingCount}
           hint={busy ? strings.escCancel : undefined}
           history={promptHistory}
+          attachments={attachments.flatMap((block) => {
+            const label = attachmentLabel(block)
+            return label ? [label] : []
+          })}
         />
       )}
 
@@ -840,7 +1126,11 @@ function slashNeedsIdle(line: string): boolean {
   const [command = '', subcommand = ''] = line.slice(1).trim().toLowerCase().split(/\s+/)
   return (
     NEEDS_IDLE.has(command) ||
-    (command === 'mcp' && (subcommand === 'add' || subcommand === 'delete'))
+    (command === 'mcp' &&
+      (subcommand === 'add' ||
+        subcommand === 'delete' ||
+        subcommand === 'enable' ||
+        subcommand === 'disable'))
   )
 }
 
@@ -894,6 +1184,23 @@ function userText(message: Message): string {
     .map((block) => (block.type === 'text' ? block.text : ''))
     .join('\n')
     .trim()
+}
+
+function userDisplay(text: string, content: ContentBlock[]): string {
+  const labels = content.flatMap((block) => {
+    const label = attachmentLabel(block)
+    return label ? [`📎 ${label}`] : []
+  })
+  return [text, ...labels].filter(Boolean).join('\n')
+}
+
+function unquoteArg(value: string): string {
+  if (value.length < 2) return value
+  const first = value[0]
+  const last = value.at(-1)
+  return (first === '"' && last === '"') || (first === "'" && last === "'")
+    ? value.slice(1, -1)
+    : value
 }
 
 // Copies text to the system clipboard using the platform's native CLI tool.
