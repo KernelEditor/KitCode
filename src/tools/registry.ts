@@ -13,6 +13,7 @@ export interface ToolRegistry {
   list(): Tool[]
   schemas(): ToolSchema[]
   register(tools: Tool[]): void
+  unregister(names: Iterable<string>): void
 }
 
 export function builtinTools(): Tool[] {
@@ -34,5 +35,8 @@ export function createToolRegistry(tools: Tool[]): ToolRegistry {
     list: () => [...byName.values()],
     schemas: () => [...byName.values()].map(toToolSchema),
     register,
+    unregister(names) {
+      for (const name of names) byName.delete(name)
+    },
   }
 }

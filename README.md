@@ -24,7 +24,7 @@ OpenAI-compatible providers, including OpenRouter and local model servers.
 - persistent and resumable sessions with native terminal scrollback;
 - input history with the `↑` and `↓` keys;
 - queued messages while the agent is working;
-- token, cost, remaining per-message budget, and context-window indicators;
+- token, estimated cost, and context-window indicators;
 - automatic file checkpoints with `/undo`;
 - detected project checks after file edits;
 - model and provider switching from the TUI;
@@ -101,10 +101,14 @@ Press `/` to open the command list.
 | `/effort` · `/thinking` | Configure reasoning depth and output. |
 | `/resume` · `/clear` | Resume a session or start a new one. |
 | `/undo` | Undo built-in file edits from the latest message. |
-| `/usage` | Show tokens, requests, and cost. |
+| `/usage` | Show tokens, requests, cost, and provider-reported balance or key limit when available. |
 | `/prompt` | Insert a saved prompt. |
 | `/prompt save <name>` | Save the latest message as a prompt. |
-| `/skills` · `/mcp` | Show skills and MCP status. |
+| `/skills` | Show discovered skills. |
+| `/mcp add <name> <https://url>` | Add and connect a remote MCP server. |
+| `/mcp add <name> -- <command> [args]` | Add and connect a local MCP server. |
+| `/mcp list` | Show configured MCP servers and connection status. |
+| `/mcp delete <name>` | Disconnect and remove an MCP server. |
 | `/theme` · `/lang` | Change the accent or interface language. |
 | `/config` | Show the active config. |
 | `/bypass` | Toggle approval-free operation. |
@@ -128,8 +132,8 @@ Messages entered while the agent is running are queued and processed in order.
 - `accept` — file edits are accepted automatically;
 - `plan` — the agent explores the project and returns a plan without changing files.
 
-The lower status panel shows the active mode, model, usage, and remaining limits for the current
-message; a left-to-right context capsule stays on the right. Completed output is committed to
+The lower status panel shows the active mode, model, and usage. A left-to-right context capsule
+stays on the right, with the connected MCP count below it. Completed output is committed to
 normal terminal scrollback, so it remains smooth to scroll while a response is streaming.
 
 Before the built-in `write` and `edit` tools change a file, KitCode creates a private checkpoint.
@@ -169,8 +173,9 @@ Minimal manual provider configuration:
 ```
 
 The main settings are `model`, `effort`, `thinking`, `maxTokens`, `budget`, `diagnostics`, `theme`,
-`permissions`, `providers`, and `mcp`. `budget` controls per-message limits for model requests,
-tokens, estimated cost (when model pricing is available), and subagents. `diagnostics.autoRun`
+`permissions`, `providers`, and `mcp`. `budget` controls local per-message safety limits for model
+requests, tokens, estimated cost (when model pricing is available), and subagents. These values are
+not the provider's account balance or rate limits. `diagnostics.autoRun`
 enables checks after file edits; `diagnostics.commands` can replace automatic detection with up to
 eight explicit commands. Manual editing is usually unnecessary: add a provider during onboarding
 or with `/login`.
@@ -185,7 +190,19 @@ Run `kitcode trust --revoke` to return to global settings and skills for that wo
 
 ## MCP and skills
 
-MCP supports local `stdio` servers and remote HTTP servers. Configure them in the `mcp` section:
+MCP supports local `stdio` servers and remote HTTP servers. Add one from the TUI and it connects
+immediately without a restart:
+
+```text
+/mcp add docs https://mcp.example.com/mcp
+/mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem .
+/mcp list
+/mcp delete filesystem
+```
+
+The server is saved to the active config. Use `${env:NAME}` references in a manually configured
+`env` or `headers` object when a server needs a secret; this keeps the secret itself out of the
+config file:
 
 ```json
 {

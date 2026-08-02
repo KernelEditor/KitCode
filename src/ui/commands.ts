@@ -16,7 +16,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'skills' },
   { name: 'bypass' },
   { name: 'usage' },
-  { name: 'mcp' },
+  { name: 'mcp', args: '[add|list|delete]' },
   { name: 'config' },
   { name: 'resume' },
   { name: 'undo' },
@@ -25,10 +25,19 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'exit' },
 ]
 
+const SUBCOMMANDS: SlashCommand[] = [
+  { name: 'mcp add', args: '<name> <url|-- command>' },
+  { name: 'mcp list' },
+  { name: 'mcp delete', args: '[name]' },
+]
+
 export function matchCommands(line: string): SlashCommand[] {
   if (!line.startsWith('/')) return []
   const token = line.slice(1)
-  if (token.includes(' ')) return []
+  if (token.includes(' ')) {
+    const needle = token.toLowerCase()
+    return SUBCOMMANDS.filter((command) => command.name.startsWith(needle))
+  }
   if (token === '') return COMMANDS
 
   const needle = token.toLowerCase()

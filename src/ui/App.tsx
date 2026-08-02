@@ -2,6 +2,9 @@ import { Box, useApp } from 'ink'
 import { execFile, execFileSync } from 'node:child_process'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from '../core/types'
+import { parseMcpAddArgs } from '../mcp/add'
+import type { McpAddError } from '../mcp/add'
+import type { McpServerState } from '../mcp/client'
 import type { Effort, Message } from '../providers/types'
 import { COMMANDS, closestCommand } from './commands'
 import { Confirm } from './components/Confirm'
@@ -14,7 +17,7 @@ import { StatusBar } from './components/StatusBar'
 import { Transcript } from './components/Transcript'
 import { appendInputHistory } from './history'
 import { LANGS, StringsContext, stringsFor } from './i18n'
-import type { Lang } from './i18n'
+import type { Lang, Strings } from './i18n'
 import { useTerminalInput } from './input'
 import type { Runtime } from './runtime'
 import { PRESETS, ThemeContext, makeTheme, resolveAccent } from './theme'
@@ -74,7 +77,6 @@ export function App({
   const [turnStart, setTurnStart] = useState<number | null>(null)
   const [, tick] = useState(0)
   const [context, setContext] = useState(() => runtime.modelContext())
-  const [budget, setBudget] = useState(() => runtime.turnBudget())
   const transcriptEvents = useRef<AgentEvent[]>([])
   const transcriptTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -111,11 +113,6 @@ export function App({
 
   useEffect(
     () => runtime.subscribeContext(() => setContext(runtime.modelContext())),
-    [runtime],
-  )
-
-  useEffect(
-    () => runtime.subscribeBudget(() => setBudget(runtime.turnBudget())),
     [runtime],
   )
 
@@ -408,15 +405,33 @@ export function App({
           return
         }
 
-        case 'usage':
+        case 'usage': {
+          const balance = await runtime.providerBalance()
+          const providerBalances = balance?.filter((item) => item.kind === 'balance') ?? []
+          const keyLimits = balance?.filter((item) => item.kind === 'key-limit') ?? []
+          const balanceLines = [
+            providerBalances.length > 0
+              ? strings.providerBalance(formatBalances(providerBalances))
+              : null,
+            keyLimits.length > 0
+              ? strings.providerKeyRemaining(formatBalances(keyLimits))
+              : null,
+          ]
           notice(
             'info',
-            `${runtime.usageReport()}\n${strings.sessionSummary(
-              formatDuration(Date.now() - sessionStart.current),
-              turns.current,
-            )}`,
+            [
+              runtime.usageReport(),
+              ...balanceLines,
+              strings.sessionSummary(
+                formatDuration(Date.now() - sessionStart.current),
+                turns.current,
+              ),
+            ]
+              .filter((line): line is string => line !== null)
+              .join('\n'),
           )
           return
+        }
 
         case 'provider': {
           const items = runtime.listProviderItems()
@@ -437,8 +452,95 @@ export function App({
         }
 
         case 'mcp': {
+          const action = rest[0]?.toLowerCase()
+          if (action === 'add') {
+            const parsed = parseMcpAddArgs(rest.slice(1))
+            if (!parsed.ok) {
+              const problem = mcpAddProblem(strings, parsed.error)
+              notice(
+                'warn',
+                parsed.error === 'usage' ? problem : `${problem}\n${strings.mcpAddUsage}`,
+              )
+              return
+            }
+            if (runtime.mcpServers().some((state) => state.name === parsed.name)) {
+              notice('warn', strings.mcpExists(parsed.name))
+              return
+            }
+
+            notice('info', strings.mcpConnecting(parsed.name))
+            try {
+              const state = await runtime.addMcpServer(parsed.name, parsed.config)
+              notice('info', strings.mcpAdded(state.name, state.toolCount))
+            } catch (error) {
+              notice(
+                'error',
+                strings.mcpAddFailed(
+                  parsed.name,
+                  error instanceof Error ? error.message : String(error),
+                ),
+              )
+            }
+            forceRender((n) => n + 1)
+            return
+          }
+
+          if (action === 'delete') {
+            const states = runtime.mcpServers()
+            let name: string | undefined = rest[1]
+            if (!name) {
+              if (states.length === 0) {
+                notice('info', strings.mcpEmpty)
+                return
+              }
+              name =
+                (await pick(
+                  strings.titleMcpDelete,
+                  states.map((state) => ({
+                    key: state.name,
+                    label: state.name,
+                    hint: `${strings.mcpState[state.status] ?? state.status} · ${strings.mcpTools(state.toolCount)}`,
+                  })),
+                )) ?? undefined
+              if (!name) return
+            }
+            if (!states.some((state) => state.name === name)) {
+              notice('warn', strings.mcpNotFound(name))
+              return
+            }
+
+            try {
+              await runtime.removeMcpServer(name)
+              notice('info', strings.mcpDeleted(name))
+            } catch (error) {
+              notice(
+                'error',
+                strings.mcpDeleteFailed(
+                  name,
+                  error instanceof Error ? error.message : String(error),
+                ),
+              )
+            }
+            forceRender((n) => n + 1)
+            return
+          }
+
+          if (action && action !== 'list') {
+            notice('warn', strings.mcpAddUsage)
+            return
+          }
+
           const { connected, failed } = runtime.mcpSummary()
-          notice('info', strings.mcpStatus(connected, failed))
+          const states = runtime.mcpServers()
+          const lines = states.map((state) => mcpStateLine(strings, state))
+          notice(
+            failed > 0 ? 'warn' : 'info',
+            [
+              strings.mcpStatus(connected, failed),
+              ...(lines.length > 0 ? lines : [strings.mcpEmpty]),
+              strings.mcpAddUsage,
+            ].join('\n'),
+          )
           return
         }
 
@@ -573,7 +675,7 @@ export function App({
         // Slash commands can run even while busy (e.g. /effort, /thinking);
         // queue-impacting commands defer until idle.
         setInput('')
-        if (busy && NEEDS_IDLE.has(text.slice(1).split(/\s+/)[0] ?? '')) {
+        if (busy && slashNeedsIdle(text)) {
           queueRef.current = [...queueRef.current, text]
           setPendingCount(queueRef.current.length)
           return
@@ -728,11 +830,45 @@ export function App({
           sessionMs: Date.now() - sessionStart.current,
           turnMs: turnStart === null ? null : Date.now() - turnStart,
           context,
-          budget,
         }}
       />
     </Box>,
   )
+}
+
+function slashNeedsIdle(line: string): boolean {
+  const [command = '', subcommand = ''] = line.slice(1).trim().toLowerCase().split(/\s+/)
+  return (
+    NEEDS_IDLE.has(command) ||
+    (command === 'mcp' && (subcommand === 'add' || subcommand === 'delete'))
+  )
+}
+
+function mcpAddProblem(strings: Strings, error: McpAddError): string {
+  switch (error) {
+    case 'invalid-name':
+      return strings.mcpAddInvalidName
+    case 'invalid-url':
+      return strings.mcpAddInvalidUrl
+    case 'http-args':
+      return strings.mcpAddHttpArgs
+    case 'usage':
+      return strings.mcpAddUsage
+  }
+}
+
+function mcpStateLine(strings: Strings, state: McpServerState): string {
+  const mark = state.status === 'connected' ? '●' : state.status === 'error' ? '✗' : '○'
+  const status = strings.mcpState[state.status] ?? state.status
+  const tools = state.status === 'connected' ? ` · ${strings.mcpTools(state.toolCount)}` : ''
+  const error = state.error ? ` · ${state.error}` : ''
+  return `${mark} ${state.name} — ${status}${tools}${error}`
+}
+
+function formatBalances(
+  balances: Array<{ amount: string; currency: string }>,
+): string {
+  return balances.map((item) => `${item.amount} ${item.currency}`).join(' · ')
 }
 
 function lastUserText(messages: Message[]): string {

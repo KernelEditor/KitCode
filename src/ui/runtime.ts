@@ -1,9 +1,12 @@
 import type { AgentHooks } from '../core/types'
 import type { UndoResult } from '../core/checkpoint'
+import type { McpServerConfig } from '../config/schema'
+import type { McpServerState } from '../mcp/client'
+import type { ProviderBalance } from '../providers/balance'
 import type { Effort, Message } from '../providers/types'
 import type { UsageSummary } from '../core/usage'
 import type { Lang } from './i18n'
-import type { PickerItem, TurnBudgetStatus } from './types'
+import type { PickerItem } from './types'
 
 export interface Runtime {
   cwd: string
@@ -33,16 +36,17 @@ export interface Runtime {
   isBypassEnabled(): boolean
   setBypass(enabled: boolean): void
   mcpSummary(): { connected: number; failed: number }
+  mcpServers(): McpServerState[]
+  addMcpServer(name: string, config: McpServerConfig): Promise<McpServerState>
+  removeMcpServer(name: string): Promise<void>
   /** Context-window size and exact usage of the most recent request. */
   modelContext(): { window: number | null; used: number }
   subscribeContext(listener: () => void): () => void
   resetContext(): void
-  /** Remaining limits for the message currently being processed. */
-  turnBudget(): TurnBudgetStatus | null
-  subscribeBudget(listener: () => void): () => void
   undoLastCheckpoint(): Promise<UndoResult>
   usageLine(): string
   usageReport(): string
+  providerBalance(): Promise<ProviderBalance[] | null>
   usageParts(): UsageSummary
   listModelItems(): Promise<PickerItem[]>
   listPromptItems(): Promise<PickerItem[]>

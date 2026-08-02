@@ -42,9 +42,10 @@ export interface Strings {
   providerSet: (id: string, model: string) => string
   providersEmpty: string
   sessionSummary: (elapsed: string, turns: number) => string
+  providerBalance: (balances: string) => string
+  providerKeyRemaining: (balances: string) => string
   noThink: string
   mcpFailed: (count: number) => string
-  budgetLeft: (requests: string, tokens: string, cost: string | null) => string
 
   escCancel: string
   escHelp: string
@@ -53,6 +54,20 @@ export interface Strings {
   configAt: (path: string) => string
   skillsEmpty: string
   mcpStatus: (connected: number, failed: number) => string
+  mcpEmpty: string
+  mcpAddUsage: string
+  mcpAddInvalidName: string
+  mcpAddInvalidUrl: string
+  mcpAddHttpArgs: string
+  mcpExists: (name: string) => string
+  mcpConnecting: (name: string) => string
+  mcpAdded: (name: string, tools: number) => string
+  mcpAddFailed: (name: string, error: string) => string
+  mcpDeleted: (name: string) => string
+  mcpDeleteFailed: (name: string, error: string) => string
+  mcpNotFound: (name: string) => string
+  mcpTools: (count: number) => string
+  mcpState: Record<string, string>
   accentSet: (name: string, hex: string) => string
   reasoning: (on: boolean) => string
   effortSet: (value: string) => string
@@ -85,6 +100,7 @@ export interface Strings {
   titleModel: string
   titlePrompts: string
   titleLang: string
+  titleMcpDelete: string
   modeLabel: Record<string, string>
   modeChanged: (label: string) => string
 
@@ -126,10 +142,10 @@ const en: Strings = {
   providerSet: (id, model) => `Provider: ${id} · model ${model}`,
   providersEmpty: 'No providers configured. Use /login to add one.',
   sessionSummary: (elapsed, turns) => `session ${elapsed} · ${turns} turns`,
+  providerBalance: (balances) => `provider balance: ${balances}`,
+  providerKeyRemaining: (balances) => `API key limit remaining: ${balances}`,
   noThink: 'no-think',
   mcpFailed: (count) => `mcp:${count} failed`,
-  budgetLeft: (requests, tokens, cost) =>
-    `left ${requests} req · ${tokens} tok · ${cost ?? 'cost ?'}`,
 
   escCancel: 'esc to cancel',
   escHelp: 'esc — cancel the running turn',
@@ -139,6 +155,26 @@ const en: Strings = {
   skillsEmpty:
     'No skills installed. Drop a folder with a SKILL.md into ~/.kitcode/skills or ./.kitcode/skills',
   mcpStatus: (connected, failed) => `MCP: ${connected} connected, ${failed} failed`,
+  mcpEmpty: 'No MCP servers configured.',
+  mcpAddUsage:
+    'List: /mcp list · Delete: /mcp delete [name]\nRemote: /mcp add <name> <https://url>\nLocal: /mcp add <name> -- <command> [args]',
+  mcpAddInvalidName: 'MCP name may contain only letters, numbers, _ and - (up to 64 chars).',
+  mcpAddInvalidUrl: 'MCP URL must use HTTPS (HTTP is allowed only for localhost).',
+  mcpAddHttpArgs: 'An HTTP MCP accepts one URL and no command arguments.',
+  mcpExists: (name) => `MCP server "${name}" already exists.`,
+  mcpConnecting: (name) => `Connecting MCP "${name}"…`,
+  mcpAdded: (name, tools) => `MCP "${name}" connected and saved · ${tools} tools`,
+  mcpAddFailed: (name, error) => `Could not add MCP "${name}": ${error}`,
+  mcpDeleted: (name) => `MCP "${name}" disconnected and removed.`,
+  mcpDeleteFailed: (name, error) => `Could not remove MCP "${name}": ${error}`,
+  mcpNotFound: (name) => `MCP server "${name}" was not found.`,
+  mcpTools: (count) => `${count} tools`,
+  mcpState: {
+    connected: 'connected',
+    connecting: 'connecting',
+    error: 'error',
+    disabled: 'disabled',
+  },
   accentSet: (name, hex) => `Accent: ${name} (${hex})`,
   reasoning: (on) => `Reasoning ${on ? 'on' : 'off'}`,
   effortSet: (value) => `Effort: ${value}`,
@@ -173,6 +209,7 @@ const en: Strings = {
   titleModel: 'Model',
   titlePrompts: 'Saved prompts',
   titleLang: 'Language',
+  titleMcpDelete: 'Remove an MCP server',
   modeLabel: { normal: 'normal', accept: 'auto-accept edits', plan: 'plan only' },
   modeChanged: (label) => `Mode: ${label}  (shift+tab to cycle)`,
 
@@ -189,7 +226,10 @@ const en: Strings = {
     skills: 'list installed skills',
     bypass: 'disable approval prompts (asks twice)',
     usage: 'token and cost breakdown',
-    mcp: 'MCP server status',
+    mcp: 'show or add MCP servers',
+    'mcp add': 'connect and save an MCP server',
+    'mcp list': 'list MCP servers and connection status',
+    'mcp delete': 'disconnect and remove an MCP server',
     config: 'show where the config lives',
     resume: 'reopen a past chat',
     undo: 'undo file edits from the latest message',
@@ -234,10 +274,10 @@ const ru: Strings = {
   providerSet: (id, model) => `Провайдер: ${id} · модель ${model}`,
   providersEmpty: 'Провайдеров нет. Добавь через /login.',
   sessionSummary: (elapsed, turns) => `сессия ${elapsed} · ходов: ${turns}`,
+  providerBalance: (balances) => `баланс провайдера: ${balances}`,
+  providerKeyRemaining: (balances) => `остаток лимита API-ключа: ${balances}`,
   noThink: 'без размышлений',
   mcpFailed: (count) => `mcp: ${count} с ошибкой`,
-  budgetLeft: (requests, tokens, cost) =>
-    `осталось ${requests} запр. · ${tokens} ток. · ${cost ?? 'цена ?'}`,
 
   escCancel: 'esc — отменить',
   escHelp: 'esc — отменить текущий ход',
@@ -247,6 +287,26 @@ const ru: Strings = {
   skillsEmpty:
     'Скиллов нет. Положи папку с файлом SKILL.md в ~/.kitcode/skills или ./.kitcode/skills',
   mcpStatus: (connected, failed) => `MCP: подключено ${connected}, с ошибкой ${failed}`,
+  mcpEmpty: 'MCP-серверы пока не добавлены.',
+  mcpAddUsage:
+    'Список: /mcp list · Удалить: /mcp delete [имя]\nУдалённый: /mcp add <имя> <https://url>\nЛокальный: /mcp add <имя> -- <команда> [аргументы]',
+  mcpAddInvalidName: 'Имя MCP: только буквы, цифры, _ и - (до 64 символов).',
+  mcpAddInvalidUrl: 'URL MCP должен использовать HTTPS (HTTP разрешён только для localhost).',
+  mcpAddHttpArgs: 'Для HTTP MCP укажи один URL без аргументов команды.',
+  mcpExists: (name) => `MCP-сервер «${name}» уже существует.`,
+  mcpConnecting: (name) => `Подключаю MCP «${name}»…`,
+  mcpAdded: (name, tools) => `MCP «${name}» подключён и сохранён · инструментов: ${tools}`,
+  mcpAddFailed: (name, error) => `Не удалось добавить MCP «${name}»: ${error}`,
+  mcpDeleted: (name) => `MCP «${name}» отключён и удалён.`,
+  mcpDeleteFailed: (name, error) => `Не удалось удалить MCP «${name}»: ${error}`,
+  mcpNotFound: (name) => `MCP-сервер «${name}» не найден.`,
+  mcpTools: (count) => `инструментов: ${count}`,
+  mcpState: {
+    connected: 'подключён',
+    connecting: 'подключается',
+    error: 'ошибка',
+    disabled: 'отключён',
+  },
   accentSet: (name, hex) => `Цвет: ${name} (${hex})`,
   reasoning: (on) => `Размышления ${on ? 'включены' : 'выключены'}`,
   effortSet: (value) => `Глубина: ${value}`,
@@ -281,6 +341,7 @@ const ru: Strings = {
   titleModel: 'Модель',
   titlePrompts: 'Сохранённые промты',
   titleLang: 'Язык',
+  titleMcpDelete: 'Удалить MCP-сервер',
   modeLabel: { normal: 'обычный', accept: 'правки без спроса', plan: 'только план' },
   modeChanged: (label) => `Режим: ${label}  (shift+tab — переключить)`,
 
@@ -297,7 +358,10 @@ const ru: Strings = {
     skills: 'список установленных скиллов',
     bypass: 'отключить подтверждения (спросит дважды)',
     usage: 'токены и стоимость',
-    mcp: 'статус MCP-серверов',
+    mcp: 'показать или добавить MCP-сервер',
+    'mcp add': 'подключить и сохранить MCP-сервер',
+    'mcp list': 'список MCP-серверов и их статус',
+    'mcp delete': 'отключить и удалить MCP-сервер',
     config: 'где лежит конфиг',
     resume: 'открыть прошлый чат',
     undo: 'откатить правки файлов из последнего сообщения',

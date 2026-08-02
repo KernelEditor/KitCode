@@ -6,7 +6,7 @@ import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
 import { formatDuration } from '../time'
 import { sanitizeTerminalText } from '../sanitize'
-import type { StatusBarProps, TurnBudgetStatus } from '../types'
+import type { StatusBarProps } from '../types'
 
 const BAR_WIDTH = 12
 
@@ -61,10 +61,6 @@ export function StatusBar({ status }: StatusBarProps) {
     )
   }
 
-  if (status.budget) {
-    details.push(<BudgetRemaining key="budget" budget={status.budget} />)
-  }
-
   details.push(
     <Text
       key="elapsed"
@@ -76,21 +72,6 @@ export function StatusBar({ status }: StatusBarProps) {
         : `${strings.working} ${formatDuration(status.turnMs)}`}
     </Text>,
   )
-
-  if (status.mcp.connected > 0) {
-    details.push(
-      <Text key="mcp" color={theme.ok}>
-        mcp:{status.mcp.connected}
-      </Text>,
-    )
-  }
-  if (status.mcp.failed > 0) {
-    details.push(
-      <Text key="mcpfail" color={theme.error}>
-        {strings.mcpFailed(status.mcp.failed)}
-      </Text>,
-    )
-  }
 
   if (status.bypass) {
     details.push(
@@ -119,8 +100,26 @@ export function StatusBar({ status }: StatusBarProps) {
         <Box flexGrow={1} flexShrink={1} flexWrap="wrap">
           <Segments items={primary} />
         </Box>
-        <Box flexShrink={0} marginLeft={2} justifyContent="flex-end">
+        <Box
+          flexShrink={0}
+          marginLeft={2}
+          flexDirection="column"
+          alignItems="flex-end"
+        >
           <ContextMeter context={status.context} />
+          {(status.mcp.connected > 0 || status.mcp.failed > 0) && (
+            <Text>
+              {status.mcp.connected > 0 && (
+                <Text color={theme.ok}>mcp:{status.mcp.connected}</Text>
+              )}
+              {status.mcp.connected > 0 && status.mcp.failed > 0 && (
+                <Text dimColor> · </Text>
+              )}
+              {status.mcp.failed > 0 && (
+                <Text color={theme.error}>{strings.mcpFailed(status.mcp.failed)}</Text>
+              )}
+            </Text>
+          )}
         </Box>
       </Box>
       {details.length > 0 && (
@@ -193,31 +192,6 @@ function tokens(count: number): string {
   if (count < 1000) return String(count)
   const [value, suffix] = count < 1_000_000 ? [count / 1000, 'k'] : [count / 1_000_000, 'M']
   return `${value.toFixed(1).replace(/\.0$/, '')}${suffix}`
-}
-
-function BudgetRemaining({ budget }: { budget: TurnBudgetStatus }) {
-  const theme = useTheme()
-  const strings = useStrings()
-  const ratios = [
-    budget.requests.remaining / budget.requests.limit,
-    budget.tokens.remaining / budget.tokens.limit,
-  ]
-  if (budget.costUsd.remaining !== null) {
-    ratios.push(budget.costUsd.remaining / budget.costUsd.limit)
-  }
-  const closestLimit = Math.min(...ratios)
-  const color = closestLimit <= 0.05 ? theme.error : closestLimit <= 0.2 ? theme.warn : theme.accent
-  const cost = budget.costUsd.remaining === null ? null : dollars(budget.costUsd.remaining)
-
-  return (
-    <Text color={color} bold={closestLimit <= 0.2}>
-      {strings.budgetLeft(
-        String(budget.requests.remaining),
-        tokens(budget.tokens.remaining),
-        cost,
-      )}
-    </Text>
-  )
 }
 
 // Context-window meter. The capsule fills left-to-right and shifts

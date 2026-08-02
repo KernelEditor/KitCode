@@ -2,7 +2,14 @@ import { detectProvider } from '../config/detect'
 import { formatModelRef, parseModelRef } from '../config/schema'
 import type { Config } from '../config/schema'
 import { projectSkillsDir, skillsDir } from '../config/paths'
-import { configLocation, loadAuth, loadRuntimeConfig, saveAuth, saveConfig } from '../config/store'
+import {
+  configLocation,
+  loadAuth,
+  loadRuntimeConfig,
+  resolveApiKey,
+  saveAuth,
+  saveConfig,
+} from '../config/store'
 import { canonicalWorkspace, isWorkspaceTrusted } from '../config/trust'
 import { runTurn } from '../core/agent'
 import type { AgentConfig, ToolLookup } from '../core/agent'
@@ -31,6 +38,7 @@ import {
   usageParts,
 } from '../core/usage'
 import { createMcpManager } from '../mcp/client'
+import { fetchProviderBalance } from '../providers/balance'
 import { loadModels } from '../providers/catalog'
 import { pricingFor } from '../providers/pricing'
 import { createRegistry } from '../providers/registry'
@@ -44,7 +52,7 @@ import { createSkillTool } from '../tools/skill'
 import { createTaskTool } from '../tools/task'
 import type { Lang } from '../ui/i18n'
 import type { Runtime } from '../ui/runtime'
-import type { PickerItem, TurnBudgetStatus } from '../ui/types'
+import type { PickerItem } from '../ui/types'
 
 const PREFERRED = ['claude-opus-5', 'claude-sonnet-5', 'gpt-5', 'claude-opus-4-8']
 
@@ -96,7 +104,16 @@ export async function boot(options: {
 
   const mcp = createMcpManager(config.mcp)
   await mcp.connectAll()
-  tools.register(mcp.tools())
+  let registeredMcpToolNames = new Set<string>()
+  const syncMcpTools = () => {
+    tools.unregister(registeredMcpToolNames)
+    const connected = mcp.tools()
+    tools.register(connected)
+    registeredMcpToolNames = new Set(
+      connected.filter((tool) => tools.get(tool.name) === tool).map((tool) => tool.name),
+    )
+  }
+  syncMcpTools()
   for (const state of mcp.states()) {
     if (state.status === 'error') warnings.push(`MCP "${state.name}": ${state.error ?? 'failed'}`)
   }
@@ -111,11 +128,13 @@ export async function boot(options: {
   }
 
   const usage = createUsageTracker(session.usage, resolvePricing)
-  const system = buildSystemPrompt({
-    cwd: options.cwd,
-    toolNames: tools.list().map((tool) => tool.name),
-    skills: formatSkillCatalogue(skills),
-  })
+  const skillCatalogue = formatSkillCatalogue(skills)
+  const mainSystemPrompt = () =>
+    buildSystemPrompt({
+      cwd: options.cwd,
+      toolNames: tools.list().map((tool) => tool.name),
+      skills: skillCatalogue,
+    })
 
   let modelRef = session.model || config.model || ''
   if (options.modelRef) modelRef = options.modelRef
@@ -205,33 +224,6 @@ export async function boot(options: {
 
   let activeBudget: TurnBudget | undefined
   let activeCheckpoint: FileCheckpoint | undefined
-  const budgetListeners = new Set<() => void>()
-
-  const notifyBudget = () => {
-    for (const listener of budgetListeners) listener()
-  }
-
-  const turnBudgetStatus = (): TurnBudgetStatus | null => {
-    if (!activeBudget) return null
-    const current = activeBudget.snapshot()
-    return {
-      requests: {
-        remaining: Math.max(0, config.budget.maxRequestsPerTurn - current.requests),
-        limit: config.budget.maxRequestsPerTurn,
-      },
-      tokens: {
-        remaining: Math.max(0, config.budget.maxTokensPerTurn - current.tokens),
-        limit: config.budget.maxTokensPerTurn,
-      },
-      costUsd: {
-        remaining:
-          current.costUsd === null
-            ? null
-            : Math.max(0, config.budget.maxCostUsdPerTurn - current.costUsd),
-        limit: config.budget.maxCostUsdPerTurn,
-      },
-    }
-  }
 
   tools.register([
     createTaskTool(createSubagentRunner(agentConfigFor, tools), config.budget.maxSubagentsPerTurn),
@@ -389,6 +381,50 @@ export async function boot(options: {
       }
     },
 
+    mcpServers: () => mcp.states(),
+
+    async addMcpServer(name, server) {
+      if (Object.hasOwn(config.mcp, name)) {
+        throw new Error(`MCP server "${name}" already exists.`)
+      }
+
+      config.mcp[name] = server
+      await mcp.reconnect(name)
+      const state = mcp.state(name)
+      if (!state || state.status !== 'connected') {
+        delete config.mcp[name]
+        await mcp.remove(name)
+        throw new Error(state?.error ?? `MCP server "${name}" did not connect.`)
+      }
+
+      try {
+        await saveConfig(config)
+      } catch (error) {
+        delete config.mcp[name]
+        await mcp.remove(name)
+        throw error
+      }
+
+      syncMcpTools()
+      return state
+    },
+
+    async removeMcpServer(name) {
+      const existing = config.mcp[name]
+      if (!existing) throw new Error(`MCP server "${name}" does not exist.`)
+
+      delete config.mcp[name]
+      try {
+        await saveConfig(config)
+      } catch (error) {
+        config.mcp[name] = existing
+        throw error
+      }
+
+      await mcp.remove(name)
+      syncMcpTools()
+    },
+
     modelContext: () => {
       const used = contextUsage?.model === modelRef ? contextTokens(contextUsage.usage) : 0
       return { window: modelContextWindow, used }
@@ -405,18 +441,19 @@ export async function boot(options: {
       notifyContext()
     },
 
-    turnBudget: turnBudgetStatus,
-
-    subscribeBudget(listener) {
-      budgetListeners.add(listener)
-      return () => budgetListeners.delete(listener)
-    },
-
     undoLastCheckpoint: () =>
       undoLatestCheckpoint({ cwd: options.cwd, sessionId: session.id }),
 
     usageLine: () => formatUsageCompact(usage),
     usageReport: () => formatUsageBreakdown(usage),
+    async providerBalance() {
+      const providerId = parseModelRef(modelRef)?.provider
+      if (!providerId) return null
+      const provider = config.providers[providerId]
+      if (!provider) return null
+      const key = resolveApiKey(providerId, provider, auth)
+      return key ? fetchProviderBalance(provider, key) : null
+    },
     usageParts: () => usageParts(usage),
 
     async listModelItems() {
@@ -458,16 +495,17 @@ export async function boot(options: {
     },
 
     async run(history, hooks, signal) {
+      // A server may have closed while KitCode was idle. Refresh the live MCP
+      // schemas before building the next prompt so disconnected tools vanish.
+      syncMcpTools()
       const requestModelRef = modelRef
       const budget = createTurnBudget(config.budget, resolvePricing)
       const checkpoint = beginCheckpoint({ cwd: options.cwd, sessionId: session.id })
       activeBudget = budget
       activeCheckpoint = checkpoint
-      notifyBudget()
       const trackedHooks: AgentHooks = {
         ...hooks,
         onEvent(event) {
-          if (event.type === 'turn_start' || event.type === 'usage') notifyBudget()
           if (event.type === 'usage') {
             contextUsage = { model: requestModelRef, usage: event.usage }
             notifyContext()
@@ -476,7 +514,12 @@ export async function boot(options: {
         },
       }
       try {
-        const next = await runTurn(agentConfigFor(system, tools), history, trackedHooks, signal)
+        const next = await runTurn(
+          agentConfigFor(mainSystemPrompt(), tools),
+          history,
+          trackedHooks,
+          signal,
+        )
         if (config.diagnostics.autoRun && !signal.aborted) {
           await runAutomaticDiagnostics({
             cwd: options.cwd,
@@ -501,7 +544,6 @@ export async function boot(options: {
         if (activeCheckpoint === checkpoint) activeCheckpoint = undefined
         if (activeBudget === budget) {
           activeBudget = undefined
-          notifyBudget()
         }
       }
     },

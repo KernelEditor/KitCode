@@ -133,6 +133,11 @@ export function createMcpManager(servers: Record<string, McpServerConfig>) {
       await connect(name, config)
     },
 
+    async remove(name: string): Promise<void> {
+      await disconnect(name)
+      serverStates.delete(name)
+    },
+
     async close(): Promise<void> {
       const open = [...sessions.values()]
       sessions.clear()
@@ -141,6 +146,10 @@ export function createMcpManager(servers: Record<string, McpServerConfig>) {
 
     states(): McpServerState[] {
       return [...serverStates.values()]
+    },
+
+    state(name: string): McpServerState | undefined {
+      return serverStates.get(name)
     },
 
     tools(): Tool[] {

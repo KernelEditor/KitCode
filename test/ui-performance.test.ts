@@ -57,24 +57,21 @@ describe('bottom status panel', () => {
             effort: 'high',
             thinking: true,
             usage: null,
-            mcp: { connected: 0, failed: 0 },
+            mcp: { connected: 2, failed: 0 },
             mode: 'normal',
             bypass: false,
             busy: false,
             sessionMs: 1_000,
             turnMs: null,
             context: { window: 100_000, used: 50_000 },
-            budget: {
-              requests: { remaining: 31, limit: 32 },
-              tokens: { remaining: 900_000, limit: 1_000_000 },
-              costUsd: { remaining: 4.75, limit: 5 },
-            },
           },
         }),
       ),
     )
     const output = renderToString(panel, { columns: 100 })
-    const statusLine = output.split('\n').find((line) => line.includes('ctx')) ?? ''
+    const lines = output.split('\n')
+    const contextLineIndex = lines.findIndex((line) => line.includes('ctx'))
+    const statusLine = lines[contextLineIndex] ?? ''
 
     expect(output.match(/ctx/g)).toHaveLength(1)
     expect(statusLine.indexOf('ctx')).toBeGreaterThan(statusLine.indexOf('test-model'))
@@ -83,8 +80,7 @@ describe('bottom status panel', () => {
     expect(statusLine).toContain('█')
     expect(statusLine).toContain('░')
     expect(statusLine).toContain('▌')
-    expect(output).toContain('left 31 req')
-    expect(output).toContain('900k tok')
-    expect(output).toContain('$4.75')
+    expect(lines[contextLineIndex + 1]).toContain('mcp:2')
+    expect(output).not.toContain('$5.00')
   })
 })
