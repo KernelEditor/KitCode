@@ -64,6 +64,11 @@ describe('bottom status panel', () => {
             sessionMs: 1_000,
             turnMs: null,
             context: { window: 100_000, used: 50_000 },
+            budget: {
+              requests: { remaining: 31, limit: 32 },
+              tokens: { remaining: 900_000, limit: 1_000_000 },
+              costUsd: { remaining: 4.75, limit: 5 },
+            },
           },
         }),
       ),
@@ -78,5 +83,8 @@ describe('bottom status panel', () => {
     expect(statusLine).toContain('█')
     expect(statusLine).toContain('░')
     expect(statusLine).toContain('▌')
+    expect(output).toContain('left 31 req')
+    expect(output).toContain('900k tok')
+    expect(output).toContain('$4.75')
   })
 })

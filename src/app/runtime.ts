@@ -8,6 +8,9 @@ import { runTurn } from '../core/agent'
 import type { AgentConfig, ToolLookup } from '../core/agent'
 import { createTurnBudget } from '../core/budget'
 import type { TurnBudget } from '../core/budget'
+import { beginCheckpoint, undoLatestCheckpoint } from '../core/checkpoint'
+import type { FileCheckpoint } from '../core/checkpoint'
+import { runAutomaticDiagnostics } from '../core/diagnostics'
 import { buildSystemPrompt } from '../core/prompt'
 import {
   createSession,
@@ -41,7 +44,7 @@ import { createSkillTool } from '../tools/skill'
 import { createTaskTool } from '../tools/task'
 import type { Lang } from '../ui/i18n'
 import type { Runtime } from '../ui/runtime'
-import type { PickerItem } from '../ui/types'
+import type { PickerItem, TurnBudgetStatus } from '../ui/types'
 
 const PREFERRED = ['claude-opus-5', 'claude-sonnet-5', 'gpt-5', 'claude-opus-4-8']
 
@@ -196,10 +199,39 @@ export async function boot(options: {
       effort: config.effort,
       thinking: config.thinking,
       budget: activeBudget,
+      checkpoint: activeCheckpoint,
     }
   }
 
   let activeBudget: TurnBudget | undefined
+  let activeCheckpoint: FileCheckpoint | undefined
+  const budgetListeners = new Set<() => void>()
+
+  const notifyBudget = () => {
+    for (const listener of budgetListeners) listener()
+  }
+
+  const turnBudgetStatus = (): TurnBudgetStatus | null => {
+    if (!activeBudget) return null
+    const current = activeBudget.snapshot()
+    return {
+      requests: {
+        remaining: Math.max(0, config.budget.maxRequestsPerTurn - current.requests),
+        limit: config.budget.maxRequestsPerTurn,
+      },
+      tokens: {
+        remaining: Math.max(0, config.budget.maxTokensPerTurn - current.tokens),
+        limit: config.budget.maxTokensPerTurn,
+      },
+      costUsd: {
+        remaining:
+          current.costUsd === null
+            ? null
+            : Math.max(0, config.budget.maxCostUsdPerTurn - current.costUsd),
+        limit: config.budget.maxCostUsdPerTurn,
+      },
+    }
+  }
 
   tools.register([
     createTaskTool(createSubagentRunner(agentConfigFor, tools), config.budget.maxSubagentsPerTurn),
@@ -373,6 +405,16 @@ export async function boot(options: {
       notifyContext()
     },
 
+    turnBudget: turnBudgetStatus,
+
+    subscribeBudget(listener) {
+      budgetListeners.add(listener)
+      return () => budgetListeners.delete(listener)
+    },
+
+    undoLastCheckpoint: () =>
+      undoLatestCheckpoint({ cwd: options.cwd, sessionId: session.id }),
+
     usageLine: () => formatUsageCompact(usage),
     usageReport: () => formatUsageBreakdown(usage),
     usageParts: () => usageParts(usage),
@@ -418,10 +460,14 @@ export async function boot(options: {
     async run(history, hooks, signal) {
       const requestModelRef = modelRef
       const budget = createTurnBudget(config.budget, resolvePricing)
+      const checkpoint = beginCheckpoint({ cwd: options.cwd, sessionId: session.id })
       activeBudget = budget
+      activeCheckpoint = checkpoint
+      notifyBudget()
       const trackedHooks: AgentHooks = {
         ...hooks,
         onEvent(event) {
+          if (event.type === 'turn_start' || event.type === 'usage') notifyBudget()
           if (event.type === 'usage') {
             contextUsage = { model: requestModelRef, usage: event.usage }
             notifyContext()
@@ -430,9 +476,33 @@ export async function boot(options: {
         },
       }
       try {
-        return await runTurn(agentConfigFor(system, tools), history, trackedHooks, signal)
+        const next = await runTurn(agentConfigFor(system, tools), history, trackedHooks, signal)
+        if (config.diagnostics.autoRun && !signal.aborted) {
+          await runAutomaticDiagnostics({
+            cwd: options.cwd,
+            changedFiles: checkpoint.changedPaths(),
+            configuredCommands: config.diagnostics.commands,
+            permissions,
+            hooks: trackedHooks,
+            signal,
+          })
+        }
+        return next
       } finally {
-        if (activeBudget === budget) activeBudget = undefined
+        try {
+          await checkpoint.commit()
+        } catch (error) {
+          hooks.onEvent({
+            type: 'notice',
+            level: 'error',
+            text: `Could not save the automatic undo checkpoint: ${error instanceof Error ? error.message : String(error)}`,
+          })
+        }
+        if (activeCheckpoint === checkpoint) activeCheckpoint = undefined
+        if (activeBudget === budget) {
+          activeBudget = undefined
+          notifyBudget()
+        }
       }
     },
 

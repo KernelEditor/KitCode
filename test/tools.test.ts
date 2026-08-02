@@ -130,6 +130,29 @@ describe('edit', () => {
     expect(await readFile(join(cwd, file), 'utf8')).toBe('const a = 1\nconst b = 3\n')
   })
 
+  it('checkpoints the original text before a successful edit', async () => {
+    await writeFile(join(cwd, file), 'before')
+    const order: string[] = []
+    const ctx: ToolContext = {
+      ...context(),
+      checkpoint: {
+        async capture(absolutePath) {
+          order.push(`capture:${await readFile(absolutePath, 'utf8')}`)
+        },
+        markChanged(absolutePath) {
+          order.push(`changed:${absolutePath}`)
+        },
+      },
+    }
+    const result = await editTool.execute(
+      { path: file, oldString: 'before', newString: 'after' },
+      ctx,
+    )
+    const safe = resolveInside(cwd, file)
+    expect(result.isError).toBeUndefined()
+    expect(order).toEqual(['capture:before', `changed:${safe.ok ? safe.path : ''}`])
+  })
+
   it('refuses two matches without replaceAll and accepts them with it', async () => {
     await writeFile(join(cwd, file), 'x = 1\nx = 1\n')
     const ambiguous = await editTool.execute({ path: file, oldString: 'x = 1', newString: 'x = 2' }, context())
@@ -162,6 +185,28 @@ describe('write', () => {
     expect(result.isError).toBeUndefined()
     expect(result.content).toContain('Created')
     expect(await readFile(join(cwd, file), 'utf8')).toBe('hello\n')
+  })
+
+  it('captures the original state before writing and marks the successful change', async () => {
+    const order: string[] = []
+    const ctx: ToolContext = {
+      ...context(),
+      checkpoint: {
+        async capture(absolutePath) {
+          order.push(`capture:${absolutePath}`)
+          await expect(readFile(absolutePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+        },
+        markChanged(absolutePath) {
+          order.push(`changed:${absolutePath}`)
+        },
+      },
+    }
+    const result = await writeTool.execute({ path: file, content: 'checkpointed' }, ctx)
+    expect(result.isError).toBeUndefined()
+    const safe = resolveInside(cwd, file)
+    expect(safe.ok).toBe(true)
+    const canonical = safe.ok ? safe.path : ''
+    expect(order).toEqual([`capture:${canonical}`, `changed:${canonical}`])
   })
 
   it('refuses to overwrite a binary file', async () => {

@@ -11,7 +11,13 @@ import type {
   ToolUseBlock,
   Usage,
 } from '../providers/types'
-import type { PermissionMode, Tool, ToolContext, ToolDisplay } from '../tools/types'
+import type {
+  FileCheckpointSink,
+  PermissionMode,
+  Tool,
+  ToolContext,
+  ToolDisplay,
+} from '../tools/types'
 import type { AgentHooks } from './types'
 import { sanitizeHistory } from './session'
 import type { TurnBudget } from './budget'
@@ -49,6 +55,7 @@ export interface AgentConfig {
   effort: Effort
   thinking: boolean
   budget?: TurnBudget
+  checkpoint?: FileCheckpointSink
 }
 
 interface StreamOutcome {
@@ -244,6 +251,7 @@ async function runOneCall(
     cwd: cfg.cwd,
     signal,
     requestPermission: (request) => hooks.requestPermission(request),
+    checkpoint: cfg.checkpoint,
     confirm: async (question) =>
       (await hooks.requestPermission({
         toolName: tool.name,

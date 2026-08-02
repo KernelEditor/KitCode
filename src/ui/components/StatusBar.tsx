@@ -6,7 +6,7 @@ import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
 import { formatDuration } from '../time'
 import { sanitizeTerminalText } from '../sanitize'
-import type { StatusBarProps } from '../types'
+import type { StatusBarProps, TurnBudgetStatus } from '../types'
 
 const BAR_WIDTH = 12
 
@@ -59,6 +59,10 @@ export function StatusBar({ status }: StatusBarProps) {
         )}
       </Text>,
     )
+  }
+
+  if (status.budget) {
+    details.push(<BudgetRemaining key="budget" budget={status.budget} />)
   }
 
   details.push(
@@ -189,6 +193,31 @@ function tokens(count: number): string {
   if (count < 1000) return String(count)
   const [value, suffix] = count < 1_000_000 ? [count / 1000, 'k'] : [count / 1_000_000, 'M']
   return `${value.toFixed(1).replace(/\.0$/, '')}${suffix}`
+}
+
+function BudgetRemaining({ budget }: { budget: TurnBudgetStatus }) {
+  const theme = useTheme()
+  const strings = useStrings()
+  const ratios = [
+    budget.requests.remaining / budget.requests.limit,
+    budget.tokens.remaining / budget.tokens.limit,
+  ]
+  if (budget.costUsd.remaining !== null) {
+    ratios.push(budget.costUsd.remaining / budget.costUsd.limit)
+  }
+  const closestLimit = Math.min(...ratios)
+  const color = closestLimit <= 0.05 ? theme.error : closestLimit <= 0.2 ? theme.warn : theme.accent
+  const cost = budget.costUsd.remaining === null ? null : dollars(budget.costUsd.remaining)
+
+  return (
+    <Text color={color} bold={closestLimit <= 0.2}>
+      {strings.budgetLeft(
+        String(budget.requests.remaining),
+        tokens(budget.tokens.remaining),
+        cost,
+      )}
+    </Text>
+  )
 }
 
 // Context-window meter. The capsule fills left-to-right and shifts

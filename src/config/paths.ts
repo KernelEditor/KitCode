@@ -20,6 +20,8 @@ export const promptsDir = path.join(homeDir, 'prompts')
 
 export const sessionsDir = path.join(homeDir, 'sessions')
 
+export const checkpointsDir = path.join(homeDir, 'checkpoints')
+
 export const cacheDir = path.join(homeDir, 'cache')
 
 export const skillsDir = path.join(homeDir, 'skills')

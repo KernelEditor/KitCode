@@ -27,7 +27,7 @@ const STREAM_FRAME_MS = 50
 
 // Slash commands that affect conversation state and must wait until the agent
 // finishes the current turn before running.
-const NEEDS_IDLE = new Set<string>(['clear', 'resume', 'logout', 'bypass'])
+const NEEDS_IDLE = new Set<string>(['clear', 'resume', 'logout', 'bypass', 'undo'])
 
 type Overlay =
   | { kind: 'none' }
@@ -74,6 +74,7 @@ export function App({
   const [turnStart, setTurnStart] = useState<number | null>(null)
   const [, tick] = useState(0)
   const [context, setContext] = useState(() => runtime.modelContext())
+  const [budget, setBudget] = useState(() => runtime.turnBudget())
   const transcriptEvents = useRef<AgentEvent[]>([])
   const transcriptTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -110,6 +111,11 @@ export function App({
 
   useEffect(
     () => runtime.subscribeContext(() => setContext(runtime.modelContext())),
+    [runtime],
+  )
+
+  useEffect(
+    () => runtime.subscribeBudget(() => setBudget(runtime.turnBudget())),
     [runtime],
   )
 
@@ -206,7 +212,27 @@ export function App({
       onEvent: queueTranscriptEvent,
       requestPermission: (request) =>
         new Promise<PermissionDecision>((resolve) => {
-          setOverlay({ kind: 'permission', request, resolve })
+          let settled = false
+          const finish = (decision: PermissionDecision) => {
+            if (settled) return
+            settled = true
+            controller.signal.removeEventListener('abort', cancel)
+            resolve(decision)
+          }
+          const cancel = () => {
+            setOverlay((current) =>
+              current.kind === 'permission' && current.resolve === finish
+                ? { kind: 'none' }
+                : current,
+            )
+            finish('deny')
+          }
+          if (controller.signal.aborted) {
+            finish('deny')
+            return
+          }
+          controller.signal.addEventListener('abort', cancel, { once: true })
+          setOverlay({ kind: 'permission', request, resolve: finish })
         }),
     }
     try {
@@ -302,6 +328,34 @@ export function App({
             notice('error', error instanceof Error ? error.message : String(error))
           }
           forceRender((n) => n + 1)
+          return
+        }
+
+        case 'undo': {
+          try {
+            const result = await runtime.undoLastCheckpoint()
+            if (!result.found) {
+              notice('info', strings.undoNothing)
+              return
+            }
+            const lines = [strings.undoResult(result.restored.length, result.removed.length)]
+            if (result.conflicts.length > 0) {
+              lines.push(strings.undoConflicts(result.conflicts))
+            }
+            if (result.failed.length > 0) {
+              lines.push(
+                strings.undoFailed(
+                  result.failed.map((failure) => `${failure.path}: ${failure.error}`),
+                ),
+              )
+            }
+            notice(
+              result.conflicts.length > 0 || result.failed.length > 0 ? 'warn' : 'info',
+              lines.join('\n'),
+            )
+          } catch (error) {
+            notice('error', error instanceof Error ? error.message : String(error))
+          }
           return
         }
 
@@ -671,6 +725,7 @@ export function App({
           sessionMs: Date.now() - sessionStart.current,
           turnMs: turnStart === null ? null : Date.now() - turnStart,
           context,
+          budget,
         }}
       />
     </Box>,

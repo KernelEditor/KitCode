@@ -80,7 +80,13 @@ export const writeTool: Tool = {
       if (!rechecked.ok || rechecked.path !== safe.path) {
         return { content: `Cannot write ${path}: its resolved location changed.`, isError: true }
       }
-      await writeFile(rechecked.path, content, 'utf8')
+      await ctx.checkpoint?.capture(rechecked.path)
+      const finalPath = resolveInside(ctx.cwd, path)
+      if (!finalPath.ok || finalPath.path !== rechecked.path) {
+        return { content: `Cannot write ${path}: its resolved location changed.`, isError: true }
+      }
+      await writeFile(finalPath.path, content, 'utf8')
+      ctx.checkpoint?.markChanged(finalPath.path)
     } catch (error) {
       return { content: `Failed to write ${path}: ${(error as Error).message}`, isError: true }
     }

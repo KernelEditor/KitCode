@@ -19,6 +19,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'mcp' },
   { name: 'config' },
   { name: 'resume' },
+  { name: 'undo' },
   { name: 'clear' },
   { name: 'help' },
   { name: 'exit' },

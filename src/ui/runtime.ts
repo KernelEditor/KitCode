@@ -1,8 +1,9 @@
 import type { AgentHooks } from '../core/types'
+import type { UndoResult } from '../core/checkpoint'
 import type { Effort, Message } from '../providers/types'
 import type { UsageSummary } from '../core/usage'
 import type { Lang } from './i18n'
-import type { PickerItem } from './types'
+import type { PickerItem, TurnBudgetStatus } from './types'
 
 export interface Runtime {
   cwd: string
@@ -36,6 +37,10 @@ export interface Runtime {
   modelContext(): { window: number | null; used: number }
   subscribeContext(listener: () => void): () => void
   resetContext(): void
+  /** Remaining limits for the message currently being processed. */
+  turnBudget(): TurnBudgetStatus | null
+  subscribeBudget(listener: () => void): () => void
+  undoLastCheckpoint(): Promise<UndoResult>
   usageLine(): string
   usageReport(): string
   usageParts(): UsageSummary

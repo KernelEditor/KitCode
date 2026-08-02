@@ -3,6 +3,12 @@ import type { UsageSummary } from '../core/usage'
 import type { Effort } from '../providers/types'
 import type { ToolDisplay } from '../tools/types'
 
+export interface TurnBudgetStatus {
+  requests: { remaining: number; limit: number }
+  tokens: { remaining: number; limit: number }
+  costUsd: { remaining: number | null; limit: number }
+}
+
 export type ToolState = 'running' | 'ok' | 'error'
 
 export type Bubble =
@@ -32,6 +38,8 @@ export interface StatusView {
   turnMs: number | null
   /** Model context window and tokens used by the most recent request. */
   context: { window: number | null; used: number }
+  /** Limits still available to the active message. */
+  budget: TurnBudgetStatus | null
 }
 
 export interface PickerItem {

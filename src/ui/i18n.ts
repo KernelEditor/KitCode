@@ -44,6 +44,7 @@ export interface Strings {
   sessionSummary: (elapsed: string, turns: number) => string
   noThink: string
   mcpFailed: (count: number) => string
+  budgetLeft: (requests: string, tokens: string, cost: string | null) => string
 
   escCancel: string
   escHelp: string
@@ -74,6 +75,10 @@ export interface Strings {
   promptsEmpty: string
   unknownCommand: (name: string) => string
   didYouMean: (typed: string, guess: string) => string
+  undoNothing: string
+  undoResult: (restored: number, removed: number) => string
+  undoConflicts: (paths: string[]) => string
+  undoFailed: (failures: string[]) => string
 
   titleAccent: string
   titleEffort: string
@@ -123,6 +128,8 @@ const en: Strings = {
   sessionSummary: (elapsed, turns) => `session ${elapsed} · ${turns} turns`,
   noThink: 'no-think',
   mcpFailed: (count) => `mcp:${count} failed`,
+  budgetLeft: (requests, tokens, cost) =>
+    `left ${requests} req · ${tokens} tok · ${cost ?? 'cost ?'}`,
 
   escCancel: 'esc to cancel',
   escHelp: 'esc — cancel the running turn',
@@ -154,6 +161,12 @@ const en: Strings = {
   promptsEmpty: 'No saved prompts. Use /prompt save <name>.',
   unknownCommand: (name) => `Unknown command /${name}. Try /help`,
   didYouMean: (typed, guess) => `Unknown command /${typed}. Did you mean /${guess}?`,
+  undoNothing: 'Nothing to undo in this session.',
+  undoResult: (restored, removed) =>
+    `Undo complete: ${restored} restored, ${removed} newly created removed.`,
+  undoConflicts: (paths) =>
+    `Kept newer changes in: ${paths.join(', ')}`,
+  undoFailed: (failures) => `Could not restore: ${failures.join('; ')}`,
 
   titleAccent: 'Accent colour',
   titleEffort: 'Reasoning depth',
@@ -179,6 +192,7 @@ const en: Strings = {
     mcp: 'MCP server status',
     config: 'show where the config lives',
     resume: 'reopen a past chat',
+    undo: 'undo file edits from the latest message',
     clear: 'start a fresh session',
     help: 'list commands',
     exit: 'quit',
@@ -222,6 +236,8 @@ const ru: Strings = {
   sessionSummary: (elapsed, turns) => `сессия ${elapsed} · ходов: ${turns}`,
   noThink: 'без размышлений',
   mcpFailed: (count) => `mcp: ${count} с ошибкой`,
+  budgetLeft: (requests, tokens, cost) =>
+    `осталось ${requests} запр. · ${tokens} ток. · ${cost ?? 'цена ?'}`,
 
   escCancel: 'esc — отменить',
   escHelp: 'esc — отменить текущий ход',
@@ -253,6 +269,12 @@ const ru: Strings = {
   promptsEmpty: 'Сохранённых промтов нет. Используй /prompt save <имя>.',
   unknownCommand: (name) => `Неизвестная команда /${name}. Попробуй /help`,
   didYouMean: (typed, guess) => `Неизвестная команда /${typed}. Может быть /${guess}?`,
+  undoNothing: 'В этой сессии пока нечего откатывать.',
+  undoResult: (restored, removed) =>
+    `Откат завершён: восстановлено ${restored}, удалено новых файлов ${removed}.`,
+  undoConflicts: (paths) =>
+    `Более свежие изменения сохранены в: ${paths.join(', ')}`,
+  undoFailed: (failures) => `Не удалось восстановить: ${failures.join('; ')}`,
 
   titleAccent: 'Цвет акцента',
   titleEffort: 'Глубина размышлений',
@@ -278,6 +300,7 @@ const ru: Strings = {
     mcp: 'статус MCP-серверов',
     config: 'где лежит конфиг',
     resume: 'открыть прошлый чат',
+    undo: 'откатить правки файлов из последнего сообщения',
     clear: 'начать новую сессию',
     help: 'список команд',
     exit: 'выход',

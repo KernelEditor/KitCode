@@ -24,7 +24,9 @@ OpenAI-compatible providers, including OpenRouter and local model servers.
 - persistent and resumable sessions with native terminal scrollback;
 - input history with the `↑` and `↓` keys;
 - queued messages while the agent is working;
-- token, cost, and context-window indicators;
+- token, cost, remaining per-message budget, and context-window indicators;
+- automatic file checkpoints with `/undo`;
+- detected project checks after file edits;
 - model and provider switching from the TUI;
 - MCP servers, skills, and subagents;
 - English and Russian interfaces with configurable accents.
@@ -98,6 +100,7 @@ Press `/` to open the command list.
 | `/login` · `/logout` | Add or remove the current provider. |
 | `/effort` · `/thinking` | Configure reasoning depth and output. |
 | `/resume` · `/clear` | Resume a session or start a new one. |
+| `/undo` | Undo built-in file edits from the latest message. |
 | `/usage` | Show tokens, requests, and cost. |
 | `/prompt` | Insert a saved prompt. |
 | `/prompt save <name>` | Save the latest message as a prompt. |
@@ -125,9 +128,14 @@ Messages entered while the agent is running are queued and processed in order.
 - `accept` — file edits are accepted automatically;
 - `plan` — the agent explores the project and returns a plan without changing files.
 
-The lower status panel shows the active mode, model, usage, and a left-to-right context capsule on
-the right. Completed output is committed to normal terminal scrollback, so it remains smooth to
-scroll while a response is streaming.
+The lower status panel shows the active mode, model, usage, and remaining limits for the current
+message; a left-to-right context capsule stays on the right. Completed output is committed to
+normal terminal scrollback, so it remains smooth to scroll while a response is streaming.
+
+Before the built-in `write` and `edit` tools change a file, KitCode creates a private checkpoint.
+`/undo` restores the latest checkpoint and leaves files with newer manual changes untouched.
+After a message changes files, KitCode detects common project checks such as `lint`, `typecheck`,
+and `test`. The exact commands are shown for approval before they run.
 
 ## Configuration
 
@@ -138,6 +146,7 @@ KitCode uses these main paths:
 | `~/.kitcode/config.json` | Global settings. |
 | `~/.kitcode/auth.json` | Provider keys. |
 | `~/.kitcode/sessions/` | Saved sessions. |
+| `~/.kitcode/checkpoints/` | Automatic file checkpoints used by `/undo`. |
 | `~/.kitcode/prompts/` | Saved prompts. |
 | `~/.kitcode/skills/` | Global skills. |
 | `./.kitcode/skills/` | Project skills. |
@@ -159,10 +168,12 @@ Minimal manual provider configuration:
 }
 ```
 
-The main settings are `model`, `effort`, `thinking`, `maxTokens`, `budget`, `theme`, `permissions`,
-`providers`, and `mcp`. `budget` controls per-message limits for model requests, tokens, estimated
-cost (when model pricing is available), and subagents. Manual editing is usually unnecessary: add
-a provider during onboarding or with `/login`.
+The main settings are `model`, `effort`, `thinking`, `maxTokens`, `budget`, `diagnostics`, `theme`,
+`permissions`, `providers`, and `mcp`. `budget` controls per-message limits for model requests,
+tokens, estimated cost (when model pricing is available), and subagents. `diagnostics.autoRun`
+enables checks after file edits; `diagnostics.commands` can replace automatic detection with up to
+eight explicit commands. Manual editing is usually unnecessary: add a provider during onboarding
+or with `/login`.
 
 Project settings and project skills are enabled after reviewing the workspace and running:
 

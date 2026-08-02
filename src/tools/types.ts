@@ -3,11 +3,17 @@ import type { JsonSchema, ToolSchema } from '../providers/types'
 
 export type PermissionMode = 'allow' | 'ask' | 'deny'
 
+export interface FileCheckpointSink {
+  capture(absolutePath: string): Promise<void>
+  markChanged(absolutePath: string): void
+}
+
 export interface ToolContext {
   cwd: string
   signal: AbortSignal
   confirm(question: string): Promise<boolean>
   requestPermission?(request: PermissionRequest): Promise<PermissionDecision>
+  checkpoint?: FileCheckpointSink
 }
 
 export type ToolDisplay =

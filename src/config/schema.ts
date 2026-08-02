@@ -67,6 +67,11 @@ export const budgetSchema = z.object({
   maxSubagentsPerTurn: z.number().int().min(0).max(16).default(3),
 })
 
+export const diagnosticsSchema = z.object({
+  autoRun: z.boolean().default(true),
+  commands: z.array(z.string().trim().min(1).max(20_000)).max(8).default([]),
+})
+
 export const configSchema = z.object({
   version: z.literal(1).default(1),
   model: z.string().optional(),
@@ -81,6 +86,7 @@ export const configSchema = z.object({
     maxCostUsdPerTurn: 5,
     maxSubagentsPerTurn: 3,
   }),
+  diagnostics: diagnosticsSchema.default({ autoRun: true, commands: [] }),
   providers: z.record(z.string(), providerConfigSchema).default({}),
   permissions: z.record(z.string(), permissionModeSchema).default({}),
   mcp: z.record(z.string(), mcpServerSchema).default({}),
