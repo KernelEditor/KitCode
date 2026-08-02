@@ -50,6 +50,7 @@ export interface PickerItem {
 
 export interface TranscriptProps {
   bubbles: Bubble[]
+  workspace: string
 }
 
 export interface StatusBarProps {

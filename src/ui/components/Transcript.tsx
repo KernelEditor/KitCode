@@ -7,8 +7,12 @@ import { Markdown } from '../markdown'
 import { useTheme } from '../theme'
 import type { Bubble, TranscriptProps } from '../types'
 import { DiffHunk } from './Diff'
+import { Logo } from './Logo'
 
-export const Transcript = memo(function Transcript({ bubbles }: TranscriptProps) {
+const HEADER = { kind: 'header' } as const
+type StaticTranscriptItem = typeof HEADER | Bubble
+
+export const Transcript = memo(function Transcript({ bubbles, workspace }: TranscriptProps) {
   const liveAt = bubbles.findLastIndex(
     (bubble) =>
       (bubble.kind === 'assistant' && bubble.streaming) ||
@@ -26,12 +30,21 @@ export const Transcript = memo(function Transcript({ bubbles }: TranscriptProps)
   }
   const stable = stableRef.current
   const live = liveAt === -1 ? [] : bubbles.slice(liveAt)
+  const staticItems: StaticTranscriptItem[] = [HEADER, ...stable]
 
   return (
     <Box flexDirection="column" marginBottom={1}>
-      {/* Completed bubbles are committed to native terminal scrollback once.
-          Only the active tail is reconciled during streaming. */}
-      <Static items={stable}>{(bubble) => <BubbleView key={bubble.id} bubble={bubble} />}</Static>
+      {/* The header is committed first, then completed bubbles are appended to
+          native scrollback. This keeps new messages from pushing the logo down. */}
+      <Static items={staticItems}>
+        {(item) =>
+          item.kind === 'header' ? (
+            <Logo key="kitcode-header" workspace={workspace} />
+          ) : (
+            <BubbleView key={item.id} bubble={item} />
+          )
+        }
+      </Static>
       {live.map((bubble) => (
         <BubbleView key={bubble.id} bubble={bubble} />
       ))}

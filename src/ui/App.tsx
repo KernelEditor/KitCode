@@ -6,7 +6,6 @@ import type { Effort, Message } from '../providers/types'
 import { COMMANDS, closestCommand } from './commands'
 import { Confirm } from './components/Confirm'
 import { LanguagePicker } from './components/LanguagePicker'
-import { Logo } from './components/Logo'
 import { Onboarding } from './components/Onboarding'
 import { PermissionPrompt } from './components/PermissionPrompt'
 import { Picker } from './components/Picker'
@@ -661,8 +660,11 @@ export function App({
 
   return shell(
     <Box flexDirection="column">
-      <Logo workspace={runtime.cwd} />
-      <Transcript key={transcriptRevision} bubbles={transcript.bubbles} />
+      <Transcript
+        key={transcriptRevision}
+        bubbles={transcript.bubbles}
+        workspace={runtime.cwd}
+      />
 
       {overlay.kind === 'permission' && (
         <PermissionPrompt
