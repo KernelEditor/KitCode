@@ -2,7 +2,7 @@ import { Box, useApp } from 'ink'
 import { execFile, execFileSync } from 'node:child_process'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from '../core/types'
-import { attachmentLabel } from '../core/attachments'
+import { attachmentLabel, looksLikeAttachmentPath } from '../core/attachments'
 import { parseMcpAddArgs } from '../mcp/add'
 import type { McpAddError } from '../mcp/add'
 import type { McpServerState } from '../mcp/client'
@@ -28,6 +28,7 @@ import type { PickerItem } from './types'
 
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const STREAM_FRAME_MS = 50
+const MAX_ATTACHMENTS = 8
 
 // Slash commands that affect conversation state and must wait until the agent
 // finishes the current turn before running.
@@ -80,6 +81,9 @@ export function App({
   const [pendingCount, setPendingCount] = useState(0)
   const queueRef = useRef<QueuedItem[]>([])
   const [attachments, setAttachments] = useState<ContentBlock[]>([])
+  const attachmentsRef = useRef<ContentBlock[]>([])
+  const automaticAttachmentTask = useRef<Promise<boolean> | null>(null)
+  const clipboardPasteTask = useRef<Promise<void> | null>(null)
   const [overlay, setOverlay] = useState<Overlay>({ kind: 'none' })
   const [accent, setAccent] = useState(runtime.getAccent())
   const [lang, setLang] = useState<Lang | undefined>(runtime.getLang())
@@ -94,6 +98,19 @@ export function App({
   const [context, setContext] = useState(() => runtime.modelContext())
   const transcriptEvents = useRef<AgentEvent[]>([])
   const transcriptTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const replaceAttachments = useCallback((next: ContentBlock[]) => {
+    attachmentsRef.current = next
+    setAttachments(next)
+  }, [])
+
+  const appendAttachment = useCallback((block: ContentBlock): boolean => {
+    if (attachmentsRef.current.length >= MAX_ATTACHMENTS) return false
+    const next = [...attachmentsRef.current, block]
+    attachmentsRef.current = next
+    setAttachments(next)
+    return true
+  }, [])
 
   const flushTranscriptEvents = useCallback(() => {
     if (transcriptTimer.current !== null) {
@@ -324,7 +341,7 @@ export function App({
         case 'clear':
           await runtime.newSession()
           history.current = []
-          setAttachments([])
+          replaceAttachments([])
           setPromptHistory([])
           setTranscript(emptyTranscript())
           setTranscriptRevision((revision) => revision + 1)
@@ -382,6 +399,48 @@ export function App({
             return
           }
 
+          if (action === 'delete' && rest.length === 2 && rest[1]?.toLowerCase() === 'all') {
+            if (!(await ask(strings.sessionDeleteAllAsk, strings.sessionDeleteAllAskBody, true))) {
+              return
+            }
+            if (
+              !(await ask(
+                strings.sessionDeleteAllFinalAsk,
+                strings.sessionDeleteAllFinalBody,
+                true,
+              ))
+            ) {
+              return
+            }
+            try {
+              const result = await runtime.deleteAllSessions()
+              history.current = []
+              replaceAttachments([])
+              setPromptHistory([])
+              const message =
+                result.failed.length === 0
+                  ? strings.sessionsDeletedAll(result.deleted)
+                  : [
+                      strings.sessionsDeleteAllFailed(result.deleted, result.failed.length),
+                      ...result.failed.slice(0, 5).map((failure) => `${failure.id}: ${failure.error}`),
+                    ].join('\n')
+              setTranscript(
+                pushNotice(
+                  emptyTranscript(),
+                  result.failed.length === 0 ? 'info' : 'error',
+                  message,
+                ),
+              )
+              setTranscriptRevision((revision) => revision + 1)
+              sessionStart.current = Date.now()
+              turns.current = 0
+            } catch (error) {
+              notice('error', error instanceof Error ? error.message : String(error))
+            }
+            forceRender((n) => n + 1)
+            return
+          }
+
           let id = action ? rest[1] : undefined
           if (!id) id = (await pick(strings.titleSessions, items)) ?? undefined
           if (!id) return
@@ -407,7 +466,7 @@ export function App({
             if (action === 'resume') {
               const restored = await runtime.resumeSession(id)
               history.current = restored
-              setAttachments([])
+              replaceAttachments([])
               setPromptHistory(inputHistoryFromMessages(restored))
               setTranscript(
                 pushNotice(fromHistory(restored), 'info', strings.resumed(id.slice(-6), restored.length)),
@@ -431,7 +490,7 @@ export function App({
               const deletedMessage = strings.sessionDeleted(result.id.slice(-6))
               if (result.wasActive) {
                 history.current = []
-                setAttachments([])
+                replaceAttachments([])
                 setPromptHistory([])
                 setTranscript(pushNotice(emptyTranscript(), 'info', deletedMessage))
                 setTranscriptRevision((revision) => revision + 1)
@@ -447,7 +506,7 @@ export function App({
               const destination = unquoteArg(rest.slice(2).join(' ').trim()) || undefined
               notice('info', strings.sessionExported(await runtime.exportSession(id, destination)))
             } else {
-              notice('warn', 'Usage: /sessions [list|rename|delete|export]')
+              notice('warn', 'Usage: /sessions [list|rename|delete [all]|export]')
               return
             }
           } catch (error) {
@@ -518,7 +577,7 @@ export function App({
             if (result.wasActive) {
               await runtime.newSession()
               history.current = []
-              setAttachments([])
+              replaceAttachments([])
               setPromptHistory([])
               setTranscript(pushNotice(emptyTranscript(), 'info', message))
               setTranscriptRevision((revision) => revision + 1)
@@ -752,22 +811,50 @@ export function App({
 
         case 'attach': {
           if (rawRest.toLowerCase() === 'clear') {
-            setAttachments([])
+            replaceAttachments([])
             notice('info', strings.attachmentsCleared)
+            return
+          }
+          if (rawRest.toLowerCase() === 'clipboard') {
+            if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
+              notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+              return
+            }
+            if (clipboardPasteTask.current) return
+            const task = runtime
+              .loadClipboardImage()
+              .then((block) => {
+                if (appendAttachment(block)) {
+                  notice(
+                    'info',
+                    strings.attachmentAdded(attachmentLabel(block) ?? 'clipboard image'),
+                  )
+                }
+              })
+              .catch((error) =>
+                notice('error', error instanceof Error ? error.message : String(error)),
+              )
+            clipboardPasteTask.current = task
+            try {
+              await task
+            } finally {
+              if (clipboardPasteTask.current === task) clipboardPasteTask.current = null
+            }
             return
           }
           if (!rawRest) {
             notice('info', strings.attachUsage)
             return
           }
-          if (attachments.length >= 8) {
-            notice('warn', 'At most 8 attachments can be queued for one message.')
+          if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
+            notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
             return
           }
           try {
             const block = await runtime.loadAttachment(rawRest)
-            setAttachments((current) => [...current, block])
-            notice('info', strings.attachmentAdded(attachmentLabel(block) ?? 'attachment'))
+            if (appendAttachment(block)) {
+              notice('info', strings.attachmentAdded(attachmentLabel(block) ?? 'attachment'))
+            }
           } catch (error) {
             notice('error', error instanceof Error ? error.message : String(error))
           }
@@ -927,7 +1014,7 @@ export function App({
         }
       }
     },
-    [applyAccent, ask, attachments, exit, notice, pick, runtime, strings],
+    [applyAccent, appendAttachment, ask, exit, notice, pick, replaceAttachments, runtime, strings],
   )
 
   const enqueueNext = useCallback(
@@ -943,29 +1030,109 @@ export function App({
     [handleSlash, runAgent],
   )
 
+  const tryQueueAutomaticAttachment = useCallback(
+    (requestedPath: string): Promise<boolean> => {
+      if (!looksLikeAttachmentPath(requestedPath)) return Promise.resolve(false)
+      if (automaticAttachmentTask.current) {
+        return automaticAttachmentTask.current.then(() => false)
+      }
+      if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
+        notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+        return Promise.resolve(true)
+      }
+
+      const task = runtime
+        .loadAutomaticAttachment(requestedPath)
+        .then((block) => {
+          if (!block) return false
+          if (!appendAttachment(block)) {
+            notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+            return true
+          }
+          notice('info', strings.attachmentAdded(attachmentLabel(block) ?? 'attachment'))
+          return true
+        })
+        .catch((error) => {
+          notice('error', error instanceof Error ? error.message : String(error))
+          return true
+        })
+      automaticAttachmentTask.current = task
+      void task.finally(() => {
+        if (automaticAttachmentTask.current === task) automaticAttachmentTask.current = null
+      })
+      return task
+    },
+    [appendAttachment, notice, runtime, strings],
+  )
+
+  const pasteClipboardImage = useCallback(() => {
+    if (clipboardPasteTask.current) return
+    if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
+      notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+      return
+    }
+    const task = runtime
+      .loadClipboardImage()
+      .then((block) => {
+        if (!appendAttachment(block)) {
+          notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+          return
+        }
+        notice('info', strings.attachmentAdded(attachmentLabel(block) ?? 'clipboard image'))
+      })
+      .catch((error) => notice('error', error instanceof Error ? error.message : String(error)))
+    clipboardPasteTask.current = task
+    void task.finally(() => {
+      if (clipboardPasteTask.current === task) clipboardPasteTask.current = null
+    })
+  }, [appendAttachment, notice, runtime, strings])
+
   const submit = useCallback(
-    (raw: string) => {
+    async (raw: string) => {
+      const pendingAttachments = [automaticAttachmentTask.current, clipboardPasteTask.current].filter(
+        (task): task is Promise<boolean> | Promise<void> => task !== null,
+      )
+      const detachedInput = pendingAttachments.length > 0
+      if (detachedInput) {
+        // Let the user start typing the next message while the clipboard/file
+        // read finishes; the captured text below is still submitted with it.
+        setInput('')
+        await Promise.all(pendingAttachments)
+      }
       const text = raw.trim()
-      if (text.startsWith('/')) {
+      const submitSlash = () => {
         // Slash commands can run even while busy (e.g. /effort, /thinking);
         // queue-impacting commands defer until idle.
-        setInput('')
+        if (!detachedInput) setInput('')
         if (busy && slashNeedsIdle(text)) {
           queueRef.current = [...queueRef.current, { kind: 'command', line: text }]
           setPendingCount(queueRef.current.length)
           return
         }
         void handleSlash(text)
+      }
+
+      if (isKnownSlashCommand(text)) {
+        submitSlash()
         return
       }
-      if (!text && attachments.length === 0) return
+      if (text && looksLikeAttachmentPath(text) && (await tryQueueAutomaticAttachment(text))) {
+        if (!detachedInput) setInput('')
+        return
+      }
+      if (text.startsWith('/')) {
+        submitSlash()
+        return
+      }
+      const queuedAttachments = attachmentsRef.current
+      if (!text && queuedAttachments.length === 0) return
       if (text) setPromptHistory((state) => appendInputHistory(state, text))
-      setInput('')
+      if (!detachedInput) setInput('')
       const content: ContentBlock[] = [
         ...(text ? ([{ type: 'text', text }] as ContentBlock[]) : []),
-        ...attachments,
+        ...queuedAttachments,
       ]
-      setAttachments([])
+      replaceAttachments([])
       const item: QueuedItem = { kind: 'message', text, content }
       if (busy) {
         queueRef.current = [...queueRef.current, item]
@@ -976,7 +1143,7 @@ export function App({
       history.current = [...history.current, { role: 'user', content }]
       void runAgent()
     },
-    [attachments, busy, handleSlash, runAgent],
+    [busy, handleSlash, replaceAttachments, runAgent, tryQueueAutomaticAttachment],
   )
 
   useTerminalInput((_char, key) => {
@@ -1092,6 +1259,8 @@ export function App({
           value={input}
           onChange={setInput}
           onSubmit={submit}
+          onPastePath={tryQueueAutomaticAttachment}
+          onPasteImage={pasteClipboardImage}
           disabled={busy}
           pending={pendingCount}
           hint={busy ? strings.escCancel : undefined}
@@ -1132,6 +1301,12 @@ function slashNeedsIdle(line: string): boolean {
         subcommand === 'enable' ||
         subcommand === 'disable'))
   )
+}
+
+function isKnownSlashCommand(line: string): boolean {
+  if (!line.startsWith('/')) return false
+  const [name = ''] = line.slice(1).trim().toLowerCase().split(/\s+/)
+  return name === 'quit' || COMMANDS.some((command) => command.name === name)
 }
 
 function mcpAddProblem(strings: Strings, error: McpAddError): string {

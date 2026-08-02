@@ -30,6 +30,7 @@ export interface Runtime {
   resumeSession(id: string): Promise<Message[]>
   renameSession(id: string, title: string): Promise<string>
   deleteSession(id: string): Promise<{ id: string; wasActive: boolean; newSessionId?: string }>
+  deleteAllSessions(): Promise<{ deleted: number; failed: Array<{ id: string; error: string }> }>
   exportSession(id: string, destination?: string): Promise<string>
   listSkills(): { name: string; description: string }[]
   getModelRef(): string
@@ -66,6 +67,8 @@ export interface Runtime {
   readPrompt(slug: string): Promise<string>
   savePrompt(name: string, body: string): Promise<void>
   loadAttachment(path: string): Promise<ContentBlock>
+  loadAutomaticAttachment(path: string): Promise<ContentBlock | null>
+  loadClipboardImage(): Promise<ContentBlock>
   compact(history: Message[], signal: AbortSignal): Promise<CompactResult>
   checkerReport(): Promise<string>
   startupUpdateCheck(): Promise<UpdateCheck> | null

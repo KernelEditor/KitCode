@@ -1,8 +1,14 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterAll, describe, expect, it, vi } from 'vitest'
-import { loadAttachment } from '../src/core/attachments'
+import {
+  loadAttachment,
+  loadAutomaticAttachment,
+  loadClipboardImage,
+  looksLikeAttachmentPath,
+} from '../src/core/attachments'
 import { compactCutIndex, compactHistory, shouldAutoCompact } from '../src/core/compact'
 import { checkForUpdates } from '../src/core/update'
 import { configSchema } from '../src/config/schema'
@@ -44,6 +50,41 @@ describe('attachments', () => {
     const file = path.join(scratch, 'payload.bin')
     await writeFile(file, Buffer.from([1, 0, 2, 3]))
     await expect(loadAttachment(scratch, file)).rejects.toThrow(/Unsupported binary/)
+  })
+
+  it('recognizes pasted paths only when they resolve to a real file', async () => {
+    const file = path.join(scratch, 'dragged notes.txt')
+    await writeFile(file, 'from drag and drop', 'utf8')
+
+    expect(looksLikeAttachmentPath(file)).toBe(true)
+    expect(looksLikeAttachmentPath('ordinary message without a path')).toBe(false)
+    await expect(loadAutomaticAttachment(scratch, 'missing.txt')).resolves.toBeNull()
+    await expect(loadAutomaticAttachment(scratch, 'ordinary message')).resolves.toBeNull()
+    await expect(loadAutomaticAttachment(scratch, pathToFileURL(file).href)).resolves.toMatchObject({
+      block: { type: 'file', name: 'dragged notes.txt', text: 'from drag and drop' },
+    })
+  })
+
+  it('requires an explicit command for sensitive-looking files', async () => {
+    const file = path.join(scratch, '.env')
+    await writeFile(file, 'API_KEY=secret', 'utf8')
+
+    await expect(loadAutomaticAttachment(scratch, file)).rejects.toThrow(/explicitly with \/attach/)
+    await expect(loadAttachment(scratch, file)).resolves.toMatchObject({
+      block: { type: 'file', name: '.env' },
+    })
+  })
+
+  it('converts an image returned by the platform clipboard reader', async () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+    const runner = vi.fn(async () => png)
+
+    await expect(loadClipboardImage('darwin', runner)).resolves.toMatchObject({
+      type: 'image',
+      mediaType: 'image/png',
+      name: 'clipboard.png',
+    })
+    expect(runner).toHaveBeenCalledWith('osascript', expect.arrayContaining(['-l', 'JavaScript']))
   })
 })
 

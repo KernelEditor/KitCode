@@ -17,6 +17,11 @@ export interface SessionSummary {
   messageCount: number
 }
 
+export interface DeleteAllSessionsResult {
+  deleted: string[]
+  failed: Array<{ id: string; error: string }>
+}
+
 export function createSession(cwd: string, model: string): SessionState {
   const now = new Date().toISOString()
   const stamp = now.replace(/[:.]/g, '-')
@@ -104,6 +109,44 @@ export async function deleteSession(query: string): Promise<string> {
     throw error
   })
   return id
+}
+
+export async function deleteAllSessions(): Promise<DeleteAllSessionsResult> {
+  let names: string[]
+  try {
+    names = await readdir(sessionsDir)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { deleted: [], failed: [] }
+    throw error
+  }
+
+  const ids = names.flatMap((name) => {
+    if (!name.endsWith('.json')) return []
+    const id = name.slice(0, -'.json'.length)
+    try {
+      assertSessionId(id)
+      return [id]
+    } catch {
+      return []
+    }
+  })
+  const results = await Promise.allSettled(
+    ids.map((id) => unlink(path.join(sessionsDir, `${id}.json`))),
+  )
+  const deleted: string[] = []
+  const failed: DeleteAllSessionsResult['failed'] = []
+  for (const [index, result] of results.entries()) {
+    const id = ids[index] as string
+    if (result.status === 'fulfilled' || (result.reason as NodeJS.ErrnoException)?.code === 'ENOENT') {
+      deleted.push(id)
+    } else {
+      failed.push({
+        id,
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      })
+    }
+  }
+  return { deleted, failed }
 }
 
 export async function exportSession(

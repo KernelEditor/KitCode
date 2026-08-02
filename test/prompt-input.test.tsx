@@ -3,6 +3,7 @@ import { render } from 'ink'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { PromptInput } from '../src/ui/components/PromptInput'
+import type { PromptInputProps } from '../src/ui/types'
 
 describe('slash command keyboard navigation', () => {
   it('moves with arrows and activates the selected command with enter', async () => {
@@ -54,11 +55,47 @@ describe('slash command keyboard navigation', () => {
       terminal.cleanup()
     }
   })
+
+  it('turns a bracketed pasted path into an attachment request', async () => {
+    const pastedPath = vi.fn(async () => true)
+    const changes: string[] = []
+    const terminal = renderPrompt(
+      vi.fn(),
+      (value) => changes.push(value),
+      { onPastePath: pastedPath },
+    )
+    try {
+      await terminal.input('\u001b[200~/tmp/screenshot.png\u001b[201~')
+      expect(pastedPath).toHaveBeenCalledWith('/tmp/screenshot.png')
+      expect(changes).toEqual([])
+    } finally {
+      terminal.cleanup()
+    }
+  })
+
+  it('keeps normal pasted text editable and maps ctrl-v to clipboard images', async () => {
+    const changes: string[] = []
+    const pasteImage = vi.fn()
+    const terminal = renderPrompt(
+      vi.fn(),
+      (value) => changes.push(value),
+      { onPasteImage: pasteImage },
+    )
+    try {
+      await terminal.input('\u001b[200~hello from clipboard\u001b[201~')
+      expect(changes.at(-1)).toBe('hello from clipboard')
+      await terminal.input('\u0016')
+      expect(pasteImage).toHaveBeenCalledOnce()
+    } finally {
+      terminal.cleanup()
+    }
+  })
 })
 
 function renderPrompt(
   onSubmit: (value: string) => void,
   observeChange: (value: string) => void = () => undefined,
+  extra: Pick<PromptInputProps, 'onPastePath' | 'onPasteImage'> = {},
 ) {
   const stdin = new PassThrough() as PassThrough & NodeJS.ReadStream
   const stdout = new PassThrough() as PassThrough & NodeJS.WriteStream
@@ -82,6 +119,7 @@ function renderPrompt(
           observeChange(next)
         }}
         onSubmit={onSubmit}
+        {...extra}
         disabled={false}
         history={[]}
       />

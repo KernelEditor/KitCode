@@ -20,7 +20,11 @@ import type { TurnBudget } from '../core/budget'
 import { beginCheckpoint, undoLatestCheckpoint } from '../core/checkpoint'
 import type { FileCheckpoint } from '../core/checkpoint'
 import { runAutomaticDiagnostics } from '../core/diagnostics'
-import { loadAttachment } from '../core/attachments'
+import {
+  loadAttachment,
+  loadAutomaticAttachment,
+  loadClipboardImage as readClipboardImage,
+} from '../core/attachments'
 import {
   compactCutIndex,
   compactHistory,
@@ -30,6 +34,7 @@ import {
 import { buildSystemPrompt } from '../core/prompt'
 import {
   createSession,
+  deleteAllSessions as deleteAllStoredSessions,
   deleteSession as deleteStoredSession,
   exportSession as exportStoredSession,
   latestSessionFor,
@@ -417,6 +422,7 @@ export async function boot(options: {
     },
 
     async listSessionItems() {
+      await persistQueue.catch(() => undefined)
       const entries = await listSessions(30)
       return entries.map((entry) => ({
         key: entry.id,
@@ -454,6 +460,17 @@ export async function boot(options: {
       latestRateLimits = undefined
       notifyContext()
       return { id: resolved, wasActive: true, newSessionId: session.id }
+    },
+
+    async deleteAllSessions() {
+      await persistQueue.catch(() => undefined)
+      const result = await deleteAllStoredSessions()
+      session = createSession(options.cwd, modelRef)
+      usage.restore([])
+      contextUsage = undefined
+      latestRateLimits = undefined
+      notifyContext()
+      return { deleted: result.deleted.length, failed: result.failed }
     },
 
     async exportSession(id, destination) {
@@ -665,6 +682,14 @@ export async function boot(options: {
 
     async loadAttachment(requestedPath) {
       return (await loadAttachment(options.cwd, requestedPath)).block
+    },
+
+    async loadAutomaticAttachment(requestedPath) {
+      return (await loadAutomaticAttachment(options.cwd, requestedPath))?.block ?? null
+    },
+
+    async loadClipboardImage() {
+      return readClipboardImage()
     },
 
     async compact(history, signal) {

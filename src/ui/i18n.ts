@@ -82,6 +82,12 @@ export interface Strings {
   sessionRenamed: (title: string) => string
   sessionDeleteAsk: string
   sessionDeleted: (id: string) => string
+  sessionDeleteAllAsk: string
+  sessionDeleteAllAskBody: string
+  sessionDeleteAllFinalAsk: string
+  sessionDeleteAllFinalBody: string
+  sessionsDeletedAll: (count: number) => string
+  sessionsDeleteAllFailed: (deleted: number, failed: number) => string
   sessionExported: (path: string) => string
   sessionActionResume: string
   sessionActionRename: string
@@ -202,7 +208,8 @@ const en: Strings = {
     error: 'error',
     disabled: 'disabled',
   },
-  attachUsage: 'Usage: /attach <image-or-text-file> · /attach clear',
+  attachUsage:
+    'Usage: /attach <image-or-text-file> · /attach clipboard · /attach clear',
   attachmentAdded: (name) => `Attached for the next message: ${name}`,
   attachmentsCleared: 'Pending attachments cleared.',
   compactNothing: 'Not enough older conversation to compact yet.',
@@ -211,6 +218,15 @@ const en: Strings = {
   sessionRenamed: (title) => `Session renamed to "${title}".`,
   sessionDeleteAsk: 'The saved chat file will be deleted. This cannot be undone.',
   sessionDeleted: (id) => `Session ${id} deleted.`,
+  sessionDeleteAllAsk: 'Delete every saved chat?',
+  sessionDeleteAllAskBody:
+    'All KitCode sessions from every workspace will be permanently deleted.',
+  sessionDeleteAllFinalAsk: 'Final confirmation: delete all chats?',
+  sessionDeleteAllFinalBody:
+    'This cannot be undone. Press y only if you want to erase the complete session history.',
+  sessionsDeletedAll: (count) => `All saved chats deleted · ${count} sessions removed.`,
+  sessionsDeleteAllFailed: (deleted, failed) =>
+    `Session cleanup was incomplete · ${deleted} removed, ${failed} failed.`,
   sessionExported: (path) => `Session exported to ${path}`,
   sessionActionResume: 'resume',
   sessionActionRename: 'rename',
@@ -283,6 +299,7 @@ const en: Strings = {
     'sessions list': 'list saved sessions',
     'sessions rename': 'rename a saved session',
     'sessions delete': 'delete a saved session',
+    'sessions delete all': 'permanently delete every saved chat',
     'sessions export': 'export a session to Markdown',
     config: 'show where the config lives',
     resume: 'reopen a past chat',
@@ -366,7 +383,8 @@ const ru: Strings = {
     error: 'ошибка',
     disabled: 'отключён',
   },
-  attachUsage: 'Использование: /attach <картинка-или-текстовый-файл> · /attach clear',
+  attachUsage:
+    'Использование: /attach <картинка-или-текстовый-файл> · /attach clipboard · /attach clear',
   attachmentAdded: (name) => `Прикреплено к следующему сообщению: ${name}`,
   attachmentsCleared: 'Ожидающие вложения убраны.',
   compactNothing: 'Пока недостаточно старых сообщений для сжатия контекста.',
@@ -375,6 +393,15 @@ const ru: Strings = {
   sessionRenamed: (title) => `Сессия переименована в «${title}».`,
   sessionDeleteAsk: 'Файл сохранённого чата будет удалён без возможности восстановления.',
   sessionDeleted: (id) => `Сессия ${id} удалена.`,
+  sessionDeleteAllAsk: 'Удалить вообще все сохранённые чаты?',
+  sessionDeleteAllAskBody:
+    'Будут навсегда удалены все сессии KitCode из всех рабочих папок.',
+  sessionDeleteAllFinalAsk: 'Последнее подтверждение: точно удалить все чаты?',
+  sessionDeleteAllFinalBody:
+    'Это нельзя отменить. Нажимай y только если хочешь стереть всю историю сессий.',
+  sessionsDeletedAll: (count) => `Все сохранённые чаты удалены · сессий: ${count}.`,
+  sessionsDeleteAllFailed: (deleted, failed) =>
+    `Удаление завершено не полностью · удалено: ${deleted}, ошибок: ${failed}.`,
   sessionExported: (path) => `Сессия экспортирована: ${path}`,
   sessionActionResume: 'открыть',
   sessionActionRename: 'переименовать',
@@ -447,6 +474,7 @@ const ru: Strings = {
     'sessions list': 'список сохранённых сессий',
     'sessions rename': 'переименовать сессию',
     'sessions delete': 'удалить сессию',
+    'sessions delete all': 'навсегда удалить все сохранённые чаты',
     'sessions export': 'экспортировать сессию в Markdown',
     config: 'где лежит конфиг',
     resume: 'открыть прошлый чат',

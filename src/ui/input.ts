@@ -1,4 +1,4 @@
-import { useInput } from 'ink'
+import { useInput, usePaste } from 'ink'
 import type { Key } from 'ink'
 import { useRef } from 'react'
 
@@ -21,4 +21,15 @@ export function useTerminalInput(
     if (key.eventType === 'release') return
     handlerRef.current(input, key)
   }, options)
+}
+
+/** Keep paste handlers fresh for the same reason as useTerminalInput. */
+export function useTerminalPaste(
+  handler: (text: string) => void,
+  options: { isActive?: boolean } = {},
+): void {
+  const handlerRef = useRef(handler)
+  handlerRef.current = handler
+
+  usePaste((text) => handlerRef.current(text), options)
 }

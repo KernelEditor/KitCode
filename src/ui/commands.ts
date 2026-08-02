@@ -17,10 +17,10 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'bypass' },
   { name: 'usage' },
   { name: 'mcp', args: '[add|list|delete|enable|disable]' },
-  { name: 'attach', args: '<path|clear>' },
+  { name: 'attach', args: '<path|clipboard|clear>' },
   { name: 'compact' },
   { name: 'checker' },
-  { name: 'sessions', args: '[list|rename|delete|export]' },
+  { name: 'sessions', args: '[list|rename|delete [all]|export]' },
   { name: 'config' },
   { name: 'resume' },
   { name: 'undo' },
@@ -38,6 +38,7 @@ const SUBCOMMANDS: SlashCommand[] = [
   { name: 'sessions list' },
   { name: 'sessions rename', args: '[id] <title>' },
   { name: 'sessions delete', args: '[id]' },
+  { name: 'sessions delete all' },
   { name: 'sessions export', args: '[id] [path]' },
 ]
 

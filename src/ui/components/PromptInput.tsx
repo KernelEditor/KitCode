@@ -1,10 +1,11 @@
 import { Box, Text } from 'ink'
 import type { Key } from 'ink'
 import { memo, useEffect, useRef, useState } from 'react'
+import { looksLikeAttachmentPath } from '../../core/attachments'
 import { matchCommands } from '../commands'
 import { moveInputHistory } from '../history'
 import { useStrings } from '../i18n'
-import { useTerminalInput } from '../input'
+import { useTerminalInput, useTerminalPaste } from '../input'
 import { useTheme } from '../theme'
 import { sanitizeTerminalText } from '../sanitize'
 import type { PromptInputProps } from '../types'
@@ -15,6 +16,8 @@ export const PromptInput = memo(function PromptInput({
   value,
   onChange,
   onSubmit,
+  onPastePath,
+  onPasteImage,
   disabled,
   pending,
   hint,
@@ -29,6 +32,10 @@ export const PromptInput = memo(function PromptInput({
   const [historyIndex, setHistoryIndex] = useState<number | null>(null)
   const historyDraft = useRef('')
   const pendingValue = useRef<string | null>(null)
+  const valueRef = useRef(safeValue)
+  const cursorRef = useRef(inputCursor)
+  valueRef.current = safeValue
+  cursorRef.current = inputCursor
 
   const suggestions = matchCommands(safeValue)
   const open = suggestions.length > 0
@@ -52,8 +59,11 @@ export const PromptInput = memo(function PromptInput({
 
   const change = (next: string, cursor = characters(next).length) => {
     next = sanitizeTerminalText(next)
+    const nextCursor = clamp(cursor, 0, characters(next).length)
     pendingValue.current = next
-    setInputCursor(clamp(cursor, 0, characters(next).length))
+    valueRef.current = next
+    cursorRef.current = nextCursor
+    setInputCursor(nextCursor)
     setHistoryIndex(null)
     historyDraft.current = next
     onChange(next)
@@ -65,7 +75,35 @@ export const PromptInput = memo(function PromptInput({
     onSubmit(next)
   }
 
+  const insertPastedText = (pasted: string) => {
+    const inserted = characters(sanitizeTerminalText(pasted))
+    if (inserted.length === 0) return
+    const valueCharacters = characters(valueRef.current)
+    const cursor = clamp(cursorRef.current, 0, valueCharacters.length)
+    valueCharacters.splice(cursor, 0, ...inserted)
+    change(valueCharacters.join(''), cursor + inserted.length)
+  }
+
+  useTerminalPaste((pasted) => {
+    const safePaste = sanitizeTerminalText(pasted)
+    if (onPastePath && looksLikeAttachmentPath(safePaste)) {
+      void onPastePath(safePaste).then((consumed) => {
+        if (!consumed) insertPastedText(safePaste)
+      })
+      return
+    }
+    insertPastedText(safePaste)
+  })
+
   useTerminalInput((input, key) => {
+    if (
+      onPasteImage &&
+      (key.ctrl || key.meta || key.super) &&
+      (input.toLowerCase() === 'v' || input === '\u0016')
+    ) {
+      onPasteImage()
+      return
+    }
     if (open && key.upArrow) {
       setSelectionCursor(Math.max(0, active - 1))
       return

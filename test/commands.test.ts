@@ -38,6 +38,10 @@ describe('matchCommands', () => {
     expect(names('/mcp d')).toEqual(['mcp delete', 'mcp disable'])
   })
 
+  it('offers the guarded delete-all session command', () => {
+    expect(names('/sessions delete a')).toEqual(['sessions delete all'])
+  })
+
   it('ignores plain text', () => {
     expect(matchCommands('hello')).toEqual([])
   })

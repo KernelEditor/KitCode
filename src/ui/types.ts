@@ -53,6 +53,9 @@ export interface PromptInputProps {
   value: string
   onChange(value: string): void
   onSubmit(value: string): void
+  /** Return true when a pasted standalone path was consumed as an attachment. */
+  onPastePath?(value: string): Promise<boolean>
+  onPasteImage?(): void
   disabled: boolean
   pending?: number
   hint?: string

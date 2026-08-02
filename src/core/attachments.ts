@@ -1,10 +1,32 @@
+import { execFile } from 'node:child_process'
 import { readFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { ContentBlock, FileBlock, ImageBlock } from '../providers/types'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_TEXT_BYTES = 256 * 1024
+const MAX_CLIPBOARD_OUTPUT_BYTES = MAX_IMAGE_BYTES + 64 * 1024
+
+const AUTO_PATH_NAMES = new Set(['dockerfile', 'license', 'makefile', 'readme'])
+const SENSITIVE_AUTO_NAMES = new Set([
+  '.env',
+  '.netrc',
+  '.npmrc',
+  '.pypirc',
+  'auth.json',
+  'credentials.json',
+  'id_dsa',
+  'id_ed25519',
+  'id_ecdsa',
+  'id_rsa',
+  'kitcode.json',
+  'secret.json',
+  'secrets.json',
+  'tokens.json',
+])
+const SENSITIVE_AUTO_EXTENSIONS = new Set(['.jks', '.key', '.keystore', '.p12', '.pem', '.pfx'])
 
 export interface LoadedAttachment {
   block: ImageBlock | FileBlock
@@ -12,19 +34,97 @@ export interface LoadedAttachment {
   path: string
 }
 
+export type ClipboardCommandRunner = (command: string, args: string[]) => Promise<Buffer>
+
 export async function loadAttachment(cwd: string, requestedPath: string): Promise<LoadedAttachment> {
-  const cleaned = normalizeInputPath(requestedPath.trim())
-  if (!cleaned) throw new Error('Give a file path: /attach <path>')
-  const expanded = cleaned === '~' ? os.homedir() : cleaned.startsWith('~/') ? path.join(os.homedir(), cleaned.slice(2)) : cleaned
-  const resolved = path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(cwd, expanded)
+  const resolved = resolveAttachmentPath(cwd, requestedPath)
   const info = await stat(resolved).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') throw new Error(`Attachment not found: ${resolved}`)
     throw error
   })
   if (!info.isFile()) throw new Error(`Attachment is not a regular file: ${resolved}`)
 
+  return loadResolvedAttachment(resolved, info.size)
+}
+
+/**
+ * Treat a pasted or dragged standalone path as an attachment only when it
+ * resolves to a real supported file. Ordinary prose never causes a file read.
+ */
+export async function loadAutomaticAttachment(
+  cwd: string,
+  requestedPath: string,
+): Promise<LoadedAttachment | null> {
+  if (!looksLikeAttachmentPath(requestedPath)) return null
+  const resolved = resolveAttachmentPath(cwd, requestedPath)
+  const info = await stat(resolved).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null
+    throw error
+  })
+  if (!info?.isFile()) return null
+  if (isSensitiveAutomaticPath(resolved)) {
+    throw new Error(
+      `For safety, sensitive-looking files must be attached explicitly with /attach: ${path.basename(resolved)}`,
+    )
+  }
+  return loadResolvedAttachment(resolved, info.size)
+}
+
+export function looksLikeAttachmentPath(value: string): boolean {
+  const trimmed = value.trim()
+  if (!trimmed || /[\r\n\0]/.test(trimmed)) return false
+  const candidate = normalizeInputPath(trimmed)
+  if (/^file:\/\//i.test(candidate)) return true
+  if (path.isAbsolute(candidate)) return true
+  if (/^(?:~|\.{1,2})[\\/]/.test(candidate)) return true
+  if (candidate.includes('/') || candidate.includes('\\')) return true
+  const basename = path.basename(candidate).toLowerCase()
+  return path.extname(basename) !== '' || AUTO_PATH_NAMES.has(basename)
+}
+
+/** Read an image from the OS clipboard without creating a persistent file. */
+export async function loadClipboardImage(
+  platform: NodeJS.Platform = process.platform,
+  runner: ClipboardCommandRunner = runClipboardCommand,
+): Promise<ImageBlock> {
+  const commands = clipboardCommands(platform)
+  if (commands.length === 0) {
+    throw new Error(`Clipboard image paste is not supported on ${platform}. Use /attach <path>.`)
+  }
+
+  for (const command of commands) {
+    try {
+      const data = await runner(command.file, command.args)
+      if (data.length === 0) continue
+      const mediaType = detectImage(data)
+      if (!mediaType) continue
+      if (data.length > MAX_IMAGE_BYTES) {
+        throw new Error(`Clipboard image is larger than ${formatBytes(MAX_IMAGE_BYTES)}.`)
+      }
+      return {
+        type: 'image',
+        mediaType,
+        data: data.toString('base64'),
+        name: clipboardImageName(mediaType),
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Clipboard image is larger')) {
+        throw error
+      }
+    }
+  }
+
+  const hint =
+    platform === 'linux'
+      ? 'Copy an image first; Linux requires wl-paste or xclip.'
+      : 'Copy an image first, then press Ctrl+V or Cmd+V again.'
+  throw new Error(`No supported image found in the clipboard. ${hint}`)
+}
+
+async function loadResolvedAttachment(resolved: string, size: number): Promise<LoadedAttachment> {
+
   const name = safeName(path.basename(resolved))
-  const imageLimitCandidate = info.size <= MAX_IMAGE_BYTES
+  const imageLimitCandidate = size <= MAX_IMAGE_BYTES
   if (!imageLimitCandidate) {
     throw new Error(`Attachment is larger than ${formatBytes(MAX_IMAGE_BYTES)}: ${name}`)
   }
@@ -55,6 +155,34 @@ export async function loadAttachment(cwd: string, requestedPath: string): Promis
   }
 }
 
+function resolveAttachmentPath(cwd: string, requestedPath: string): string {
+  const cleaned = normalizeInputPath(requestedPath.trim())
+  if (!cleaned) throw new Error('Give a file path: /attach <path>')
+  if (/^file:\/\//i.test(cleaned)) {
+    try {
+      return path.normalize(fileURLToPath(cleaned))
+    } catch {
+      throw new Error(`Invalid local file URL: ${cleaned}`)
+    }
+  }
+  const expanded =
+    cleaned === '~'
+      ? os.homedir()
+      : cleaned.startsWith('~/')
+        ? path.join(os.homedir(), cleaned.slice(2))
+        : cleaned
+  return path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(cwd, expanded)
+}
+
+function isSensitiveAutomaticPath(file: string): boolean {
+  const basename = path.basename(file).toLowerCase()
+  return (
+    basename.startsWith('.env.') ||
+    SENSITIVE_AUTO_NAMES.has(basename) ||
+    SENSITIVE_AUTO_EXTENSIONS.has(path.extname(basename))
+  )
+}
+
 export function attachmentLabel(block: ContentBlock): string | null {
   if (block.type === 'image') return `image: ${block.name}`
   if (block.type === 'file') return `file: ${block.name}`
@@ -82,6 +210,94 @@ function detectImage(data: Buffer): ImageBlock['mediaType'] | null {
   }
   return null
 }
+
+function clipboardImageName(mediaType: ImageBlock['mediaType']): string {
+  if (mediaType === 'image/jpeg') return 'clipboard.jpg'
+  if (mediaType === 'image/gif') return 'clipboard.gif'
+  if (mediaType === 'image/webp') return 'clipboard.webp'
+  return 'clipboard.png'
+}
+
+function clipboardCommands(platform: NodeJS.Platform): Array<{ file: string; args: string[] }> {
+  if (platform === 'darwin') {
+    return [{ file: 'osascript', args: ['-l', 'JavaScript', '-e', MACOS_CLIPBOARD_SCRIPT] }]
+  }
+  if (platform === 'win32') {
+    return [
+      {
+        file: 'powershell.exe',
+        args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Sta', '-Command', WINDOWS_CLIPBOARD_SCRIPT],
+      },
+    ]
+  }
+  if (platform === 'linux') {
+    const types = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+    return [
+      ...types.map((type) => ({ file: 'wl-paste', args: ['--no-newline', '--type', type] })),
+      ...types.map((type) => ({
+        file: 'xclip',
+        args: ['-selection', 'clipboard', '-t', type, '-o'],
+      })),
+    ]
+  }
+  return []
+}
+
+function runClipboardCommand(command: string, args: string[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      command,
+      args,
+      {
+        encoding: null,
+        maxBuffer: MAX_CLIPBOARD_OUTPUT_BYTES,
+        timeout: 5000,
+        windowsHide: true,
+      },
+      (error, stdout) => {
+        if (error) reject(error)
+        else resolve(Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout))
+      },
+    )
+  })
+}
+
+const MACOS_CLIPBOARD_SCRIPT = String.raw`
+ObjC.import('AppKit')
+ObjC.import('Foundation')
+const pasteboard = $.NSPasteboard.generalPasteboard
+let data = pasteboard.dataForType($.NSPasteboardTypePNG)
+if (!data) {
+  const tiff = pasteboard.dataForType($.NSPasteboardTypeTIFF)
+  if (tiff) {
+    const bitmap = $.NSBitmapImageRep.imageRepWithData(tiff)
+    if (bitmap) {
+      data = bitmap.representationUsingTypeProperties(
+        $.NSBitmapImageFileTypePNG,
+        $.NSDictionary.dictionary,
+      )
+    }
+  }
+}
+if (!data) throw new Error('no clipboard image')
+$.NSFileHandle.fileHandleWithStandardOutput.writeData(data)
+`
+
+const WINDOWS_CLIPBOARD_SCRIPT = String.raw`
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$image = [System.Windows.Forms.Clipboard]::GetImage()
+if ($null -eq $image) { exit 2 }
+$stream = New-Object System.IO.MemoryStream
+try {
+  $image.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+  $bytes = $stream.ToArray()
+  [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)
+} finally {
+  $stream.Dispose()
+  $image.Dispose()
+}
+`
 
 function textMime(file: string): string {
   const extension = path.extname(file).toLowerCase()

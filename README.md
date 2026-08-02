@@ -106,8 +106,9 @@ Press `/` to open the command list.
 | `/resume` · `/clear` | Resume a session or start a new one. |
 | `/sessions` | Search sessions, then resume, rename, delete, or export one. |
 | `/sessions rename <id> <title>` | Give a saved session a title. |
+| `/sessions delete all` | Delete every saved chat after two separate confirmations. |
 | `/sessions export <id> [path]` | Export a session to a private Markdown file (default: `.kitcode-exports/`). |
-| `/attach <path>` · `/attach clear` | Attach a supported image or UTF-8 text file to the next message. |
+| `/attach <path>` · `/attach clipboard` · `/attach clear` | Manage attachments for the next message. |
 | `/compact` | Replace older conversation context with a concise model-generated summary. |
 | `/undo` | Undo built-in file edits from the latest message. |
 | `/usage` | Show tokens, requests, cost, balance/key limits, and response rate-limit headers when available. |
@@ -133,6 +134,7 @@ Press `/` to open the command list.
 | `↑` / `↓` | Browse input history or menu items. |
 | `Tab` | Complete a slash command. |
 | `Shift+Tab` | Cycle `normal → accept → plan`. |
+| `Ctrl+V` / `Cmd+V` | Attach an image from the system clipboard; `/attach clipboard` is the explicit fallback. |
 | `Esc` | Cancel the current request or close an overlay. |
 
 Messages entered while the agent is running are queued and processed in order.
@@ -242,7 +244,8 @@ A skill is a directory containing a `SKILL.md` file. Global skills live in
 `~/.kitcode/skills`; project skills live in `./.kitcode/skills`.
 
 Attachments support PNG, JPEG, GIF, and WebP images up to 10 MB, plus UTF-8 text files up to
-256 KB. File contents are sent only when the attachment is submitted with a message.
+256 KB. Pasting or dragging a standalone existing path queues it automatically and displays a
+chip below the prompt. File contents are sent only when the attachment is submitted with a message.
 
 ## Development
 

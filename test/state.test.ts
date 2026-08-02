@@ -16,6 +16,7 @@ const {
   listSessions,
   renameSession,
   deleteSession,
+  deleteAllSessions,
   exportSession,
 } = await import('../src/core/session')
 const { getPrompt, listPrompts, savePrompt, searchPrompts, deletePrompt } = await import(
@@ -300,5 +301,19 @@ describe('saveSession', () => {
 
     expect(await deleteSession(session.id)).toBe(session.id)
     await expect(loadSession(session.id)).rejects.toThrow(/No session found/)
+  })
+
+  it('deletes every session file without touching unrelated files', async () => {
+    const first = createSession('/tmp/one', 'provider/model')
+    const second = createSession('/tmp/two', 'provider/model')
+    await Promise.all([saveSession(first), saveSession(second)])
+    const unrelated = path.join(sessionsDir, 'keep.txt')
+    await writeFile(unrelated, 'keep', 'utf8')
+
+    const result = await deleteAllSessions()
+    expect(result.failed).toEqual([])
+    expect(result.deleted).toEqual(expect.arrayContaining([first.id, second.id]))
+    expect(await listSessions(100)).toEqual([])
+    await expect(stat(unrelated)).resolves.toBeDefined()
   })
 })
