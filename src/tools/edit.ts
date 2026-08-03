@@ -109,17 +109,13 @@ export const editTool: Tool = {
     }
 
     try {
-      const rechecked = resolveInside(ctx.cwd, path)
-      if (!rechecked.ok || rechecked.path !== safe.path) {
-        return { content: `Cannot edit ${path}: its resolved location changed.`, isError: true }
-      }
-      await ctx.checkpoint?.capture(rechecked.path)
-      const finalPath = resolveInside(ctx.cwd, path)
-      if (!finalPath.ok || finalPath.path !== rechecked.path) {
-        return { content: `Cannot edit ${path}: its resolved location changed.`, isError: true }
-      }
-      await writeFile(finalPath.path, after, 'utf8')
-      ctx.checkpoint?.markChanged(finalPath.path)
+      await ctx.checkpoint?.capture(safe.path)
+    } catch (error) {
+      return { content: `Checkpoint capture failed: ${(error as Error).message}`, isError: true }
+    }
+    try {
+      await writeFile(safe.path, after, 'utf8')
+      ctx.checkpoint?.markChanged(safe.path)
     } catch (error) {
       return { content: `Failed to write ${path}: ${(error as Error).message}`, isError: true }
     }

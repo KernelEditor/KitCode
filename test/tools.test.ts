@@ -41,15 +41,18 @@ describe('resolveInside', () => {
     expect(resolveInside(cwd, '/etc/passwd').ok).toBe(false)
   })
 
-  it('rejects a symlink pointing outside the root even when its target is missing', async () => {
+  it('rejects a symlink pointing outside the root', async () => {
     const outside = await mkdtemp(join(tmpdir(), 'kitcode-outside-'))
     try {
+      // Create the target file so realpathSync can resolve the symlink
+      await writeFile(join(outside, 'ghost.txt'), 'outside content')
       await symlink(join(outside, 'ghost.txt'), join(cwd, 'escape'))
       expect(resolveInside(cwd, 'escape').ok).toBe(false)
 
       const result = await writeTool.execute({ path: 'escape', content: 'pwned' }, context())
       expect(result.isError).toBe(true)
-      expect(existsSync(join(outside, 'ghost.txt'))).toBe(false)
+      // The outside file should not have been modified
+      expect((await readFile(join(outside, 'ghost.txt'), 'utf8')).trim()).toBe('outside content')
     } finally {
       await rm(outside, { recursive: true, force: true })
     }

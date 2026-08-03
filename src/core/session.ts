@@ -344,7 +344,7 @@ export async function resolveSessionId(query: string): Promise<string> {
 }
 
 function assertSessionId(id: string): void {
-  if (!/^[A-Za-z0-9._-]{1,240}$/.test(id) || id.includes('..')) {
+  if (!/^[A-Za-z0-9_-]{1,240}$/.test(id)) {
     throw new Error(`Invalid session id: ${id}`)
   }
 }

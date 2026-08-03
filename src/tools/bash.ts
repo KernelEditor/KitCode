@@ -118,7 +118,11 @@ export const bashTool: Tool = {
         if (truncated) notes.push(`[output truncated at ${MAX_OUTPUT} characters]`)
         if (aborted) notes.push('[command was cancelled]')
         else if (timedOut) notes.push(`[command timed out after ${timeout}ms]`)
-        if (code !== 0) notes.push(`[exit ${signal ? `signal ${signal}` : `code ${code}`}]`)
+        // Only report the exit code when the process was not intentionally killed —
+        // otherwise the note is redundant (the cancel/timeout note already explains it).
+        if (code !== 0 && !aborted && !timedOut) {
+          notes.push(`[exit ${signal ? `signal ${signal}` : `code ${code}`}]`)
+        }
         const body = output.trim() === '' ? '(no output)' : output.replace(/\n+$/, '')
         finish({ content: [body, ...notes].join('\n'), isError: aborted || timedOut || code !== 0 })
       })

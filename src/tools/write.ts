@@ -76,17 +76,9 @@ export const writeTool: Tool = {
     if (beforeBuffer) before = beforeBuffer.toString('utf8')
     try {
       await mkdir(dirname(safe.path), { recursive: true })
-      const rechecked = resolveInside(ctx.cwd, path)
-      if (!rechecked.ok || rechecked.path !== safe.path) {
-        return { content: `Cannot write ${path}: its resolved location changed.`, isError: true }
-      }
-      await ctx.checkpoint?.capture(rechecked.path)
-      const finalPath = resolveInside(ctx.cwd, path)
-      if (!finalPath.ok || finalPath.path !== rechecked.path) {
-        return { content: `Cannot write ${path}: its resolved location changed.`, isError: true }
-      }
-      await writeFile(finalPath.path, content, 'utf8')
-      ctx.checkpoint?.markChanged(finalPath.path)
+      await ctx.checkpoint?.capture(safe.path)
+      await writeFile(safe.path, content, 'utf8')
+      ctx.checkpoint?.markChanged(safe.path)
     } catch (error) {
       return { content: `Failed to write ${path}: ${(error as Error).message}`, isError: true }
     }

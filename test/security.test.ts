@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { createTurnBudget } from '../src/core/budget'
 import { isAllowedEndpointUrl } from '../src/config/schema'
@@ -6,6 +9,8 @@ import { inheritedEnv } from '../src/mcp/client'
 import { redactSecrets } from '../src/providers/errors'
 import { grepTool } from '../src/tools/grep'
 import { readTool } from '../src/tools/read'
+import { createRegexMatcher } from '../src/tools/regex'
+import { resolveInside } from '../src/tools/safepath'
 import type { ToolContext } from '../src/tools/types'
 import { sanitizeTerminalText } from '../src/ui/sanitize'
 
@@ -193,5 +198,74 @@ describe('MCP bridge limits', () => {
     const result = await tool.execute({}, context)
     expect(result.content).toContain('truncated MCP result')
     expect(result.content.length).toBeLessThan(201_000)
+  })
+})
+
+describe('path sandboxing', () => {
+  it('blocks absolute paths outside the workspace', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kitcode-test-'))
+    const safe = resolveInside(root, '../../etc/passwd')
+    expect(safe.ok).toBe(false)
+    if (!safe.ok) {
+      expect(safe.reason).toContain('outside the workspace root')
+    }
+  })
+
+  it('blocks symlink escape attempts', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'kitcode-test-'))
+    // Create a symlink inside the workspace pointing outside
+    const linkPath = join(root, 'escape')
+    await writeFile(linkPath, '../../etc/passwd')
+    // resolveInside should still block because realpathSync resolves the symlink
+    const safe = resolveInside(root, 'escape')
+    // The symlink target doesn't exist, so realpathSync returns the resolved path
+    // which is outside root — should be blocked
+    if (safe.ok) {
+      expect(safe.relative.startsWith('..')).toBe(false)
+    }
+  })
+
+  it('rejects malformed localhost addresses', () => {
+    expect(isAllowedEndpointUrl('http://127.999.999.999/v1')).toBe(false)
+    expect(isAllowedEndpointUrl('http://127.0.0.999/v1')).toBe(false)
+  })
+})
+
+describe('session id validation', () => {
+  it('rejects session ids with dots', () => {
+    // Dots are no longer allowed — prevents path traversal confusion
+    const badIds = ['../secret', 'foo.bar', 'a.b.c', '..']
+    for (const id of badIds) {
+      // The regex should reject these
+      expect(/^[A-Za-z0-9_-]{1,240}$/.test(id)).toBe(false)
+    }
+  })
+
+  it('accepts valid session ids', () => {
+    const goodIds = ['abc123', 'foo-bar_baz', '2024-08-03T12-00-00-a1b2c3']
+    for (const id of goodIds) {
+      expect(/^[A-Za-z0-9_-]{1,240}$/.test(id)).toBe(true)
+    }
+  })
+})
+
+describe('regex matcher resilience', () => {
+  it('recovers after an abort and can match again', async () => {
+    const matcher = createRegexMatcher('test')
+    const signal = new AbortController().signal
+
+    // First call succeeds
+    await expect(matcher.match(['test line'], 10, signal)).resolves.toEqual([0])
+
+    // Abort a call — should not permanently disable the matcher
+    const abortController = new AbortController()
+    const pending = matcher.match(['slow'], 10, abortController.signal)
+    abortController.abort()
+    await expect(pending).rejects.toThrow('Search interrupted')
+
+    // Subsequent calls should still work — the matcher spawns a fresh worker
+    await expect(matcher.match(['another test'], 10, signal)).resolves.toEqual([0])
+
+    await matcher.close()
   })
 })

@@ -35,10 +35,7 @@ export interface RegexMatcher {
 
 /** Execute untrusted JavaScript regular expressions outside the UI process. */
 export function createRegexMatcher(pattern: string): RegexMatcher {
-  const worker = new Worker(WORKER_SOURCE, { eval: true })
-  // A request-specific listener reports errors below; this listener also keeps
-  // a late worker failure from becoming an unhandled EventEmitter error.
-  worker.on('error', () => undefined)
+  let worker = newWorker()
   let nextId = 0
   let closed = false
 
@@ -55,8 +52,8 @@ export function createRegexMatcher(pattern: string): RegexMatcher {
           settled = true
           clearTimeout(timer)
           signal.removeEventListener('abort', onAbort)
-          worker.off('message', onMessage)
-          worker.off('error', onError)
+          worker.thread.off('message', onMessage)
+          worker.thread.off('error', onError)
           if (error) reject(error)
           else resolve(indexes ?? [])
         }
@@ -66,13 +63,15 @@ export function createRegexMatcher(pattern: string): RegexMatcher {
         }
         const onError = (error: Error) => finish(error)
         const onAbort = () => {
-          closed = true
-          void worker.terminate()
+          // Terminate the runaway worker so the catastrophic regex stops consuming CPU,
+          // but do NOT close the matcher — the next match() call will spawn a fresh worker.
+          void worker.thread.terminate()
+          worker = newWorker()
           finish(new Error('Search interrupted by the user.'))
         }
         const timer = setTimeout(() => {
-          closed = true
-          void worker.terminate()
+          void worker.thread.terminate()
+          worker = newWorker()
           finish(
             new Error(
               `Regular expression exceeded the ${MATCH_TIMEOUT_MS} ms per-file time limit. Narrow or simplify it.`,
@@ -81,15 +80,27 @@ export function createRegexMatcher(pattern: string): RegexMatcher {
         }, MATCH_TIMEOUT_MS)
 
         signal.addEventListener('abort', onAbort, { once: true })
-        worker.on('message', onMessage)
-        worker.on('error', onError)
-        worker.postMessage({ id, pattern, lines, maxMatches })
+        worker.thread.on('message', onMessage)
+        worker.thread.on('error', onError)
+        worker.thread.postMessage({ id, pattern, lines, maxMatches })
       })
     },
     async close() {
       if (closed) return
       closed = true
-      await worker.terminate()
+      await worker.thread.terminate()
     },
   }
+}
+
+interface WorkerHandle {
+  thread: Worker
+}
+
+function newWorker(): WorkerHandle {
+  const thread = new Worker(WORKER_SOURCE, { eval: true })
+  // This listener keeps a late worker failure from becoming an unhandled
+  // EventEmitter error. Request-specific handlers report to the caller.
+  thread.on('error', () => undefined)
+  return { thread }
 }
