@@ -4,6 +4,14 @@
   "description": "Terminal coding agent with a config you never have to write by hand",
   "type": "module",
   "license": "MIT",
+  "homepage": "https://github.com/PanicOnKernel/KitCode#readme",
+  "bugs": {
+    "url": "https://github.com/PanicOnKernel/KitCode/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PanicOnKernel/KitCode.git"
+  },
   "bin": {
     "kitcode": "dist/index.js"
   },
