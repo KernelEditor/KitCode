@@ -18,6 +18,15 @@ export type Bubble =
       display?: ToolDisplay
     }
   | { kind: 'notice'; id: string; level: 'info' | 'warn' | 'error'; text: string }
+  | {
+      kind: 'subagent'
+      id: string
+      description: string
+      state: 'running' | 'done'
+      result?: string
+      seq: number
+      bubbles: Bubble[]
+    }
 
 export interface StatusView {
   modelRef: string

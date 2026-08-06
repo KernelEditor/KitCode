@@ -934,9 +934,20 @@ export function App({
           return
         }
 
-        case 'subagents':
-          notice('info', strings.subagentsStatus(runtime.activeAgentsCount()))
+        case 'subagents': {
+          const agents = runtime.activeAgentsList()
+          if (agents.length === 0) {
+            notice('info', strings.subagentsStatus(0))
+            return
+          }
+          const lines = agents.map((a, i) => {
+            const label = a.description || `subagent ${i + 1}`
+            const progress = a.progress.length > 0 ? ` · ${a.progress[a.progress.length - 1]}` : ''
+            return `${label}${progress}`
+          })
+          notice('info', lines.join('\n'))
           return
+        }
 
         case 'checker':
           try {

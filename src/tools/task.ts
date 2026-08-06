@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { TASK_TOOL_NAME } from '../core/subagent'
 import type { SubagentRunner } from '../core/subagent'
 import { brief } from './summary'
@@ -50,14 +51,20 @@ export function createTaskTool(runner: SubagentRunner, maxSubagents = MAX_SUBAGE
       }
 
       const progress: string[] = []
+      const subagentId = `sa${randomBytes(4).toString('hex')}`
+      const description = field(input, 'description') || 'subagent'
+      ctx.onEvent?.({ type: 'subagent_start', id: subagentId, description })
       try {
         const content = await runner.run({
           prompt: instruction,
+          description,
           signal: ctx.signal,
           onProgress: (line) => progress.push(line),
+          onEvent: (event) => ctx.onEvent?.({ type: 'subagent_event', id: subagentId, event }),
           confirm: ctx.confirm,
           requestPermission: ctx.requestPermission,
         })
+        ctx.onEvent?.({ type: 'subagent_end', id: subagentId, result: content })
         if (progress.length === 0) return { content }
         return {
           content,
@@ -69,6 +76,7 @@ export function createTaskTool(runner: SubagentRunner, maxSubagents = MAX_SUBAGE
         }
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
+        ctx.onEvent?.({ type: 'subagent_end', id: subagentId, result: `The subagent failed: ${reason}` })
         return { content: `The subagent failed: ${reason}`, isError: true }
       }
     },

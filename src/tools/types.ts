@@ -1,4 +1,4 @@
-import type { PermissionDecision, PermissionRequest } from '../core/types'
+import type { AgentEvent, PermissionDecision, PermissionRequest } from '../core/types'
 import type { JsonSchema, ToolSchema } from '../providers/types'
 
 export type PermissionMode = 'allow' | 'ask' | 'deny'
@@ -14,6 +14,7 @@ export interface ToolContext {
   confirm(question: string): Promise<boolean>
   requestPermission?(request: PermissionRequest): Promise<PermissionDecision>
   checkpoint?: FileCheckpointSink
+  onEvent?(event: AgentEvent): void
 }
 
 export type ToolDisplay =

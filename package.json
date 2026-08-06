@@ -5,7 +5,7 @@
   "type": "module",
   "license": "MIT",
   "bin": {
-    "kitcode": "./dist/index.js"
+    "kitcode": "dist/index.js"
   },
   "files": [
     "dist"

@@ -287,12 +287,9 @@ function estimateRequestTokens(cfg: AgentConfig, messages: Message[]): number {
     ).length
     characters += JSON.stringify(cfg.tools.schemas()).length
   } catch {
-    
-    
     return Math.max(1, characters)
   }
-  
-  
+
   return Math.max(1, characters)
 }
 
@@ -327,6 +324,7 @@ async function runOneCall(
     signal,
     requestPermission: (request) => hooks.requestPermission(request),
     checkpoint: cfg.checkpoint,
+    onEvent: (event) => hooks.onEvent(event),
     confirm: async (question) =>
       (await hooks.requestPermission({
         toolName: tool.name,

@@ -21,6 +21,9 @@ export type AgentEvent =
   | { type: 'rate_limits'; model: string; limits: RateLimits }
   | { type: 'turn_end'; stopReason: StopReason }
   | { type: 'notice'; level: 'info' | 'warn' | 'error'; text: string }
+  | { type: 'subagent_start'; id: string; description: string }
+  | { type: 'subagent_end'; id: string; result: string }
+  | { type: 'subagent_event'; id: string; event: AgentEvent }
 
 export interface AgentHooks {
   onEvent(event: AgentEvent): void

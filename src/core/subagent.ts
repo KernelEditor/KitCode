@@ -2,7 +2,7 @@ import type { Message } from '../providers/types'
 import { brief } from '../tools/summary'
 import type { AgentConfig, ToolLookup } from './agent'
 import { runTurn } from './agent'
-import type { AgentHooks, PermissionDecision, PermissionRequest } from './types'
+import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from './types'
 
 export const TASK_TOOL_NAME = 'task'
 
@@ -25,8 +25,10 @@ const SUBAGENT_SYSTEM = [
 
 export interface SubagentRequest {
   prompt: string
+  description?: string
   signal: AbortSignal
   onProgress(summary: string): void
+  onEvent?(event: AgentEvent): void
   confirm?(question: string): Promise<boolean>
   requestPermission?(request: PermissionRequest): Promise<PermissionDecision>
 }
@@ -63,6 +65,8 @@ export function createSubagentRunner(
         onEvent(event) {
           if (event.type === 'turn_start' && ++steps > MAX_SUBAGENT_STEPS) limit.abort()
           if (event.type === 'tool_start') request.onProgress(brief(event.summary, 80))
+          if (event.type === 'subagent_start' || event.type === 'subagent_end' || event.type === 'subagent_event') return
+          request.onEvent?.(event)
         },
         async requestPermission(permission) {
           if (request.requestPermission) {

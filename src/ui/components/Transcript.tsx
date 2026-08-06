@@ -92,6 +92,10 @@ const BubbleView = memo(function BubbleView({ bubble }: { bubble: Bubble }) {
     )
   }
 
+  if (bubble.kind === 'subagent') {
+    return <SubagentView bubble={bubble} />
+  }
+
   return <ToolView bubble={bubble} />
 })
 
@@ -158,4 +162,28 @@ function previewLines(content: string): string[] {
   const lines = content.split('\n').filter((line) => line.trim() !== '')
   if (lines.length <= 6) return lines
   return [...lines.slice(0, 6), `… ${lines.length - 6} more lines`]
+}
+
+function SubagentView({ bubble }: { bubble: Extract<Bubble, { kind: 'subagent' }> }) {
+  const theme = useTheme()
+  const mark = bubble.state === 'running' ? '◌' : '●'
+  const color = bubble.state === 'running' ? theme.warn : theme.ok
+
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color={color} bold>
+        {mark} subagent: {bubble.description}
+      </Text>
+      <Box marginLeft={2} flexDirection="column">
+        {bubble.bubbles.map((inner, index) => (
+          <BubbleView key={index} bubble={inner} />
+        ))}
+        {bubble.state === 'done' && bubble.result && (
+          <Box marginTop={1}>
+            <Text dimColor>── result ──</Text>
+          </Box>
+        )}
+      </Box>
+    </Box>
+  )
 }

@@ -8,7 +8,8 @@ import type {
 
 const KEEP_USER_TURNS = 2
 const MAX_SOURCE_CHARS = 500_000
-const MAX_TOOL_RESULT_CHARS = 24_000
+const MAX_TOOL_RESULT_CHARS = 8_000
+const MAX_TEXT_BLOCK_CHARS = 50_000
 
 export interface CompactResult {
   history: Message[]
@@ -30,7 +31,7 @@ export async function compactHistory(options: {
     return { history: options.history, compacted: false, removedMessages: 0 }
   }
 
-  const source = limitSource(renderHistory(options.history.slice(0, cut)))
+  const source = renderHistory(options.history.slice(0, cut))
   if (!source.trim()) {
     return { history: options.history, compacted: false, removedMessages: 0 }
   }
@@ -105,7 +106,7 @@ export function compactCutIndex(history: Message[]): number {
 export function estimateCompactTokens(history: Message[]): number {
   const cut = compactCutIndex(history)
   if (cut <= 0) return 1
-  return Math.max(1, limitSource(renderHistory(history.slice(0, cut))).length + 1_000)
+  return Math.max(1, renderHistory(history.slice(0, cut)).length + 1_000)
 }
 
 function isConversationUser(message: Message): boolean {
@@ -119,25 +120,30 @@ function isConversationUser(message: Message): boolean {
 }
 
 function renderHistory(history: Message[]): string {
-  return history
-    .map((message) => {
-      const blocks = message.content.map(renderBlock).filter(Boolean)
-      return blocks.length > 0 ? `${message.role.toUpperCase()}:\n${blocks.join('\n\n')}` : ''
-    })
-    .filter(Boolean)
-    .join('\n\n')
+  let result = ''
+  for (const message of history) {
+    const blocks = message.content.map(renderBlock).filter(Boolean)
+    if (blocks.length === 0) continue
+    const part = `${message.role.toUpperCase()}:\n${blocks.join('\n\n')}`
+    if (result.length + part.length > MAX_SOURCE_CHARS) {
+      result += '\n\n[...older context truncated for compaction...]'
+      break
+    }
+    result += (result ? '\n\n' : '') + part
+  }
+  return result
 }
 
 function renderBlock(block: ContentBlock): string {
   switch (block.type) {
     case 'text':
-      return block.text
+      return truncate(block.text, MAX_TEXT_BLOCK_CHARS)
     case 'thinking':
       return ''
     case 'image':
       return `[Image attached: ${block.name}]`
     case 'file':
-      return `[File attached: ${block.name}]\n${block.text}`
+      return `[File attached: ${block.name}]\n${truncate(block.text, MAX_TOOL_RESULT_CHARS)}`
     case 'tool_use':
       return `[Tool call: ${block.name}]\n${safeJson(block.input)}`
     case 'tool_result':
@@ -151,12 +157,6 @@ function safeJson(value: unknown): string {
   } catch {
     return '[unserializable input]'
   }
-}
-
-function limitSource(value: string): string {
-  if (value.length <= MAX_SOURCE_CHARS) return value
-  const half = Math.floor(MAX_SOURCE_CHARS / 2)
-  return `${value.slice(0, half)}\n\n[...older context truncated for compaction...]\n\n${value.slice(-half)}`
 }
 
 function truncate(value: string, max: number): string {

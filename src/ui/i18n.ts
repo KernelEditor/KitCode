@@ -343,7 +343,7 @@ const en: Strings = {
     clear: 'start a fresh session',
     help: 'list commands',
     exit: 'quit',
-    subagents: 'show active sub-agent count',
+    subagents: 'show active sub-agents and what they are doing',
   },
 }
 
@@ -537,7 +537,7 @@ const ru: Strings = {
     clear: 'начать новую сессию',
     help: 'список команд',
     exit: 'выход',
-    subagents: 'показать количество активных суб-агентов',
+    subagents: 'показать активных суб-агентов и чем заняты',
   },
 }
 

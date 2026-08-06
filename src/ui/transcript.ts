@@ -80,6 +80,50 @@ export function applyEvent(state: TranscriptState, event: AgentEvent): Transcrip
         ),
       }
 
+    case 'subagent_start':
+      return {
+        bubbles: [
+          ...closeAssistant(state.bubbles),
+          {
+            kind: 'subagent',
+            id: event.id,
+            description: sanitizeTerminalText(event.description),
+            state: 'running',
+            seq: 0,
+            bubbles: [],
+          },
+        ],
+        seq: state.seq + 1,
+      }
+
+    case 'subagent_end':
+      return {
+        ...state,
+        bubbles: state.bubbles.map((bubble) =>
+          bubble.kind === 'subagent' && bubble.id === event.id
+            ? { ...bubble, state: 'done', result: sanitizeTerminalText(event.result) }
+            : bubble,
+        ),
+      }
+
+    case 'subagent_event': {
+      const idx = state.bubbles.findLastIndex(
+        (b) => b.kind === 'subagent' && b.id === event.id && b.state === 'running',
+      )
+      if (idx === -1) return state
+      const sub = state.bubbles[idx] as Extract<typeof state.bubbles[number], { kind: 'subagent' }>
+      const innerState: TranscriptState = { bubbles: sub.bubbles, seq: sub.seq }
+      const updated = applyEvent(innerState, event.event)
+      return {
+        ...state,
+        bubbles: state.bubbles.map((bubble, i) =>
+          i === idx
+            ? { ...sub, seq: updated.seq, bubbles: updated.bubbles }
+            : bubble,
+        ),
+      }
+    }
+
     case 'notice':
       return pushNotice(state, event.level, event.text)
 

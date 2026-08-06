@@ -1,4 +1,5 @@
 import { Box, Text } from 'ink'
+import { Fragment } from 'react'
 import type { ReactNode } from 'react'
 import { dollars } from '../../core/usage'
 import type { Effort } from '../../providers/types'
@@ -27,8 +28,9 @@ export function StatusBar({ status }: StatusBarProps) {
     )
   }
   if (status.mode !== 'normal') {
+    const modeColor = status.mode === 'accept' ? 'yellow' : status.mode === 'plan' ? 'blue' : theme.accent
     details.push(
-      <Text key="mode" color={theme.accent}>
+      <Text key="mode" color={modeColor}>
         {strings.modeLabel[status.mode] ?? status.mode}
       </Text>,
     )
@@ -38,7 +40,7 @@ export function StatusBar({ status }: StatusBarProps) {
     const u = status.usage
     details.push(
       <Text key="usage">
-        <Text color={theme.accent}>{u.input}</Text>
+        <Text color="white" bold>{u.input}</Text>
         <Text dimColor> ↑ </Text>
         <Text color={theme.ok}>{u.output}</Text>
         <Text dimColor> ↓</Text>
@@ -135,12 +137,18 @@ export function StatusBar({ status }: StatusBarProps) {
 }
 
 function Segments({ items }: { items: ReactNode[] }) {
-  return items.map((item, index) => (
-    <Text key={index}>
-      {index > 0 && <Text dimColor> · </Text>}
-      {item}
-    </Text>
-  ))
+  return items.flatMap((item, index) => {
+    const elements: ReactNode[] = []
+    if (index > 0) {
+      elements.push(
+        <Text key={`sep-${index}`} dimColor>
+          {' '}·{' '}
+        </Text>,
+      )
+    }
+    elements.push(<Fragment key={`item-${index}`}>{item}</Fragment>)
+    return elements
+  })
 }
 
 function shortModel(ref: string): string {
@@ -153,37 +161,35 @@ function ModelBadge({ ref: modelRef }: { ref: string }) {
   const theme = useTheme()
   const name = shortModel(modelRef)
   return (
-    <Text color="black" backgroundColor={theme.accent} bold>
-      {` ${name} `}
-    </Text>
+    <Box borderColor={theme.accent} borderStyle="round" paddingX={1}>
+      <Text color={theme.accent} bold>{name}</Text>
+    </Box>
   )
 }
 
 const EFFORT_STYLES: Record<
   Effort,
-  { label: string; color?: string; bg?: string; bold?: boolean; dim?: boolean; underline?: boolean }
+  { label: string; color?: string; bold?: boolean; dim?: boolean }
 > = {
-  max: { label: 'max', color: 'black', bg: 'yellow', bold: true, underline: true },
-  xhigh: { label: 'xhigh', bold: true },
-  high: { label: 'high' },
-  medium: { label: 'medium', dim: true },
+  max: { label: 'max', color: 'red', bold: true },
+  xhigh: { label: 'xhigh', color: 'yellow', bold: true },
+  high: { label: 'high', color: 'cyan' },
+  medium: { label: 'medium', color: 'blue' },
   low: { label: 'low', color: 'gray', dim: true },
 }
 
 function EffortLabel({ effort }: { effort: Effort }) {
-  const theme = useTheme()
   const style = EFFORT_STYLES[effort]
-  const color = style.color ?? theme.accent
   return (
-    <Text
-      color={color}
-      backgroundColor={style.bg}
-      bold={style.bold}
-      dimColor={style.dim}
-      underline={style.underline}
-    >
-      {style.bg ? ` ${style.label} ` : style.label}
-    </Text>
+    <Box borderColor={style.color ?? 'gray'} borderStyle="round" paddingX={1}>
+      <Text
+        color={style.color}
+        bold={style.bold}
+        dimColor={style.dim}
+      >
+        {style.label}
+      </Text>
+    </Box>
   )
 }
 

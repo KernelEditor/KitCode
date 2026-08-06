@@ -249,15 +249,27 @@ export async function boot(options: {
   let activeBudget: TurnBudget | undefined
   let activeCheckpoint: FileCheckpoint | undefined
   let activeAgentCount = 0
+  const activeAgents: { description: string; progress: string[] }[] = []
 
   const subagentRunner = createSubagentRunner(agentConfigFor, tools)
   const wrappedRunner = {
     run: async (request: import('../core/subagent').SubagentRequest): Promise<string> => {
       activeAgentCount += 1
+      const entry = { description: request.description ?? '', progress: [] as string[] }
+      activeAgents.push(entry)
+      const trackedRequest = {
+        ...request,
+        onProgress: (summary: string) => {
+          entry.progress.push(summary)
+          request.onProgress(summary)
+        },
+      }
       try {
-        return await subagentRunner.run(request)
+        return await subagentRunner.run(trackedRequest)
       } finally {
         activeAgentCount = Math.max(0, activeAgentCount - 1)
+        const idx = activeAgents.indexOf(entry)
+        if (idx !== -1) activeAgents.splice(idx, 1)
       }
     },
   }
@@ -563,6 +575,11 @@ export async function boot(options: {
     },
 
     activeAgentsCount: () => activeAgentCount,
+
+    activeAgentsList: () => activeAgents.map((a) => ({
+      description: a.description,
+      progress: [...a.progress],
+    })),
 
     mcpServers: () => mcp.states(),
 
