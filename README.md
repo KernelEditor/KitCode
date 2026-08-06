@@ -110,6 +110,7 @@ Press `/` to open the command list.
 | `/sessions export <id> [path]` | Export a session to a private Markdown file (default: `.kitcode-exports/`). |
 | `/attach <path>` · `/attach clipboard` · `/attach clear` | Manage attachments for the next message. |
 | `/compact` | Replace older conversation context with a concise model-generated summary. |
+| `/subagents` | Show the current number of active sub-agents. |
 | `/undo` | Undo built-in file edits from the latest message. |
 | `/usage` | Show tokens, requests, cost, balance/key limits, and response rate-limit headers when available. |
 | `/checker` | Check the local setup and provider model listing without sending a paid chat request. |
@@ -152,7 +153,7 @@ Completed output is committed to
 normal terminal scrollback, so it remains smooth to scroll while a response is streaming.
 
 When exact usage reaches 80% of a known context window, KitCode automatically summarizes older
-turns while keeping the latest three user turns. `/compact` runs the same operation manually.
+turns while keeping the latest two user turns. `/compact` runs the same operation manually.
 
 Before the built-in `write` and `edit` tools change a file, KitCode creates a private checkpoint.
 `/undo` restores the latest checkpoint and leaves files with newer manual changes untouched.
