@@ -106,7 +106,8 @@ export function compactCutIndex(history: Message[]): number {
 export function estimateCompactTokens(history: Message[]): number {
   const cut = compactCutIndex(history)
   if (cut <= 0) return 1
-  return Math.max(1, renderHistory(history.slice(0, cut)).length + 1_000)
+  const rendered = renderHistory(history.slice(0, cut))
+  return Math.max(1, Math.min(rendered.length, MAX_SOURCE_CHARS) + 1_000)
 }
 
 function isConversationUser(message: Message): boolean {

@@ -108,7 +108,7 @@ export function applyEvent(state: TranscriptState, event: AgentEvent): Transcrip
 
     case 'subagent_event': {
       const idx = state.bubbles.findLastIndex(
-        (b) => b.kind === 'subagent' && b.id === event.id && b.state === 'running',
+        (b) => b.kind === 'subagent' && b.id === event.id,
       )
       if (idx === -1) return state
       const sub = state.bubbles[idx] as Extract<typeof state.bubbles[number], { kind: 'subagent' }>
