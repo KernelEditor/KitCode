@@ -97,7 +97,7 @@ const BubbleView = memo(function BubbleView({ bubble }: { bubble: Bubble }) {
 
 function ToolView({ bubble }: { bubble: Extract<Bubble, { kind: 'tool' }> }) {
   const theme = useTheme()
-  const mark = bubble.state === 'running' ? '◌' : bubble.state === 'ok' ? '⏺' : '✗'
+  const mark = bubble.state === 'running' ? '◌' : bubble.state === 'ok' ? '●' : '✗'
   const color =
     bubble.state === 'error' ? theme.error : bubble.state === 'ok' ? theme.ok : theme.warn
   const display = bubble.display

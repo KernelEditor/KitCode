@@ -40,6 +40,12 @@ OpenAI-compatible providers, including OpenRouter and local model servers.
 - Node.js 22 or newer;
 - npm.
 
+## Install
+
+```sh
+npm install -g kitcode
+```
+
 ## Install from source
 
 ```sh
