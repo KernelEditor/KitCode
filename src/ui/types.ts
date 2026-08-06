@@ -30,7 +30,7 @@ export interface StatusView {
   busy: boolean
   sessionMs: number
   turnMs: number | null
-  
+  activeAgents: number
   context: { window: number | null; used: number; exact: boolean }
 }
 

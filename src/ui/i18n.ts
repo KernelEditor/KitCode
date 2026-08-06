@@ -76,10 +76,13 @@ export interface Strings {
   mcpDisabled: (name: string) => string
   mcpToggleFailed: (name: string, error: string) => string
   mcpState: Record<string, string>
+  activeAgents: (count: number) => string
+  subagentsStatus: (count: number) => string
   attachUsage: string
   attachmentAdded: (name: string) => string
   attachmentsCleared: string
   compactNothing: string
+  compactStarting: string
   compactDone: (count: number) => string
   sessionRenameUsage: string
   sessionRenamed: (title: string) => string
@@ -224,11 +227,15 @@ const en: Strings = {
     error: 'error',
     disabled: 'disabled',
   },
+  activeAgents: (count) => `agents: ${count}`,
+  subagentsStatus: (count) =>
+    count > 0 ? `Active sub-agents: ${count}` : 'No active sub-agents.',
   attachUsage:
     'Usage: /attach <image-or-text-file> · /attach clipboard · /attach clear',
   attachmentAdded: (name) => `Attached for the next message: ${name}`,
   attachmentsCleared: 'Pending attachments cleared.',
   compactNothing: 'Not enough older conversation to compact yet.',
+  compactStarting: 'Compacting context…',
   compactDone: (count) => `Context compacted · ${count} older messages replaced with a summary.`,
   sessionRenameUsage: 'Type the title after the command: /sessions rename <id> <title>',
   sessionRenamed: (title) => `Session renamed to "${title}".`,
@@ -336,6 +343,7 @@ const en: Strings = {
     clear: 'start a fresh session',
     help: 'list commands',
     exit: 'quit',
+    subagents: 'show active sub-agent count',
   },
 }
 
@@ -415,11 +423,15 @@ const ru: Strings = {
     error: 'ошибка',
     disabled: 'отключён',
   },
+  activeAgents: (count) => `агентов: ${count}`,
+  subagentsStatus: (count) =>
+    count > 0 ? `Активных суб-агентов: ${count}` : 'Нет активных суб-агентов.',
   attachUsage:
     'Использование: /attach <картинка-или-текстовый-файл> · /attach clipboard · /attach clear',
   attachmentAdded: (name) => `Прикреплено к следующему сообщению: ${name}`,
   attachmentsCleared: 'Ожидающие вложения убраны.',
   compactNothing: 'Пока недостаточно старых сообщений для сжатия контекста.',
+  compactStarting: 'Сжатие контекста…',
   compactDone: (count) => `Контекст сжат · старых сообщений заменено сводкой: ${count}.`,
   sessionRenameUsage: 'Допиши название: /sessions rename <id> <название>',
   sessionRenamed: (title) => `Сессия переименована в «${title}».`,
@@ -525,6 +537,7 @@ const ru: Strings = {
     clear: 'начать новую сессию',
     help: 'список команд',
     exit: 'выход',
+    subagents: 'показать количество активных суб-агентов',
   },
 }
 

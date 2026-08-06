@@ -248,9 +248,22 @@ export async function boot(options: {
 
   let activeBudget: TurnBudget | undefined
   let activeCheckpoint: FileCheckpoint | undefined
+  let activeAgentCount = 0
+
+  const subagentRunner = createSubagentRunner(agentConfigFor, tools)
+  const wrappedRunner = {
+    run: async (request: import('../core/subagent').SubagentRequest): Promise<string> => {
+      activeAgentCount += 1
+      try {
+        return await subagentRunner.run(request)
+      } finally {
+        activeAgentCount = Math.max(0, activeAgentCount - 1)
+      }
+    },
+  }
 
   tools.register([
-    createTaskTool(createSubagentRunner(agentConfigFor, tools), config.budget.maxSubagentsPerTurn),
+    createTaskTool(wrappedRunner, config.budget.maxSubagentsPerTurn),
   ])
 
   let persistQueue: Promise<void> = Promise.resolve()
@@ -548,6 +561,8 @@ export async function boot(options: {
         failed: states.filter((state) => state.status === 'error').length,
       }
     },
+
+    activeAgentsCount: () => activeAgentCount,
 
     mcpServers: () => mcp.states(),
 

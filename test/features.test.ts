@@ -129,8 +129,8 @@ describe('context compaction', () => {
     { role: 'assistant', content: [{ type: 'text', text: `answer ${index}` }] } as Message,
   ]).flat()
 
-  it('keeps the latest three user turns and replaces older messages with a durable summary', async () => {
-    expect(compactCutIndex(history)).toBe(2)
+  it('keeps the latest two user turns and replaces older messages with a durable summary', async () => {
+    expect(compactCutIndex(history)).toBe(4)
     const provider: Provider = {
       id: 'test',
       kind: 'openai',
@@ -158,12 +158,12 @@ describe('context compaction', () => {
       signal: new AbortController().signal,
     })
     expect(result.compacted).toBe(true)
-    expect(result.removedMessages).toBe(2)
+    expect(result.removedMessages).toBe(4)
     expect(result.history[0]?.content[0]).toMatchObject({
       type: 'text',
       text: expect.stringContaining('keep tests green'),
     })
-    expect(result.history.slice(2)).toEqual(history.slice(2))
+    expect(result.history.slice(2)).toEqual(history.slice(4))
     expect(result.rateLimits).toEqual({ requests: { remaining: 9, limit: 10 } })
   })
 

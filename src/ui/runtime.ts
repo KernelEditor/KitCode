@@ -51,6 +51,7 @@ export interface Runtime {
   isBypassEnabled(): boolean
   setBypass(enabled: boolean): void
   mcpSummary(): { connected: number; failed: number }
+  activeAgentsCount(): number
   mcpServers(): McpServerState[]
   addMcpServer(name: string, config: McpServerConfig): Promise<McpServerState>
   removeMcpServer(name: string): Promise<void>

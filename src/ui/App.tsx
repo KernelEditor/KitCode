@@ -898,6 +898,7 @@ export function App({
           abort.current = controller
           setBusy(true)
           setTurnStart(Date.now())
+          notice('info', strings.compactStarting)
           try {
             const result = await runtime.compact(history.current, controller.signal)
             if (!result.compacted) {
@@ -932,6 +933,10 @@ export function App({
           forceRender((n) => n + 1)
           return
         }
+
+        case 'subagents':
+          notice('info', strings.subagentsStatus(runtime.activeAgentsCount()))
+          return
 
         case 'checker':
           try {
@@ -1400,6 +1405,7 @@ export function App({
           busy,
           sessionMs: Date.now() - sessionStart.current,
           turnMs: turnStart === null ? null : Date.now() - turnStart,
+          activeAgents: runtime.activeAgentsCount(),
           context,
         }}
       />

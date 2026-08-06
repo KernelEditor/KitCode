@@ -63,6 +63,7 @@ describe('bottom status panel', () => {
             busy: false,
             sessionMs: 1_000,
             turnMs: null,
+            activeAgents: 0,
             context: { window: 100_000, used: 50_000, exact: true },
           },
         }),

@@ -28,6 +28,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'clear' },
   { name: 'help' },
   { name: 'exit' },
+  { name: 'subagents' },
 ]
 
 const SUBCOMMANDS: SlashCommand[] = [

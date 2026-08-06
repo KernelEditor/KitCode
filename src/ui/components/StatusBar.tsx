@@ -120,6 +120,9 @@ export function StatusBar({ status }: StatusBarProps) {
               )}
             </Text>
           )}
+          {status.activeAgents > 0 && (
+            <Text color={theme.accent}>{strings.activeAgents(status.activeAgents)}</Text>
+          )}
         </Box>
       </Box>
       {details.length > 0 && (

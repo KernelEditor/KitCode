@@ -6,7 +6,7 @@ import type {
   Usage,
 } from '../providers/types'
 
-const KEEP_USER_TURNS = 3
+const KEEP_USER_TURNS = 2
 const MAX_SOURCE_CHARS = 500_000
 const MAX_TOOL_RESULT_CHARS = 24_000
 

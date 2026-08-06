@@ -39,16 +39,19 @@ export function createSubagentRunner(
   makeConfig: (system: string, tools: ToolLookup) => AgentConfig,
   tools: ToolLookup,
 ): SubagentRunner {
-  const isolated = withoutTaskTool(tools)
-
   return {
     async run(request) {
       if (request.signal.aborted) return SUBAGENT_CANCELLED
 
-      const base = makeConfig(SUBAGENT_SYSTEM, isolated)
+      const base = makeConfig(SUBAGENT_SYSTEM, tools)
       const cfg: AgentConfig = {
         ...base,
-        tools: isolated,
+        tools: {
+          get: (name) =>
+            name === TASK_TOOL_NAME ? undefined : base.tools.get(name),
+          schemas: () =>
+            base.tools.schemas().filter((schema) => schema.name !== TASK_TOOL_NAME),
+        },
         system: `${SUBAGENT_SYSTEM}\n\nWorking directory: ${base.cwd}`,
       }
 
@@ -81,13 +84,6 @@ export function createSubagentRunner(
       if (!limit.signal.aborted) return text
       return text === SUBAGENT_NO_ANSWER ? STEP_LIMIT_NOTE : `${text}\n\n${STEP_LIMIT_NOTE}`
     },
-  }
-}
-
-function withoutTaskTool(tools: ToolLookup): ToolLookup {
-  return {
-    get: (name) => (name === TASK_TOOL_NAME ? undefined : tools.get(name)),
-    schemas: () => tools.schemas().filter((schema) => schema.name !== TASK_TOOL_NAME),
   }
 }
 
