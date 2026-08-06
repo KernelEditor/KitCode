@@ -146,8 +146,6 @@ function shortModel(ref: string): string {
   return slash === -1 ? safe : safe.slice(slash + 1)
 }
 
-// Coloured badge for the active model: inverse colour (accent background,
-// black text) so it reads as a chip/pill rather than plain text.
 function ModelBadge({ ref: modelRef }: { ref: string }) {
   const theme = useTheme()
   const name = shortModel(modelRef)
@@ -158,8 +156,6 @@ function ModelBadge({ ref: modelRef }: { ref: string }) {
   )
 }
 
-// Visual styling for the reasoning/effort level.
-// "max" is hottest — bright yellow background; each lower level fades out.
 const EFFORT_STYLES: Record<
   Effort,
   { label: string; color?: string; bg?: string; bold?: boolean; dim?: boolean; underline?: boolean }
@@ -194,8 +190,6 @@ function tokens(count: number): string {
   return `${value.toFixed(1).replace(/\.0$/, '')}${suffix}`
 }
 
-// Context-window meter. The capsule fills left-to-right and shifts
-// green → yellow → red as the request approaches the model limit.
 function ContextMeter({
   context,
 }: {

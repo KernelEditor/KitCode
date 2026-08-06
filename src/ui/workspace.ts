@@ -1,7 +1,6 @@
 import { homedir } from 'node:os'
 import { sanitizeTerminalText } from './sanitize'
 
-/** Keep the useful end of a workspace path visible without wrapping the header. */
 export function formatWorkspacePath(
   value: string,
   maxWidth: number,

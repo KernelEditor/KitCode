@@ -15,7 +15,6 @@ interface RawModel {
   pricing?: unknown
 }
 
-/** Preserve metadata exposed by richer OpenAI-compatible model endpoints. */
 export function modelInfoFromRaw(entry: unknown): ModelInfo | null {
   if (typeof entry !== 'object' || entry === null) return null
   const raw = entry as RawModel

@@ -6,9 +6,9 @@ export interface DiffLine {
 export interface DiffResult {
   hunk: DiffLine[]
   hidden: number
-  /** Total added lines across the whole file (not capped). */
+  
   added: number
-  /** Total removed lines across the whole file (not capped). */
+  
   removed: number
 }
 
@@ -28,7 +28,6 @@ export function diffLines(
   return { hunk: hunk.slice(0, maxLines), hidden: hunk.length - maxLines, added, removed }
 }
 
-/** Total added/removed line counts across the whole file (not just the visible window). */
 export function diffCounts(
   before: string,
   after: string,
@@ -36,8 +35,6 @@ export function diffCounts(
   return diffBody(before, after)
 }
 
-// Walk the prefix/suffix trim once; return the rendered hunk *and* the
-// full change tally. Used by both the visible diff and the +/- stat.
 function diffBody(
   before: string,
   after: string,

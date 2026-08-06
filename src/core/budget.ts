@@ -4,7 +4,6 @@ import { costOf, pricingFor } from '../providers/pricing'
 import type { PricingResolver } from './usage'
 
 export interface BudgetLimits {
-  maxRequestsPerTurn: number
   maxTokensPerTurn: number
   maxCostUsdPerTurn: number
 }
@@ -16,19 +15,17 @@ export interface TurnBudget {
     estimatedInputTokens: number
   }): { allowed: true; maxOutputTokens: number } | { allowed: false; reason: string }
   record(modelRef: string, usage: Usage): void
-  snapshot(): { requests: number; tokens: number; costUsd: number | null }
+  snapshot(): { tokens: number; costUsd: number | null }
 }
 
 export function createTurnBudget(
   limits: BudgetLimits,
   resolvePricing: PricingResolver = pricingFor,
 ): TurnBudget {
-  let requests = 0
   let usage = emptyUsage()
   let costUsd: number | null = 0
 
   const snapshot = () => ({
-    requests,
     tokens: usage.input + usage.output + usage.cacheWrite + usage.cacheRead,
     costUsd,
   })
@@ -36,16 +33,10 @@ export function createTurnBudget(
   return {
     beforeRequest(request) {
       const current = snapshot()
-      if (current.requests >= limits.maxRequestsPerTurn) {
+      if (limits.maxTokensPerTurn > 0 && current.tokens >= limits.maxTokensPerTurn) {
         return {
           allowed: false,
-          reason: `Turn stopped at the request budget (${limits.maxRequestsPerTurn}). Send another message to continue.`,
-        }
-      }
-      if (current.tokens >= limits.maxTokensPerTurn) {
-        return {
-          allowed: false,
-          reason: `Turn stopped at the token budget (${limits.maxTokensPerTurn}). Send another message to continue.`,
+          reason: `Turn stopped at the token budget (${limits.maxTokensPerTurn.toLocaleString()} tokens). This is a safety limit to prevent runaway costs. To disable it, run: /budget 0`,
         }
       }
       if (current.costUsd !== null && current.costUsd >= limits.maxCostUsdPerTurn) {
@@ -56,14 +47,17 @@ export function createTurnBudget(
       }
 
       const estimatedInput = finitePositive(request.estimatedInputTokens)
-      let outputLimit = Math.min(
-        finitePositive(request.maxOutputTokens),
-        limits.maxTokensPerTurn - current.tokens - estimatedInput,
-      )
+      const tokenLimit = limits.maxTokensPerTurn
+      let outputLimit = tokenLimit === 0
+        ? finitePositive(request.maxOutputTokens)
+        : Math.min(
+            finitePositive(request.maxOutputTokens),
+            tokenLimit - current.tokens - estimatedInput,
+          )
       if (outputLimit < 1) {
         return {
           allowed: false,
-          reason: `Turn stopped because the next request would exceed the token budget (${limits.maxTokensPerTurn}). Send another message to continue.`,
+          reason: `Turn stopped because the next request would exceed the token budget (${limits.maxTokensPerTurn.toLocaleString()} tokens). This is a safety limit to prevent runaway costs. To disable it, run: /budget 0`,
         }
       }
 
@@ -83,7 +77,6 @@ export function createTurnBudget(
         }
       }
 
-      requests += 1
       return { allowed: true, maxOutputTokens: Math.floor(outputLimit) }
     },
     record(modelRef, next) {

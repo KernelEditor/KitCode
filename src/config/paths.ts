@@ -60,7 +60,6 @@ export async function resolveConfigLocation(cwd: string = process.cwd()): Promis
   return { path: configPath, scope: 'global' }
 }
 
-/** Root used for project trust and project-local skills. */
 export async function workspaceRootFor(cwd: string = process.cwd()): Promise<string> {
   const project = await findProjectConfig(cwd)
   return project ? path.dirname(project) : path.resolve(cwd)

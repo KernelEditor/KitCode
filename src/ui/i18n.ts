@@ -55,6 +55,9 @@ export interface Strings {
   queued: (count: number) => string
   configAt: (path: string) => string
   skillsEmpty: string
+  skillsInstallUsage: string
+  skillsInstalling: (source: string) => string
+  skillsInstalled: (name: string, source: string) => string
   mcpStatus: (connected: number, failed: number) => string
   mcpEmpty: string
   mcpAddUsage: string
@@ -97,6 +100,10 @@ export interface Strings {
   accentSet: (name: string, hex: string) => string
   reasoning: (on: boolean) => string
   effortSet: (value: string) => string
+  budgetCurrent: (tokens: number) => string
+  budgetSet: (tokens: number) => string
+  budgetUnlimited: string
+  budgetInvalid: string
   modelSet: (value: string) => string
   noModels: string
   bypassOff: string
@@ -113,6 +120,11 @@ export interface Strings {
   promptUsage: string
   promptNothing: string
   promptSaved: (name: string) => string
+  promptDeleteUsage: string
+  promptDeleted: (name: string) => string
+  promptNotFound: (name: string) => string
+  promptSaveAsk: string
+  promptSaveAskBody: string
   promptsEmpty: string
   unknownCommand: (name: string) => string
   didYouMean: (typed: string, guess: string) => string
@@ -125,6 +137,7 @@ export interface Strings {
   titleEffort: string
   titleModel: string
   titlePrompts: string
+  titleSkills: string
   titleLang: string
   titleMcpDelete: string
   titleMcpEnable: string
@@ -184,6 +197,9 @@ const en: Strings = {
   configAt: (path) => `config: ${path}`,
   skillsEmpty:
     'No skills installed. Drop a folder with a SKILL.md into ~/.kitcode/skills or ./.kitcode/skills',
+  skillsInstallUsage: 'Usage: /skills install <github-url|npm-package|local-path>',
+  skillsInstalling: (source) => `Installing skill from "${source}"…`,
+  skillsInstalled: (name, source) => `Skill "${name}" installed from "${source}"`,
   mcpStatus: (connected, failed) => `MCP: ${connected} connected, ${failed} failed`,
   mcpEmpty: 'No MCP servers configured.',
   mcpAddUsage:
@@ -236,6 +252,10 @@ const en: Strings = {
   accentSet: (name, hex) => `Accent: ${name} (${hex})`,
   reasoning: (on) => `Reasoning ${on ? 'on' : 'off'}`,
   effortSet: (value) => `Effort: ${value}`,
+  budgetCurrent: (tokens) => `Token budget: ${tokens.toLocaleString()} per turn`,
+  budgetSet: (tokens) => `Token budget set to ${tokens.toLocaleString()} per turn`,
+  budgetUnlimited: 'Token budget: unlimited (0). Set /budget <tokens> to restore a limit.',
+  budgetInvalid: 'Invalid budget: must be between 1,000 and 10,000,000',
   modelSet: (value) => `Model: ${value}`,
   noModels: 'No models available. Use /login to add a provider.',
   bypassOff: 'Approval prompts are back on.',
@@ -252,6 +272,11 @@ const en: Strings = {
   promptUsage: 'Usage: /prompt save <name>',
   promptNothing: 'Nothing to save yet — send a message first.',
   promptSaved: (name) => `Saved prompt "${name}"`,
+  promptDeleteUsage: 'Usage: /prompt delete <name>',
+  promptDeleted: (name) => `Deleted prompt "${name}"`,
+  promptNotFound: (name) => `Prompt "${name}" not found.`,
+  promptSaveAsk: 'Save this as a prompt?',
+  promptSaveAskBody: 'The text will be saved to a file and can be loaded later with /prompt.',
   promptsEmpty: 'No saved prompts. Use /prompt save <name>.',
   unknownCommand: (name) => `Unknown command /${name}. Try /help`,
   didYouMean: (typed, guess) => `Unknown command /${typed}. Did you mean /${guess}?`,
@@ -266,6 +291,7 @@ const en: Strings = {
   titleEffort: 'Reasoning depth',
   titleModel: 'Model',
   titlePrompts: 'Saved prompts',
+  titleSkills: 'Skill',
   titleLang: 'Language',
   titleMcpDelete: 'Remove an MCP server',
   titleMcpEnable: 'Enable an MCP server',
@@ -280,9 +306,12 @@ const en: Strings = {
     logout: 'choose a provider to sign out from',
     effort: 'set reasoning depth',
     thinking: 'toggle reasoning',
+    budget: 'set token budget per turn',
     theme: 'change the accent colour',
     lang: 'change the interface language',
     prompt: 'insert or save a prompt',
+    'prompt save': 'save the current or recent text as a prompt',
+    'prompt delete': 'delete a saved prompt',
     skills: 'list installed skills',
     bypass: 'disable approval prompts (asks twice)',
     usage: 'token and cost breakdown',
@@ -359,6 +388,9 @@ const ru: Strings = {
   configAt: (path) => `конфиг: ${path}`,
   skillsEmpty:
     'Скиллов нет. Положи папку с файлом SKILL.md в ~/.kitcode/skills или ./.kitcode/skills',
+  skillsInstallUsage: 'Использование: /skills install <github-url|npm-пакет|локальный-путь>',
+  skillsInstalling: (source) => `Устанавливаю скилл из "${source}"…`,
+  skillsInstalled: (name, source) => `Скилл «${name}» установлен из "${source}"`,
   mcpStatus: (connected, failed) => `MCP: подключено ${connected}, с ошибкой ${failed}`,
   mcpEmpty: 'MCP-серверы пока не добавлены.',
   mcpAddUsage:
@@ -411,6 +443,10 @@ const ru: Strings = {
   accentSet: (name, hex) => `Цвет: ${name} (${hex})`,
   reasoning: (on) => `Размышления ${on ? 'включены' : 'выключены'}`,
   effortSet: (value) => `Глубина: ${value}`,
+  budgetCurrent: (tokens) => `Лимит токенов: ${tokens.toLocaleString()} за ход`,
+  budgetSet: (tokens) => `Лимит токенов установлен: ${tokens.toLocaleString()} за ход`,
+  budgetUnlimited: 'Лимит токенов: безлимитный (0). Введи /budget <число> чтобы вернуть лимит.',
+  budgetInvalid: 'Неверный лимит: от 1 000 до 10 000 000',
   modelSet: (value) => `Модель: ${value}`,
   noModels: 'Моделей нет. Добавь провайдера через /login.',
   bypassOff: 'Подтверждения снова включены.',
@@ -427,6 +463,11 @@ const ru: Strings = {
   promptUsage: 'Использование: /prompt save <имя>',
   promptNothing: 'Пока нечего сохранять — сначала отправь сообщение.',
   promptSaved: (name) => `Промт «${name}» сохранён`,
+  promptDeleteUsage: 'Использование: /prompt delete <имя>',
+  promptDeleted: (name) => `Промт «${name}» удалён`,
+  promptNotFound: (name) => `Промт «${name}» не найден.`,
+  promptSaveAsk: 'Сохранить как промт?',
+  promptSaveAskBody: 'Текст будет сохранён в файл и его можно будет загрузить позже через /prompt.',
   promptsEmpty: 'Сохранённых промтов нет. Используй /prompt save <имя>.',
   unknownCommand: (name) => `Неизвестная команда /${name}. Попробуй /help`,
   didYouMean: (typed, guess) => `Неизвестная команда /${typed}. Может быть /${guess}?`,
@@ -441,6 +482,7 @@ const ru: Strings = {
   titleEffort: 'Глубина размышлений',
   titleModel: 'Модель',
   titlePrompts: 'Сохранённые промты',
+  titleSkills: 'Скиллы',
   titleLang: 'Язык',
   titleMcpDelete: 'Удалить MCP-сервер',
   titleMcpEnable: 'Включить MCP-сервер',
@@ -455,6 +497,7 @@ const ru: Strings = {
     logout: 'выбрать провайдера и удалить его ключ',
     effort: 'глубина размышлений',
     thinking: 'включить/выключить размышления',
+    budget: 'лимит токенов за ход (0 = безлимит)',
     theme: 'сменить цвет акцента',
     lang: 'сменить язык интерфейса',
     prompt: 'вставить или сохранить промт',

@@ -93,7 +93,6 @@ export function applyEvent(state: TranscriptState, event: AgentEvent): Transcrip
   }
 }
 
-/** Apply a render frame of agent events, collapsing adjacent stream chunks. */
 export function applyEvents(state: TranscriptState, events: AgentEvent[]): TranscriptState {
   return coalesceDeltas(events).reduce(applyEvent, state)
 }

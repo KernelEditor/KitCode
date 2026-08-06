@@ -9,7 +9,6 @@ export type McpAddParseResult =
 
 const SERVER_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/
 
-/** Parse `/mcp add` arguments without invoking a shell. */
 export function parseMcpAddArgs(args: string[]): McpAddParseResult {
   const [name, first, ...remaining] = args
   if (!name || !first) return { ok: false, error: 'usage' }
@@ -28,7 +27,7 @@ export function parseMcpAddArgs(args: string[]): McpAddParseResult {
     return stdioServer(name, command, commandArgs)
   }
 
-  if (/^https?:\/\//i.test(first)) {
+  if (/^https?:\/\//.test(first)) {
     if (remaining.length > 0) return { ok: false, error: 'http-args' }
     return httpServer(name, first)
   }

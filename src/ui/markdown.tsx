@@ -2,20 +2,6 @@ import { Box, Text } from 'ink'
 import { useMemo } from 'react'
 import type { ReactNode } from 'react'
 
-/**
- * Minimal inline + block markdown renderer for the transcript.
- *
- * Supported:
- *  - headings:       "# h1", "## h2", ... "###### h6"
- *  - blockquotes:    "> quote"
- *  - unordered list: "-", "*", "+"
- *  - ordered list:   "1.", "2." ...
- *  - inline:         **bold**, *italic*, `code`, ~~strike~~
- *
- * Everything else is rendered as plain paragraphs, with hard line breaks
- * inside the same paragraph soft-wrapped by ink.
- */
-
 interface MdNode {
   type: 'heading' | 'paragraph' | 'blockquote' | 'ul' | 'ol'
   level?: number
@@ -79,12 +65,9 @@ function BlockView({ block }: { block: MdNode }): ReactNode {
   }
 }
 
-/** Truncates heading text to roughly `size` chars (esthetic cap, not a hard limit). */
 function truncateBySize(text: string, size: number): string {
   return text.length > size * 3 ? text.slice(0, size * 3) + '…' : text
 }
-
-/* ---------- block parsing ---------- */
 
 const HEADING_RE = /^(#{1,6})\s+(.*)$/
 const UL_RE = /^([-*+])\s+(.*)$/
@@ -169,7 +152,7 @@ export function extractBlocks(src: string): MdNode[] {
       continue
     }
 
-    // plain text line (continuation of paragraph; list/quote ends)
+    
     flushList()
     flushQuote()
     paragraph.push(trimmed)
@@ -179,13 +162,6 @@ export function extractBlocks(src: string): MdNode[] {
   return blocks
 }
 
-/* ---------- inline parsing ---------- */
-
-/**
- * Parses inline markdown into ReactNodes. Supports inline code, bold (star
- * and underscore), italic, and strikethrough. Nested emphasis is
- * intentionally minimal — this targets assistant chat output, not arbitrary MD.
- */
 function inline(text: string): ReactNode {
   const nodes: ReactNode[] = []
   let rest = text
@@ -204,35 +180,35 @@ function inline(text: string): ReactNode {
     if (idx > 0) nodes.push(rest.slice(0, idx))
 
     if (m[1]) {
-      // `code`
+      
       nodes.push(
         <Text key={key++} bold color="cyan">
           {m[2]}
         </Text>,
       )
     } else if (m[3]) {
-      // **bold**
+      
       nodes.push(
         <Text key={key++} bold>
           {inline(m[4] as string)}
         </Text>,
       )
     } else if (m[5]) {
-      // ~~strike~~
+      
       nodes.push(
         <Text key={key++} strikethrough>
           {m[6]}
         </Text>,
       )
     } else if (m[7]) {
-      // *italic*
+      
       nodes.push(
         <Text key={key++} italic>
           {inline(m[8] as string)}
         </Text>,
       )
     } else if (m[9]) {
-      // __bold__
+      
       nodes.push(
         <Text key={key++} bold>
           {inline(m[10] as string)}

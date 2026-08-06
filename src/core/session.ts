@@ -41,13 +41,25 @@ export async function saveSession(state: SessionState): Promise<void> {
   state.updatedAt = new Date().toISOString()
   await ensureDir(sessionsDir)
   const file = path.join(sessionsDir, `${state.id}.json`)
-  // A random suffix keeps concurrent writes for the same session from sharing
-  // the temp path and clobbering each other's rename.
   const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
-  // Sessions can contain large tool outputs; compact JSON cuts serialization
-  // and disk work on the hot path immediately after a turn finishes.
   await writeFile(temp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 })
-  await rename(temp, file)
+  await atomicRename(temp, file)
+}
+
+async function atomicRename(from: string, to: string, retries = 5): Promise<void> {
+  for (let attempt = 0; attempt < retries; attempt++) {
+    try {
+      await rename(from, to)
+      return
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'EPERM' && code !== 'EBUSY') throw error
+      if (attempt < retries - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)))
+      }
+    }
+  }
+  await rename(from, to)
 }
 
 export async function loadSession(id: string): Promise<SessionState> {
@@ -288,7 +300,7 @@ function renderMessage(content: ContentBlock[]): string {
     else if (block.type === 'tool_result') {
       sections.push(`> Tool result${block.isError ? ' (error)' : ''}:\n> ${block.content.replace(/\n/g, '\n> ')}`)
     }
-    // Private model thinking is deliberately not included in exports.
+    
   }
   return sections.join('\n\n').trim()
 }

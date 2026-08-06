@@ -35,9 +35,9 @@ export interface UsageEntry {
 }
 
 export interface ContextUsage {
-  /** Full provider/model reference used for the request. */
+  
   model: string
-  /** Usage of the most recent model request, not cumulative session usage. */
+  
   usage: Usage
 }
 

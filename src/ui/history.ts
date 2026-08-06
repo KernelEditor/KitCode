@@ -4,7 +4,6 @@ export interface HistoryMove {
   draft: string
 }
 
-/** Move through prompt history while preserving the unfinished input draft. */
 export function moveInputHistory(
   history: string[],
   index: number | null,
@@ -31,7 +30,6 @@ export function moveInputHistory(
   return { index: null, value: draft, draft }
 }
 
-/** Add one prompt, avoiding accidental duplicate entries and unbounded growth. */
 export function appendInputHistory(history: string[], value: string, limit = 100): string[] {
   const text = value.trim()
   if (!text || history.at(-1) === text) return history

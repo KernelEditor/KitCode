@@ -34,8 +34,7 @@ export const Transcript = memo(function Transcript({ bubbles, workspace }: Trans
 
   return (
     <Box flexDirection="column" marginBottom={1}>
-      {/* The header is committed first, then completed bubbles are appended to
-          native scrollback. This keeps new messages from pushing the logo down. */}
+      {}
       <Static items={staticItems}>
         {(item) =>
           item.kind === 'header' ? (

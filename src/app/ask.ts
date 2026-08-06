@@ -4,7 +4,6 @@ import type { AgentMode } from '../tools/permissions'
 import { sanitizeTerminalText } from '../ui/sanitize'
 import { boot } from './runtime'
 
-// Russian ЁЙЦУКЕН: pressing Y on a Russian layout emits `н`.
 const RU_YES = new Set(['y', 'н'])
 
 export async function ask(

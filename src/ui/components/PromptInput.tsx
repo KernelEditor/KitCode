@@ -52,8 +52,8 @@ export const PromptInput = memo(function PromptInput({
       setInputCursor((cursor) => clamp(cursor, 0, length))
       return
     }
-    // Values inserted by a picker or cleared by the parent are external to
-    // this input, so place the cursor at their end.
+    
+    
     setInputCursor(length)
   }, [safeValue])
 
@@ -190,7 +190,7 @@ export const PromptInput = memo(function PromptInput({
         paddingX={1}
       >
         <Text color={disabled ? 'gray' : theme.accent}>› </Text>
-        {/* Input stays active while the agent runs; submitted messages queue. */}
+        {}
         <EditableText value={safeValue} cursor={inputCursor} placeholder={strings.placeholder} />
         {pending && pending > 0 ? <Text dimColor> · {strings.queued(pending)}</Text> : null}
       </Box>

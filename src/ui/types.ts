@@ -30,7 +30,7 @@ export interface StatusView {
   busy: boolean
   sessionMs: number
   turnMs: number | null
-  /** Model context window and tokens used by the most recent request. */
+  
   context: { window: number | null; used: number; exact: boolean }
 }
 
@@ -53,7 +53,7 @@ export interface PromptInputProps {
   value: string
   onChange(value: string): void
   onSubmit(value: string): void
-  /** Return true when a pasted standalone path was consumed as an attachment. */
+  
   onPastePath?(value: string): Promise<boolean>
   onPasteImage?(): void
   disabled: boolean

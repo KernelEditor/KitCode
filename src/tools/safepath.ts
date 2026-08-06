@@ -3,11 +3,6 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path
 
 export type SafePath = { ok: true; path: string; relative: string } | { ok: false; reason: string }
 
-// realpathSync is atomic at the kernel level — it resolves symlinks in a single
-// system call, eliminating the TOCTOU window of a manual lstat/readlink walk.
-// For paths that don't exist yet (common for write/edit), we walk up the tree
-// until we find an existing ancestor, canonicalize it, then append the remaining
-// path components. This also handles macOS /var → /private/var correctly.
 function canonicalize(target: string): string {
   try {
     return realpathSync(target)
@@ -39,5 +34,5 @@ export function resolveInside(cwd: string, userPath: string): SafePath {
 }
 
 export function patternEscapes(pattern: string): boolean {
-  return isAbsolute(pattern) || pattern.split('/').includes('..')
+  return isAbsolute(pattern) || pattern.split('/').includes('..') || pattern.split('\\').includes('..')
 }

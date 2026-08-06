@@ -4,6 +4,8 @@ import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 import type { Message } from '../src/providers/types'
 
+const isWindows = process.platform === 'win32'
+
 const home = await mkdtemp(path.join(tmpdir(), 'kitcode-state-'))
 process.env.KITCODE_HOME = home
 
@@ -148,7 +150,9 @@ describe('prompt library', () => {
     const saved = await savePrompt({ name: 'Private prompt', body: 'hello' })
     await expect(getPrompt('../auth')).rejects.toThrow(/Invalid prompt id/)
     await expect(deletePrompt('../../config')).rejects.toThrow(/Invalid prompt id/)
-    expect((await stat(path.join(promptsDir, `${saved.slug}.md`))).mode & 0o777).toBe(0o600)
+    if (!isWindows) {
+      expect((await stat(path.join(promptsDir, `${saved.slug}.md`))).mode & 0o777).toBe(0o600)
+    }
   })
 })
 
@@ -209,9 +213,9 @@ describe('usage tracker', () => {
   })
 
   it('restore() replaces the totals with the resumed session entries', () => {
-    // Models the resume path: the tracker is created once at boot, and a later
-    // resumeSession() must repopulate it from the loaded session's usage,
-    // otherwise the status bar shows zero after a resume.
+    
+    
+    
     const tracker = createUsageTracker([
       { model: 'a/model', usage, requests: 1 },
     ])
@@ -248,14 +252,16 @@ describe('saveSession', () => {
 
     await saveSession(session)
     expect((await loadSession(session.id)).context).toEqual(session.context)
-    expect((await stat(path.join(sessionsDir, `${session.id}.json`))).mode & 0o777).toBe(0o600)
+    if (!isWindows) {
+      expect((await stat(path.join(sessionsDir, `${session.id}.json`))).mode & 0o777).toBe(0o600)
+    }
   })
 
   it('concurrent writes for the same session both finish without clobbering', async () => {
     const session = createSession('/tmp', 'provider/model')
     session.messages = [{ role: 'user', content: [{ type: 'text', text: 'seed' }] }]
-    // Same id, two concurrent saves — the unique temp suffix must keep them
-    // from sharing a temp path and one rename stomping the other.
+    
+    
     const [a, b] = await Promise.all([
       saveSession({ ...session, messages: [{ role: 'user', content: [{ type: 'text', text: 'A' }] }] }),
       saveSession({ ...session, messages: [{ role: 'user', content: [{ type: 'text', text: 'B' }] }] }),
@@ -265,7 +271,7 @@ describe('saveSession', () => {
     const loaded = await loadSession(session.id)
     expect(loaded.messages[0].content[0]).toMatchObject({
       type: 'text',
-      // Either "A" or "B" wins, but the file is intact (not empty/corrupt).
+      
       text: expect.stringMatching(/^[AB]$/),
     })
   })
@@ -297,7 +303,9 @@ describe('saveSession', () => {
     expect(markdown).toContain('[redacted]')
     expect(markdown).not.toContain('very-large-base64')
     expect(markdown).not.toContain('private reasoning')
-    expect((await stat(exported.path)).mode & 0o777).toBe(0o600)
+    if (!isWindows) {
+      expect((await stat(exported.path)).mode & 0o777).toBe(0o600)
+    }
 
     expect(await deleteSession(session.id)).toBe(session.id)
     await expect(loadSession(session.id)).rejects.toThrow(/No session found/)

@@ -75,7 +75,7 @@ export interface UsageSummary {
   output: string
   cache: string | null
   costUsd: number | null
-  /** Combined tokens consumed so far (input + output + cache). */
+  
   totalTokens: number
 }
 
@@ -91,7 +91,6 @@ export function usageParts(tracker: UsageTracker): UsageSummary {
   }
 }
 
-/** Tokens occupying the context window for one provider request. */
 export function contextTokens(usage: Usage): number {
   return usage.input + usage.output + usage.cacheWrite + usage.cacheRead
 }

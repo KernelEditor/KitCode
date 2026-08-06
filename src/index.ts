@@ -32,7 +32,7 @@ program
       try {
         cwd = resolve(cwd)
       } catch {
-        // keep raw
+        
       }
     }
     await startTui({

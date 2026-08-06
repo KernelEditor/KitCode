@@ -25,9 +25,9 @@ export async function startTui(options: {
   clearTerminal()
 
   const instance = render(<App runtime={runtime} initialHistory={history} warnings={warnings} />, {
-    // Only rewrite terminal lines that actually changed. Combined with the UI's
-    // stream batching this keeps long code responses responsive without
-    // sacrificing the normal terminal scrollback.
+    
+    
+    
     incrementalRendering: true,
     maxFps: 30,
   })

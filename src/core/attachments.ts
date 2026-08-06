@@ -47,10 +47,6 @@ export async function loadAttachment(cwd: string, requestedPath: string): Promis
   return loadResolvedAttachment(resolved, info.size)
 }
 
-/**
- * Treat a pasted or dragged standalone path as an attachment only when it
- * resolves to a real supported file. Ordinary prose never causes a file read.
- */
 export async function loadAutomaticAttachment(
   cwd: string,
   requestedPath: string,
@@ -82,7 +78,6 @@ export function looksLikeAttachmentPath(value: string): boolean {
   return path.extname(basename) !== '' || AUTO_PATH_NAMES.has(basename)
 }
 
-/** Read an image from the OS clipboard without creating a persistent file. */
 export async function loadClipboardImage(
   platform: NodeJS.Platform = process.platform,
   runner: ClipboardCommandRunner = runClipboardCommand,
@@ -368,7 +363,6 @@ function normalizeInputPath(value: string): string {
       return value.slice(1, -1)
     }
   }
-  // Paths dragged into a terminal commonly escape spaces and punctuation.
   return value.replace(/\\([\\ "'()\[\]{}&;#$!])/g, (_match, character: string) => character)
 }
 

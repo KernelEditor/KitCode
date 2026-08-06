@@ -64,8 +64,9 @@ import type { Effort, Message, ModelInfo, ModelPricing, RateLimits } from '../pr
 import { createPermissionEngine } from '../tools/permissions'
 import type { AgentMode } from '../tools/permissions'
 import { builtinTools, createToolRegistry } from '../tools/registry'
-import { getPrompt, listPrompts, savePrompt } from '../prompts/library'
-import { discoverSkills, formatSkillCatalogue } from '../skills/library'
+import { deletePrompt, getPrompt, listPrompts, promptExists, savePrompt } from '../prompts/library'
+import { discoverSkills, formatSkillCatalogue, loadSkill } from '../skills/library'
+import { installSkill } from '../skills/install'
 import { createSkillTool } from '../tools/skill'
 import { createTaskTool } from '../tools/task'
 import type { Lang } from '../ui/i18n'
@@ -120,7 +121,7 @@ export async function boot(options: {
   if (options.mode) permissions.mode.set(options.mode)
 
   const skillRoots = workspaceTrusted ? [projectSkillsDir(workspaceRoot), skillsDir] : [skillsDir]
-  const skills = await discoverSkills(skillRoots)
+  let skills = await discoverSkills(skillRoots)
   if (skills.length > 0) tools.register([createSkillTool(skills)])
 
   const mcp = createMcpManager(config.mcp)
@@ -196,7 +197,7 @@ export async function boot(options: {
 
   modelContextWindow = knownContextWindow(modelRef)
 
-  // Refresh the cached context-window size for the active model.
+  
   async function refreshModelContextWindow(): Promise<void> {
     const targetRef = modelRef
     const parsed = parseModelRef(targetRef)
@@ -207,9 +208,9 @@ export async function boot(options: {
       }
       return
     }
-    // Preserve context metadata captured during provider detection when the
-    // provider's later /models response is more minimal (common for OpenAI-
-    // compatible endpoints).
+    
+    
+    
     let next = modelContextWindow ?? knownContextWindow(targetRef)
     try {
       const provider = registry.get(parsed.provider)
@@ -218,7 +219,7 @@ export async function boot(options: {
       const found = models.find((m) => m.id === parsed.model)
       next = found?.contextWindow ?? next
     } catch {
-      // Keep provider-known metadata when discovery or cache refresh fails.
+      
     }
     if (modelRef === targetRef) {
       modelContextWindow = next
@@ -383,7 +384,7 @@ export async function boot(options: {
               config.model = nextModel
               break
             } catch {
-              // Logging out must still work if another provider is temporarily offline.
+              
             }
           }
         }
@@ -507,6 +508,13 @@ export async function boot(options: {
     async setThinking(enabled) {
       await persistConfig((draft) => {
         draft.thinking = enabled
+      })
+    },
+
+    getMaxTokensPerTurn: () => config.budget.maxTokensPerTurn,
+    async setMaxTokensPerTurn(tokens: number) {
+      await persistConfig((draft) => {
+        draft.budget.maxTokensPerTurn = tokens
       })
     },
 
@@ -680,6 +688,24 @@ export async function boot(options: {
       await savePrompt({ name, body })
     },
 
+    async deletePrompt(slug) {
+      const ok = await deletePrompt(slug)
+      if (!ok) throw new Error(`Prompt "${slug}" not found.`)
+    },
+
+    async loadSkill(name) {
+      const meta = skills.find((s) => s.name === name)
+      if (!meta) throw new Error(`Skill "${name}" not found.`)
+      return (await loadSkill(meta)).body
+    },
+
+    async installSkill(source) {
+      const result = await installSkill(source)
+      
+      skills = await discoverSkills(skillRoots)
+      return result
+    },
+
     async loadAttachment(requestedPath) {
       return (await loadAttachment(options.cwd, requestedPath)).block
     },
@@ -734,8 +760,8 @@ export async function boot(options: {
     startupUpdateCheck: () => startupUpdate,
 
     async run(history, hooks, signal) {
-      // A server may have closed while KitCode was idle. Refresh the live MCP
-      // schemas before building the next prompt so disconnected tools vanish.
+      
+      
       syncMcpTools()
       let requestHistory = history
       const budget = createTurnBudget(config.budget, resolvePricing)

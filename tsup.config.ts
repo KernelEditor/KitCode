@@ -22,8 +22,8 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   dts: false,
-  // Runtime deps stay external and are resolved from node_modules.
-  // Only our own `src/**` files get bundled together.
+  
+  
   banner: { js: '#!/usr/bin/env node' },
   define: { __KITCODE_COMMIT__: JSON.stringify(buildCommit()) },
 })

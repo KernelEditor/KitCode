@@ -44,7 +44,6 @@ const SCHEMES: Record<keyof RateLimits, HeaderNames> = {
   },
 }
 
-/** Parse only explicit provider response headers; no limits are guessed locally. */
 export function parseRateLimits(headers: Headers | null): RateLimits | null {
   if (!headers) return null
   const limits: RateLimits = {}

@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
 
+const isWindows = process.platform === 'win32'
+
 const home = await mkdtemp(path.join(tmpdir(), 'kitcode-cfg-home-'))
 process.env.KITCODE_HOME = home
 delete process.env.KITCODE_CONFIG
@@ -77,7 +79,9 @@ describe('workspace trust', () => {
     expect(trustedRoot).toBe(await realpath(workspace))
     expect(await isWorkspaceTrusted(workspace)).toBe(true)
     expect((await loadRuntimeConfig(nested)).config.effort).toBe('low')
-    expect((await stat(trustPath)).mode & 0o777).toBe(0o600)
+    if (!isWindows) {
+      expect((await stat(trustPath)).mode & 0o777).toBe(0o600)
+    }
 
     await revokeWorkspaceTrust(workspace)
   })
@@ -103,8 +107,10 @@ describe('saveAuth', () => {
     await saveAuth({ demo: 'sk-secret' })
 
     expect(authPath.startsWith(home)).toBe(true)
-    expect((await stat(authPath)).mode & 0o777).toBe(0o600)
-    expect((await stat(homeDir)).mode & 0o777).toBe(0o700)
+    if (!isWindows) {
+      expect((await stat(authPath)).mode & 0o777).toBe(0o600)
+      expect((await stat(homeDir)).mode & 0o777).toBe(0o700)
+    }
     await expect(stat(path.join(workspace, 'auth.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

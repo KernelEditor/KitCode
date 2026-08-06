@@ -77,9 +77,9 @@ function balanceEndpoints(baseUrl: string): BalanceEndpoint[] {
   }
   if (host === 'api.openai.com' || host === 'api.anthropic.com') return []
 
-  // OpenAI-compatible gateways do not share a balance standard. Probe a
-  // short allowlist on the already configured origin and accept only a known
-  // response shape. Never forward the key to another host.
+  
+  
+  
   return [
     endpoint(url.origin, '/user/balance', deepSeekBalance),
     endpoint(url.origin, '/api/v1/key', openRouterKeyBalance),

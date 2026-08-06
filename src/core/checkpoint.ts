@@ -74,13 +74,13 @@ export interface UndoResult {
 }
 
 export interface FileCheckpoint {
-  /** Capture the original bytes before the first write to a file. */
+  
   capture(absolutePath: string): Promise<void>
-  /** Mark a successfully written file as part of this turn. */
+  
   markChanged(absolutePath: string): void
-  /** Canonical workspace-relative paths touched by write/edit. */
+  
   changedPaths(): string[]
-  /** Persist the final after-state so a later /undo can verify conflicts. */
+  
   commit(): Promise<CheckpointCommit | null>
 }
 

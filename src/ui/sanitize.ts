@@ -1,4 +1,4 @@
-/** Remove terminal control sequences from provider, tool, config, and file text. */
+
 export function sanitizeTerminalText(value: unknown): string {
   const text = String(value ?? '')
   let output = ''

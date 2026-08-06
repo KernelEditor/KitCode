@@ -86,24 +86,8 @@ describe('turn budget', () => {
     estimatedInputTokens: 0,
   })
 
-  it('stops before exceeding the model-request limit', () => {
-    const budget = createTurnBudget({
-      maxRequestsPerTurn: 2,
-      maxTokensPerTurn: 100_000,
-      maxCostUsdPerTurn: 10,
-    })
-    expect(budget.beforeRequest(request())).toMatchObject({ allowed: true })
-    expect(budget.beforeRequest(request())).toMatchObject({ allowed: true })
-    expect(budget.beforeRequest(request())).toMatchObject({
-      allowed: false,
-      reason: expect.stringMatching(/request budget/),
-    })
-    expect(budget.snapshot().requests).toBe(2)
-  })
-
   it('stops subsequent calls at token and cost limits', () => {
     const tokenBudget = createTurnBudget({
-      maxRequestsPerTurn: 10,
       maxTokensPerTurn: 1_000,
       maxCostUsdPerTurn: 10,
     })
@@ -120,7 +104,6 @@ describe('turn budget', () => {
     })
 
     const costBudget = createTurnBudget({
-      maxRequestsPerTurn: 10,
       maxTokensPerTurn: 1_000_000,
       maxCostUsdPerTurn: 0.01,
     })
@@ -142,7 +125,6 @@ describe('turn budget', () => {
   it('uses provider-discovered pricing when it is available', () => {
     const budget = createTurnBudget(
       {
-        maxRequestsPerTurn: 10,
         maxTokensPerTurn: 1_000_000,
         maxCostUsdPerTurn: 0.01,
       },
@@ -165,7 +147,6 @@ describe('turn budget', () => {
 
   it('caps output before sending a request that approaches the budget', () => {
     const budget = createTurnBudget({
-      maxRequestsPerTurn: 10,
       maxTokensPerTurn: 2_000,
       maxCostUsdPerTurn: 10,
     })
@@ -213,13 +194,13 @@ describe('path sandboxing', () => {
 
   it('blocks symlink escape attempts', async () => {
     const root = await mkdtemp(join(tmpdir(), 'kitcode-test-'))
-    // Create a symlink inside the workspace pointing outside
+    
     const linkPath = join(root, 'escape')
     await writeFile(linkPath, '../../etc/passwd')
-    // resolveInside should still block because realpathSync resolves the symlink
+    
     const safe = resolveInside(root, 'escape')
-    // The symlink target doesn't exist, so realpathSync returns the resolved path
-    // which is outside root — should be blocked
+    
+    
     if (safe.ok) {
       expect(safe.relative.startsWith('..')).toBe(false)
     }
@@ -233,10 +214,10 @@ describe('path sandboxing', () => {
 
 describe('session id validation', () => {
   it('rejects session ids with dots', () => {
-    // Dots are no longer allowed — prevents path traversal confusion
+    
     const badIds = ['../secret', 'foo.bar', 'a.b.c', '..']
     for (const id of badIds) {
-      // The regex should reject these
+      
       expect(/^[A-Za-z0-9_-]{1,240}$/.test(id)).toBe(false)
     }
   })
@@ -254,16 +235,16 @@ describe('regex matcher resilience', () => {
     const matcher = createRegexMatcher('test')
     const signal = new AbortController().signal
 
-    // First call succeeds
+    
     await expect(matcher.match(['test line'], 10, signal)).resolves.toEqual([0])
 
-    // Abort a call — should not permanently disable the matcher
+    
     const abortController = new AbortController()
     const pending = matcher.match(['slow'], 10, abortController.signal)
     abortController.abort()
     await expect(pending).rejects.toThrow('Search interrupted')
 
-    // Subsequent calls should still work — the matcher spawns a fresh worker
+    
     await expect(matcher.match(['another test'], 10, signal)).resolves.toEqual([0])
 
     await matcher.close()

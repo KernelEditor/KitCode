@@ -9,7 +9,6 @@ export type UpdateCheck =
   | { status: 'available'; current: string; latest: string; url: string }
   | { status: 'unknown'; reason: string }
 
-/** Public, unauthenticated check. It is never called unless updates.checkOnStart is true. */
 export async function checkForUpdates(
   fetcher: typeof fetch = fetch,
   currentCommit = KITCODE_COMMIT,

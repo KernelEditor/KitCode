@@ -4,6 +4,8 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { beginCheckpoint, undoLatestCheckpoint } from '../src/core/checkpoint'
 
+const isWindows = process.platform === 'win32'
+
 let root: string
 let cwd: string
 let storageDir: string
@@ -35,13 +37,17 @@ describe('automatic file checkpoints', () => {
 
     expect(committed?.paths).toEqual(['src.txt'])
     const checkpointFile = path.join(storageDir, sessionId, `${committed?.id}.json`)
-    expect((await stat(checkpointFile)).mode & 0o777).toBe(0o600)
-    expect((await stat(path.dirname(checkpointFile))).mode & 0o777).toBe(0o700)
+    if (!isWindows) {
+      expect((await stat(checkpointFile)).mode & 0o777).toBe(0o600)
+      expect((await stat(path.dirname(checkpointFile))).mode & 0o777).toBe(0o700)
+    }
 
     const result = await undoLatestCheckpoint({ cwd, sessionId, storageDir })
     expect(result).toMatchObject({ found: true, restored: ['src.txt'], conflicts: [], failed: [] })
     expect(await readFile(file, 'utf8')).toBe('before\n')
-    expect((await stat(file)).mode & 0o777).toBe(0o640)
+    if (!isWindows) {
+      expect((await stat(file)).mode & 0o777).toBe(0o640)
+    }
   })
 
   it('removes a file created by the agent', async () => {

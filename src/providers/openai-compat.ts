@@ -195,12 +195,12 @@ function toContentBlocks(
   return content
 }
 
-function parseArguments(args: string): unknown {
+function parseArguments(args: string): Record<string, unknown> {
   if (!args) return {}
   try {
-    return JSON.parse(args)
+    return JSON.parse(args) as Record<string, unknown>
   } catch {
-    return args
+    return {}
   }
 }
 
@@ -286,9 +286,9 @@ export function normalizeOpenAiUsage(usage: {
   completion_tokens?: number | null
   prompt_tokens_details?: { cached_tokens?: number | null } | null
 }): Usage {
-  // OpenAI reports cached tokens as a subset of prompt_tokens. Internally all
-  // usage buckets are exclusive so pricing and context totals can safely add
-  // them without counting the cached portion twice.
+  
+  
+  
   const cacheRead = usage.prompt_tokens_details?.cached_tokens ?? 0
   return {
     input: Math.max(0, (usage.prompt_tokens ?? 0) - cacheRead),

@@ -36,7 +36,6 @@ export interface RuntimeConfigLoad {
   ignoredProject?: ConfigLocation
 }
 
-/** Load executable project settings only after the workspace was explicitly trusted. */
 export async function loadRuntimeConfig(cwd: string): Promise<RuntimeConfigLoad> {
   const location = await resolveConfigLocation(cwd)
   if (location.scope === 'project' && !(await isWorkspaceTrusted(cwd))) {

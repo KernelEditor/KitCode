@@ -33,7 +33,6 @@ export interface RegexMatcher {
   close(): Promise<void>
 }
 
-/** Execute untrusted JavaScript regular expressions outside the UI process. */
 export function createRegexMatcher(pattern: string): RegexMatcher {
   let worker = newWorker()
   let nextId = 0
@@ -63,8 +62,8 @@ export function createRegexMatcher(pattern: string): RegexMatcher {
         }
         const onError = (error: Error) => finish(error)
         const onAbort = () => {
-          // Terminate the runaway worker so the catastrophic regex stops consuming CPU,
-          // but do NOT close the matcher — the next match() call will spawn a fresh worker.
+          
+          
           void worker.thread.terminate()
           worker = newWorker()
           finish(new Error('Search interrupted by the user.'))
@@ -99,8 +98,8 @@ interface WorkerHandle {
 
 function newWorker(): WorkerHandle {
   const thread = new Worker(WORKER_SOURCE, { eval: true })
-  // This listener keeps a late worker failure from becoming an unhandled
-  // EventEmitter error. Request-specific handlers report to the caller.
+  
+  
   thread.on('error', () => undefined)
   return { thread }
 }

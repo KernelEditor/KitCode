@@ -58,31 +58,47 @@ export const bashTool: Tool = {
       const child = spawn(command, {
         shell: true,
         cwd: ctx.cwd,
-        detached: true,
+        detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe'],
+        
+        
+        
+        windowsHide: true,
       })
 
       const chunks: string[] = []
       let captured = 0
       let truncated = false
-      const collect = (text: string) => {
+      const collect = (buf: Buffer) => {
         if (truncated) return
-        const room = MAX_OUTPUT - captured
-        if (text.length > room) {
-          chunks.push(text.slice(0, room))
+        
+        let text: string
+        try {
+          text = buf.toString('utf8')
+        } catch {
+          text = buf.toString()
+        }
+        if (text.length > MAX_OUTPUT - captured) {
+          chunks.push(text.slice(0, MAX_OUTPUT - captured))
           truncated = true
           return
         }
         chunks.push(text)
         captured += text.length
       }
-      child.stdout.setEncoding('utf8')
-      child.stderr.setEncoding('utf8')
       child.stdout.on('data', collect)
       child.stderr.on('data', collect)
 
       const killTree = () => {
         if (child.pid == null) return
+        if (process.platform === 'win32') {
+          try {
+            spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' })
+          } catch {
+            child.kill('SIGKILL')
+          }
+          return
+        }
         try {
           process.kill(-child.pid, 'SIGKILL')
         } catch {
@@ -118,8 +134,8 @@ export const bashTool: Tool = {
         if (truncated) notes.push(`[output truncated at ${MAX_OUTPUT} characters]`)
         if (aborted) notes.push('[command was cancelled]')
         else if (timedOut) notes.push(`[command timed out after ${timeout}ms]`)
-        // Only report the exit code when the process was not intentionally killed —
-        // otherwise the note is redundant (the cancel/timeout note already explains it).
+        
+        
         if (code !== 0 && !aborted && !timedOut) {
           notes.push(`[exit ${signal ? `signal ${signal}` : `code ${code}`}]`)
         }

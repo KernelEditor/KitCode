@@ -33,12 +33,15 @@ export interface Runtime {
   deleteAllSessions(): Promise<{ deleted: number; failed: Array<{ id: string; error: string }> }>
   exportSession(id: string, destination?: string): Promise<string>
   listSkills(): { name: string; description: string }[]
+  installSkill(source: string): Promise<{ name: string; dir: string; source: string }>
   getModelRef(): string
   setModelRef(ref: string): Promise<void>
   getEffort(): Effort
   setEffort(effort: Effort): Promise<void>
   getThinking(): boolean
   setThinking(enabled: boolean): Promise<void>
+  getMaxTokensPerTurn(): number
+  setMaxTokensPerTurn(tokens: number): Promise<void>
   getLang(): Lang | undefined
   setLang(lang: Lang): Promise<void>
   getAccent(): string
@@ -52,7 +55,7 @@ export interface Runtime {
   addMcpServer(name: string, config: McpServerConfig): Promise<McpServerState>
   removeMcpServer(name: string): Promise<void>
   setMcpEnabled(name: string, enabled: boolean): Promise<McpServerState>
-  /** Context-window size and exact usage of the most recent request. */
+  
   modelContext(): { window: number | null; used: number; exact: boolean }
   subscribeContext(listener: () => void): () => void
   resetContext(): void
@@ -66,6 +69,8 @@ export interface Runtime {
   listPromptItems(): Promise<PickerItem[]>
   readPrompt(slug: string): Promise<string>
   savePrompt(name: string, body: string): Promise<void>
+  deletePrompt(slug: string): Promise<void>
+  loadSkill(name: string): Promise<string>
   loadAttachment(path: string): Promise<ContentBlock>
   loadAutomaticAttachment(path: string): Promise<ContentBlock | null>
   loadClipboardImage(): Promise<ContentBlock>

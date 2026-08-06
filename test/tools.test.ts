@@ -12,6 +12,8 @@ import { resolveInside } from '../src/tools/safepath'
 import type { Tool, ToolContext } from '../src/tools/types'
 import { writeTool } from '../src/tools/write'
 
+const isWindows = process.platform === 'win32'
+
 let cwd: string
 
 beforeEach(async () => {
@@ -42,16 +44,17 @@ describe('resolveInside', () => {
   })
 
   it('rejects a symlink pointing outside the root', async () => {
+    if (isWindows) return 
     const outside = await mkdtemp(join(tmpdir(), 'kitcode-outside-'))
     try {
-      // Create the target file so realpathSync can resolve the symlink
+      
       await writeFile(join(outside, 'ghost.txt'), 'outside content')
       await symlink(join(outside, 'ghost.txt'), join(cwd, 'escape'))
       expect(resolveInside(cwd, 'escape').ok).toBe(false)
 
       const result = await writeTool.execute({ path: 'escape', content: 'pwned' }, context())
       expect(result.isError).toBe(true)
-      // The outside file should not have been modified
+      
       expect((await readFile(join(outside, 'ghost.txt'), 'utf8')).trim()).toBe('outside content')
     } finally {
       await rm(outside, { recursive: true, force: true })
@@ -59,6 +62,7 @@ describe('resolveInside', () => {
   })
 
   it('recognizes a harmless-looking symlink to a credential file as sensitive', async () => {
+    if (isWindows) return 
     await writeFile(join(cwd, '.env'), 'TOKEN=private\n')
     await symlink(join(cwd, '.env'), join(cwd, 'config.txt'))
     expect(readTool.permission?.({ path: 'config.txt' }, context())).toBe('ask')
@@ -83,7 +87,7 @@ describe('grep', () => {
   it('matches every line even when the pattern has the global flag', async () => {
     await writeFile(join(cwd, 'g.txt'), 'x\nx\nx\n')
     const result = await grepTool.execute({ pattern: 'x', glob: '**/*.txt' }, context())
-    // Without resetting lastIndex, a stateful /g test skips lines inconsistently.
+    
     expect(result.content).toBe('g.txt:1: x\ng.txt:2: x\ng.txt:3: x')
   })
 

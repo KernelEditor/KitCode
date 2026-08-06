@@ -30,8 +30,6 @@ const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const STREAM_FRAME_MS = 50
 const MAX_ATTACHMENTS = 8
 
-// Slash commands that affect conversation state and must wait until the agent
-// finishes the current turn before running.
 const NEEDS_IDLE = new Set<string>([
   'clear',
   'resume',
@@ -154,13 +152,13 @@ export function App({
     return () => clearInterval(timer)
   }, [turnStart])
 
-  // Auto-copy mouse-selected text to the system clipboard.
-  //
-  // In a CLI/TUI you normally can't intercept mouse selections — they live
-  // inside the terminal emulator. Linux X11 exposes the "primary selection"
-  // (what's currently highlighted by the mouse) via the X clipboard; polling it
-  // and forwarding it to the "clipboard" gives "select to copy" behaviour.
-  // Wayland and macOS don't expose an equivalent, so we skip them.
+  
+  
+  
+  
+  
+  
+  
   useEffect(() => {
     if (process.platform === 'darwin') return
     let last = ''
@@ -179,7 +177,7 @@ export function App({
           polling = false
           if (cancelling) return
           if (error) {
-            // xclip missing or not X11: stop polling for the rest of the session.
+            
             giveUp = true
             if (interval) clearInterval(interval)
             return
@@ -290,7 +288,7 @@ export function App({
       abort.current = null
       setBusy(false)
       setTurnStart(null)
-      // Drain the queue of messages typed while the agent was running.
+      
       const queue = queueRef.current
       if (queue.length > 0) {
         const [next, ...rest] = queue
@@ -609,13 +607,47 @@ export function App({
         }
 
         case 'skills': {
+          const action = rest[0]?.toLowerCase()
+
+          if (action === 'install') {
+            const source = rest.slice(1).join(' ').trim()
+            if (!source) {
+              notice('warn', strings.skillsInstallUsage)
+              return
+            }
+            notice('info', strings.skillsInstalling(source))
+            try {
+              const result = await runtime.installSkill(source)
+              notice('info', strings.skillsInstalled(result.name, result.source))
+              
+              forceRender((n) => n + 1)
+            } catch (error) {
+              notice('error', error instanceof Error ? error.message : String(error))
+            }
+            return
+          }
+
           const skills = runtime.listSkills()
-          notice(
-            'info',
-            skills.length === 0
-              ? strings.skillsEmpty
-              : skills.map((skill) => `${skill.name} — ${skill.description}`).join('\n'),
-          )
+          if (skills.length === 0) {
+            notice('info', strings.skillsEmpty)
+            return
+          }
+          const items: PickerItem[] = skills.map((skill) => ({
+            key: skill.name,
+            label: skill.name,
+            hint: skill.description || undefined,
+          }))
+          const choice = await pick(strings.titleSkills, items)
+          if (!choice) return
+          try {
+            const body = await runtime.loadSkill(choice)
+            
+            setTranscript((state) => pushUser(state, `skill: ${choice}\n${body}`))
+            history.current = [...history.current, { role: 'user', content: [{ type: 'text', text: body }] }]
+            void runAgent()
+          } catch (error) {
+            notice('error', error instanceof Error ? error.message : String(error))
+          }
           return
         }
 
@@ -943,6 +975,27 @@ export function App({
           return
         }
 
+        case 'budget': {
+          const current = runtime.getMaxTokensPerTurn()
+          if (rest[0]) {
+            const tokens = Number(rest[0])
+            if (tokens === 0) {
+              await runtime.setMaxTokensPerTurn(0)
+              notice('info', strings.budgetUnlimited)
+              forceRender((n) => n + 1)
+            } else if (!Number.isInteger(tokens) || tokens < 1_000 || tokens > 10_000_000) {
+              notice('warn', strings.budgetInvalid)
+            } else {
+              await runtime.setMaxTokensPerTurn(tokens)
+              notice('info', strings.budgetSet(tokens))
+              forceRender((n) => n + 1)
+            }
+          } else {
+            notice('info', current === 0 ? strings.budgetUnlimited : strings.budgetCurrent(current))
+          }
+          return
+        }
+
         case 'model': {
           const items = await runtime.listModelItems()
           if (items.length === 0) {
@@ -979,21 +1032,84 @@ export function App({
         }
 
         case 'prompt': {
-          if (rest[0] === 'save') {
+          const sub = rest[0]?.toLowerCase()
+
+          if (sub === 'save') {
             const name = rest.slice(1).join(' ').trim()
-            const body = lastUserText(history.current)
-            if (!name) {
-              notice('warn', strings.promptUsage)
+            if (name) {
+              
+              const body = lastUserText(history.current)
+              if (!body) {
+                notice('warn', strings.promptNothing)
+                return
+              }
+              await runtime.savePrompt(name, body)
+              notice('info', strings.promptSaved(name))
               return
             }
-            if (!body) {
-              notice('warn', strings.promptNothing)
+            
+            const recent = recentUserMessages(history.current, 20)
+            if (recent.length > 0) {
+              const items: PickerItem[] = recent.map((text, i) => ({
+                key: `__recent_${i}__`,
+                label: text.length > 60 ? `${text.slice(0, 60)}…` : text,
+                hint: text.length > 60 ? undefined : undefined,
+              }))
+              items.push({ key: '__custom__', label: '— type a custom prompt —' })
+              const choice = await pick(strings.titlePrompts, items)
+              if (!choice) return
+              if (choice === '__custom__') {
+                setInput('/prompt save ')
+                return
+              }
+              const index = parseInt(choice.replace('__recent_', '').replace('__', ''), 10)
+              const body = recent[index] ?? ''
+              if (!body) {
+                notice('warn', strings.promptNothing)
+                return
+              }
+              if (!(await ask(strings.promptSaveAsk, strings.promptSaveAskBody))) return
+              
+              const defaultName = body.split(/\s+/).slice(0, 4).join('-').replace(/[^a-z0-9-]/gi, '').toLowerCase()
+              const nameInput = `${defaultName || 'prompt'}`
+              
+              await runtime.savePrompt(nameInput, body)
+              notice('info', `${strings.promptSaved(nameInput)}\nRename the file if you want a different name.`)
               return
             }
-            await runtime.savePrompt(name, body)
-            notice('info', strings.promptSaved(name))
+            notice('warn', strings.promptNothing)
             return
           }
+
+          if (sub === 'delete') {
+            const name = rest.slice(1).join(' ').trim()
+            if (name) {
+              try {
+                await runtime.deletePrompt(name)
+                notice('info', strings.promptDeleted(name))
+              } catch (error) {
+                notice('error', error instanceof Error ? error.message : String(error))
+              }
+              return
+            }
+            const items = await runtime.listPromptItems()
+            if (items.length === 0) {
+              notice('info', strings.promptsEmpty)
+              return
+            }
+            const choice = await pick(strings.titlePrompts, items)
+            if (!choice) return
+            if (!(await ask(strings.promptDeleteUsage.replace('Usage: ', '').replace('<name>', choice || '') + '?', strings.sessionDeleteAsk, true))) return
+            try {
+              await runtime.deletePrompt(choice)
+              notice('info', strings.promptDeleted(choice))
+            } catch (error) {
+              notice('error', error instanceof Error ? error.message : String(error))
+            }
+            return
+          }
+
+          
           const items = await runtime.listPromptItems()
           if (items.length === 0) {
             notice('info', strings.promptsEmpty)
@@ -1094,15 +1210,15 @@ export function App({
       )
       const detachedInput = pendingAttachments.length > 0
       if (detachedInput) {
-        // Let the user start typing the next message while the clipboard/file
-        // read finishes; the captured text below is still submitted with it.
+        
+        
         setInput('')
         await Promise.all(pendingAttachments)
       }
       const text = raw.trim()
       const submitSlash = () => {
-        // Slash commands can run even while busy (e.g. /effort, /thinking);
-        // queue-impacting commands defer until idle.
+        
+        
         if (!detachedInput) setInput('')
         if (busy && slashNeedsIdle(text)) {
           queueRef.current = [...queueRef.current, { kind: 'command', line: text }]
@@ -1346,6 +1462,17 @@ function lastUserText(messages: Message[]): string {
   return ''
 }
 
+function recentUserMessages(messages: Message[], max: number): string[] {
+  const results: string[] = []
+  for (let index = messages.length - 1; index >= 0 && results.length < max; index -= 1) {
+    const message = messages[index]
+    if (message?.role !== 'user') continue
+    const text = userText(message)
+    if (text) results.unshift(text)
+  }
+  return results
+}
+
 function inputHistoryFromMessages(messages: Message[]): string[] {
   return messages.reduce<string[]>((items, message) => {
     if (message.role !== 'user') return items
@@ -1378,9 +1505,6 @@ function unquoteArg(value: string): string {
     : value
 }
 
-// Copies text to the system clipboard using the platform's native CLI tool.
-// macOS: pbcopy · Linux: wl-copy (Wayland) or xclip/xsel (X11).
-// No external npm dependency required.
 function copyToClipboard(text: string): void {
   const run = (cmd: string, args: string[]) =>
     execFileSync(cmd, args, { input: text, stdio: ['pipe', 'ignore', 'ignore'] })
@@ -1388,7 +1512,7 @@ function copyToClipboard(text: string): void {
     try {
       run('pbcopy', [])
     } catch {
-      /* pbcopy unavailable */
+      
     }
     return
   }
@@ -1402,7 +1526,7 @@ function copyToClipboard(text: string): void {
       run(cmd, args)
       return
     } catch {
-      /* try next */
+      
     }
   }
 }

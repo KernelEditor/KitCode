@@ -14,8 +14,6 @@ export function Diff({ before, after }: { before: string; after: string }) {
   return <DiffHunk lines={hunk} hidden={hidden} />
 }
 
-// Render a precomputed hunk. Lets a parent reuse one diffLines() call for both
-// the visible diff and the +/- stat.
 export function DiffHunk({ lines, hidden }: { lines: DiffLine[]; hidden: number }) {
   return (
     <Box flexDirection="column">

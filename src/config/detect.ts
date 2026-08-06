@@ -180,8 +180,8 @@ function withTimeout(fetchImpl: typeof fetch, timeoutMs: number): typeof fetch {
   return async (input, init) => {
     const controller = new AbortController()
     const expiry = new Error(`timed out after ${Math.round(timeoutMs / 100) / 10}s`)
-    // Name it so abortKind (errors.ts) recognises it as a timeout rather than
-    // a generic non-retryable error if this wrapper is ever reused for streaming.
+    
+    
     expiry.name = 'TimeoutError'
     let timer: ReturnType<typeof setTimeout> | undefined
     const expired = new Promise<never>((_resolve, reject) => {

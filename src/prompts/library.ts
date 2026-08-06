@@ -73,6 +73,17 @@ export async function deletePrompt(slug: string): Promise<boolean> {
   }
 }
 
+export async function promptExists(slug: string): Promise<boolean> {
+  assertSlug(slug)
+  try {
+    await readFile(path.join(promptsDir, `${slug}.md`), 'utf8')
+    return true
+  } catch (error) {
+    if (isMissing(error)) return false
+    throw error
+  }
+}
+
 export async function searchPrompts(query: string): Promise<SavedPrompt[]> {
   const needle = query.trim().toLowerCase()
   const prompts = await listPrompts()

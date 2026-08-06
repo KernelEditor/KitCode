@@ -6,6 +6,8 @@ import { discoverSkills, formatSkillCatalogue, loadSkill } from '../src/skills/l
 import { createSkillTool } from '../src/tools/skill'
 import type { ToolContext } from '../src/tools/types'
 
+const isWindows = process.platform === 'win32'
+
 const io = vi.hoisted(() => ({ bytes: 0 }))
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -130,6 +132,7 @@ describe('discoverSkills', () => {
   })
 
   it('follows a symlinked skill directory', async () => {
+    if (isWindows) return 
     const real = await writeSkill(globalRoot, 'excel', '---\nname: excel\ndescription: Edit spreadsheets\n---\n\nUse openpyxl.\n')
     await symlink(real, join(projectRoot, 'excel-link'))
 
@@ -139,6 +142,7 @@ describe('discoverSkills', () => {
   })
 
   it('survives a SKILL.md that is a directory and a symlink loop', async () => {
+    if (isWindows) return 
     await mkdir(join(projectRoot, 'weird', 'SKILL.md'), { recursive: true })
     await symlink(join(projectRoot, 'loop'), join(projectRoot, 'loop'))
     await writeSkill(projectRoot, 'pdf-forms', pdfForms)

@@ -11,6 +11,7 @@ import type {
   ToolUseBlock,
   Usage,
 } from '../providers/types'
+import { ProviderError } from '../providers/types'
 import type {
   FileCheckpointSink,
   PermissionMode,
@@ -23,6 +24,8 @@ import { sanitizeHistory } from './session'
 import type { TurnBudget } from './budget'
 
 const MAX_PAUSE_RESUMES = 5
+const MAX_RETRIES = 3
+const INITIAL_BACKOFF_MS = 1000
 
 export const MAX_TURN_STEPS = 64
 export const MAX_TOOL_CALLS_PER_STEP = 32
@@ -178,7 +181,7 @@ async function consumeStream(
 
   let outcome: StreamOutcome | undefined
 
-  for await (const event of cfg.provider.stream(request)) {
+  for await (const event of streamWithRetry(cfg.provider, request, cfg.modelRef, signal)) {
     switch (event.type) {
       case 'text_delta':
         hooks.onEvent({ type: 'text_delta', text: event.text })
@@ -209,6 +212,71 @@ async function consumeStream(
   )
 }
 
+async function* streamWithRetry(
+  provider: Provider,
+  request: ChatRequest,
+  modelRef: string,
+  signal: AbortSignal,
+): AsyncGenerator<import('../providers/types').StreamEvent> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    if (signal.aborted) return
+    try {
+      for await (const event of provider.stream(request)) {
+        yield event
+      }
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt >= MAX_RETRIES) break
+      const waitMs = retryBackoffMs(error, attempt)
+      if (waitMs > 0) {
+        await sleep(waitMs, signal)
+        continue
+      }
+      break
+    }
+  }
+  if (lastError) throw lastError
+}
+
+function retryBackoffMs(error: unknown, attempt: number): number {
+  if (!isRateLimitError(error)) return 0
+  const serverWait = retryAfterFromError(error)
+  if (serverWait > 0) return Math.min(serverWait, 60_000)
+  return Math.min(INITIAL_BACKOFF_MS * 2 ** attempt, 30_000)
+}
+
+function isRateLimitError(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return false
+  return error.status === 429
+}
+
+function retryAfterFromError(error: unknown): number {
+  const cause = (error as { cause?: unknown })?.cause
+  const headers = (cause as { headers?: unknown })?.headers
+  if (headers && typeof (headers as { get?: unknown }).get === 'function') {
+    const ms = Number((headers as { get: (k: string) => string | null }).get('retry-after-ms'))
+    if (Number.isFinite(ms) && ms > 0) return ms
+    const raw = (headers as { get: (k: string) => string | null }).get('retry-after')
+    if (raw) {
+      const s = Number(raw)
+      if (Number.isFinite(s) && s > 0) return s * 1000
+    }
+  }
+  return 0
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const id = setTimeout(resolve, ms)
+    signal.addEventListener('abort', () => {
+      clearTimeout(id)
+      reject(signal.reason ?? new Error('Aborted'))
+    }, { once: true })
+  })
+}
+
 function estimateRequestTokens(cfg: AgentConfig, messages: Message[]): number {
   let characters = cfg.system.length
   try {
@@ -219,12 +287,12 @@ function estimateRequestTokens(cfg: AgentConfig, messages: Message[]): number {
     ).length
     characters += JSON.stringify(cfg.tools.schemas()).length
   } catch {
-    // Provider serialization will report malformed/cyclic data. Keep a small
-    // non-zero estimate here so the budget still has a conservative floor.
+    
+    
     return Math.max(1, characters)
   }
-  // One token per UTF-16 character deliberately overestimates ordinary code
-  // and prose, reserving room for input before an API request is sent.
+  
+  
   return Math.max(1, characters)
 }
 

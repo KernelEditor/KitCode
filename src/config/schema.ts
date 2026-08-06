@@ -61,8 +61,7 @@ export const themeSchema = z.object({
 export const langSchema = z.enum(['en', 'ru'])
 
 export const budgetSchema = z.object({
-  maxRequestsPerTurn: z.number().int().min(1).max(256).default(32),
-  maxTokensPerTurn: z.number().int().min(1_000).max(10_000_000).default(1_000_000),
+  maxTokensPerTurn: z.number().int().min(0).max(10_000_000).default(10_000_000),
   maxCostUsdPerTurn: z.number().positive().max(1_000).default(5),
   maxSubagentsPerTurn: z.number().int().min(0).max(16).default(3),
 })
@@ -73,7 +72,7 @@ export const diagnosticsSchema = z.object({
 })
 
 export const updatesSchema = z.object({
-  // The updater is intentionally opt-in while the canonical repository is private.
+  
   checkOnStart: z.boolean().default(false),
 })
 
@@ -86,8 +85,7 @@ export const configSchema = z.object({
   thinking: z.boolean().default(true),
   maxTokens: z.number().int().positive().max(200_000).default(64_000),
   budget: budgetSchema.default({
-    maxRequestsPerTurn: 32,
-    maxTokensPerTurn: 1_000_000,
+    maxTokensPerTurn: 10_000_000,
     maxCostUsdPerTurn: 5,
     maxSubagentsPerTurn: 3,
   }),

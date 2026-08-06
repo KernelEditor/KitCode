@@ -102,7 +102,6 @@ export function compactCutIndex(history: Message[]): number {
   return userTurns[userTurns.length - KEEP_USER_TURNS] ?? 0
 }
 
-/** Conservative input estimate used by the same local turn budget as the next model call. */
 export function estimateCompactTokens(history: Message[]): number {
   const cut = compactCutIndex(history)
   if (cut <= 0) return 1
