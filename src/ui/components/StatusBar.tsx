@@ -203,9 +203,9 @@ function ContextMeter({
   if (!exact || win === null || win <= 0) {
     return (
       <Text>
-        <Text dimColor>ctx ? </Text>
-        <Text color="gray">▐{'░'.repeat(BAR_WIDTH)}▌</Text>
-        <Text dimColor> {exact ? tokens(used) : '?'}{win && win > 0 ? `/${tokens(win)}` : ''}</Text>
+        <Text dimColor>ctx </Text>
+        <Text color="gray">{exact ? tokens(used) : '?'}</Text>
+        {win && win > 0 && <Text dimColor>/{tokens(win)}</Text>}
       </Text>
     )
   }
