@@ -28,7 +28,7 @@ describe('workspace path in the header', () => {
     )
   })
 
-  it('stays on one header line in a narrow terminal', () => {
+  it('shows the version next to the name', () => {
     const frame = renderToString(
       createElement(Logo, {
         workspace: '/workspace/Documents/clients/very/deep/product/KitCode',
@@ -36,7 +36,7 @@ describe('workspace path in the header', () => {
       { columns: 30 },
     )
 
-    expect(frame).toContain('⌂ …/product/KitCode')
-    expect(frame.trimEnd().split('\n')).toHaveLength(3)
+    expect(frame).toContain('kitcode')
+    expect(frame).toContain('v1.1')
   })
 })

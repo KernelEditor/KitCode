@@ -2,6 +2,7 @@ import { Box, Text, useWindowSize } from 'ink'
 import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
 import { formatWorkspacePath } from '../workspace'
+import { KITCODE_VERSION } from '../../version'
 
 const CAT = ['  ╱\\_╱\\ ', ' ( o.o )', '  > ^ <  ']
 
@@ -23,9 +24,12 @@ export function Logo({ subtitle, workspace }: { subtitle?: string; workspace?: s
         ))}
       </Box>
       <Box flexDirection="column" marginLeft={2} flexGrow={1} flexShrink={1} minWidth={0}>
-        <Text color={theme.accent} bold>
-          kitcode
-        </Text>
+        <Box>
+          <Text color={theme.accent} bold>
+            kitcode
+          </Text>
+          <Text dimColor> v{KITCODE_VERSION}</Text>
+        </Box>
         <Text dimColor wrap="truncate-end">{subtitle ?? strings.hint}</Text>
         {location && (
           <Box width="100%">
