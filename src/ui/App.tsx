@@ -169,7 +169,8 @@ export function App({
   
   
   useEffect(() => {
-    if (process.platform === 'darwin') return
+    // Clipboard polling is only supported on Linux (xclip) and macOS (handled elsewhere)
+    if (process.platform === 'darwin' || process.platform === 'win32') return
     let last = ''
     let cancelling = false
     let giveUp = false
@@ -1632,7 +1633,15 @@ function copyToClipboard(text: string): void {
     try {
       run('pbcopy', [])
     } catch {
-      
+      // Silently fail if pbcopy is unavailable
+    }
+    return
+  }
+  if (process.platform === 'win32') {
+    try {
+      run('clip', [])
+    } catch {
+      // Silently fail if clip.exe is unavailable (e.g., no TTY)
     }
     return
   }
@@ -1646,7 +1655,7 @@ function copyToClipboard(text: string): void {
       run(cmd, args)
       return
     } catch {
-      
+      // Try next candidate
     }
   }
 }

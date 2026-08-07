@@ -363,7 +363,7 @@ function normalizeInputPath(value: string): string {
       return value.slice(1, -1)
     }
   }
-  return value.replace(/\\([\\ "'()\[\]{}&;#$!])/g, (_match, character: string) => character)
+  return value.replace(/\\([\\ "'()\[\]&;#$!])/g, (_match, character: string) => character)
 }
 
 function safeName(value: string): string {

@@ -108,6 +108,7 @@ Press `/` to open the command list.
 | `/model` | Select a model. |
 | `/provider` | Switch providers. |
 | `/login` · `/logout [provider]` | Add a provider or choose exactly which provider to remove. |
+| `/key [provider]` | Change API key for a provider. |
 | `/effort` · `/thinking` | Configure reasoning depth and output. |
 | `/resume` · `/clear` | Resume a session or start a new one. |
 | `/sessions` | Search sessions, then resume, rename, delete, or export one. |

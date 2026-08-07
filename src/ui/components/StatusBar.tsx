@@ -98,7 +98,7 @@ export function StatusBar({ status }: StatusBarProps) {
       alignItems="flex-start"
       flexDirection="column"
     >
-      <Box width="100%" alignItems="center">
+      <Box width="100%" alignItems="flex-start">
         <Box flexGrow={1} flexShrink={1} flexWrap="wrap">
           <Segments items={primary} />
         </Box>
@@ -129,7 +129,12 @@ export function StatusBar({ status }: StatusBarProps) {
       </Box>
       {details.length > 0 && (
         <Box flexWrap="wrap">
-          <Segments items={details} />
+          {details.map((item, index) => (
+            <Fragment key={index}>
+              {index > 0 && <Text dimColor> · </Text>}
+              {item}
+            </Fragment>
+          ))}
         </Box>
       )}
     </Box>
@@ -141,9 +146,9 @@ function Segments({ items }: { items: ReactNode[] }) {
     const elements: ReactNode[] = []
     if (index > 0) {
       elements.push(
-        <Text key={`sep-${index}`} dimColor>
-          {' '}·{' '}
-        </Text>,
+        <Box key={`sep-${index}`} marginTop={1}>
+          <Text dimColor>{' · '}</Text>
+        </Box>,
       )
     }
     elements.push(<Fragment key={`item-${index}`}>{item}</Fragment>)
