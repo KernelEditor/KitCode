@@ -98,7 +98,7 @@ export function StatusBar({ status }: StatusBarProps) {
       alignItems="flex-start"
       flexDirection="column"
     >
-      <Box width="100%" alignItems="flex-start">
+      <Box width="100%" alignItems="center">
         <Box flexGrow={1} flexShrink={1} flexWrap="wrap">
           <Segments items={primary} />
         </Box>

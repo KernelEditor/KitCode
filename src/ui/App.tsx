@@ -1,4 +1,4 @@
-import { Box, useApp } from 'ink'
+import { Box, Text, useApp, useInput } from 'ink'
 import { execFile, execFileSync } from 'node:child_process'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from '../core/types'
@@ -8,6 +8,8 @@ import type { McpAddError } from '../mcp/add'
 import type { McpServerState } from '../mcp/client'
 import type { ContentBlock, Effort, Message } from '../providers/types'
 import { COMMANDS, closestCommand } from './commands'
+import TextInput from 'ink-text-input'
+import { useTheme } from './theme'
 import { Confirm } from './components/Confirm'
 import { LanguagePicker } from './components/LanguagePicker'
 import { Onboarding } from './components/Onboarding'
@@ -55,6 +57,13 @@ type Overlay =
       body?: string
       danger?: boolean
       resolve: (yes: boolean) => void
+    }
+  | {
+      kind: 'textinput'
+      title: string
+      mask?: boolean
+      resolve: (value: string | null) => void
+      cancel?: () => void
     }
 
 export function App({
@@ -239,6 +248,14 @@ export function App({
           return
         }
         setOverlay({ kind: 'picker', title, items, select: resolve })
+      }),
+    [],
+  )
+
+  const promptInput = useCallback(
+    (title: string, mask?: boolean) =>
+      new Promise<string | null>((resolve) => {
+        setOverlay({ kind: 'textinput', title, mask, resolve, cancel: () => resolve(null) })
       }),
     [],
   )
@@ -592,6 +609,39 @@ export function App({
           }
           setSetup(runtime.needsSetup())
           forceRender((n) => n + 1)
+          return
+        }
+
+        case 'key': {
+          const providers = runtime.listProviderItems()
+          if (providers.length === 0) {
+            notice('warn', strings.logoutNothing)
+            return
+          }
+          let providerId: string | undefined = rest[0]
+          if (!providerId) {
+            providerId =
+              providers.length === 1
+                ? providers[0]?.key
+                : ((await pick(strings.titleKeyChange, providers)) ?? undefined)
+          }
+          if (!providerId) return
+          if (!providers.some((provider) => provider.key === providerId)) {
+            notice('warn', `Provider "${providerId}" is not configured.`)
+            return
+          }
+          if (!(await ask(strings.keyChangeAsk(providerId), strings.keyChangeAskBody, true))) return
+          const newKey = await promptInput(strings.apiKey, true)
+          if (!newKey || newKey.trim() === '') {
+            notice('warn', 'Empty key — nothing changed.')
+            return
+          }
+          try {
+            await runtime.changeProviderKey(providerId, newKey.trim())
+            notice('info', strings.keyChanged(providerId))
+          } catch (error) {
+            notice('error', error instanceof Error ? error.message : String(error))
+          }
           return
         }
 
@@ -1386,6 +1436,21 @@ export function App({
         />
       )}
 
+      {overlay.kind === 'textinput' && (
+        <TextInputOverlay
+          title={overlay.title}
+          mask={overlay.mask}
+          onAnswer={(value) => {
+            overlay.resolve(value)
+            setOverlay({ kind: 'none' })
+          }}
+          onCancel={() => {
+            overlay.cancel?.()
+            setOverlay({ kind: 'none' })
+          }}
+        />
+      )}
+
       {overlay.kind === 'none' && (
         <PromptInput
           value={input}
@@ -1421,6 +1486,44 @@ export function App({
         }}
       />
     </Box>,
+  )
+}
+
+function TextInputOverlay({
+  title,
+  mask,
+  onAnswer,
+  onCancel,
+}: {
+  title: string
+  mask?: boolean
+  onAnswer: (value: string | null) => void
+  onCancel: () => void
+}) {
+  const [value, setValue] = useState('')
+  const theme = useTheme()
+
+  const submit = useCallback(() => {
+    onAnswer(value || null)
+  }, [value, onAnswer])
+
+  useInput((_input, key) => {
+    if (key.escape) onCancel()
+  })
+
+  return (
+    <Box flexDirection="column">
+      <Text dimColor>{title}</Text>
+      <TextInput
+        value={value}
+        onChange={setValue}
+        onSubmit={submit}
+        mask={mask ? '•' : undefined}
+      />
+      <Box marginTop={1}>
+        <Text dimColor color={theme.accent}>enter submit · esc cancel</Text>
+      </Box>
+    </Box>
   )
 }
 

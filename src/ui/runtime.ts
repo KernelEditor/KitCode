@@ -23,6 +23,7 @@ export interface Runtime {
     wasActive: boolean
     nextModel?: string
   }>
+  changeProviderKey(providerId: string, newKey: string): Promise<void>
   configPath(): string
   sessionId(): string
   newSession(): Promise<string>

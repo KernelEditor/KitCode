@@ -37,6 +37,7 @@ export interface Strings {
   workingFor: (elapsed: string) => string
   titleProvider: string
   titleLogout: string
+  titleKeyChange: string
   titleSessions: string
   titleSessionAction: string
   resumed: (id: string, count: number) => string
@@ -120,6 +121,9 @@ export interface Strings {
   logoutAskBody: string
   loggedOut: (provider: string) => string
   logoutNothing: string
+  keyChangeAsk: (provider: string) => string
+  keyChangeAskBody: string
+  keyChanged: (provider: string) => string
   promptUsage: string
   promptNothing: string
   promptSaved: (name: string) => string
@@ -181,6 +185,7 @@ const en: Strings = {
   workingFor: (elapsed) => `working ${elapsed}`,
   titleProvider: 'Provider',
   titleLogout: 'Sign out of a provider',
+  titleKeyChange: 'Change API key for a provider',
   titleSessions: 'Resume a session',
   titleSessionAction: 'Session action',
   resumed: (id, count) => `Resumed ${id} — ${count} messages restored`,
@@ -276,6 +281,9 @@ const en: Strings = {
   logoutAskBody: 'Its API key is removed from auth.json and the provider is dropped from the config.',
   loggedOut: (provider) => `Signed out of "${provider}".`,
   logoutNothing: 'No provider is signed in.',
+  keyChangeAsk: (provider) => `Change API key for "${provider}"?`,
+  keyChangeAskBody: 'The new key replaces the old one. Models are re-fetched automatically.',
+  keyChanged: (provider) => `API key updated for "${provider}".`,
   promptUsage: 'Usage: /prompt save <name>',
   promptNothing: 'Nothing to save yet — send a message first.',
   promptSaved: (name) => `Saved prompt "${name}"`,
@@ -311,6 +319,7 @@ const en: Strings = {
     login: 'add a provider (url + key)',
     provider: 'switch between configured providers',
     logout: 'choose a provider to sign out from',
+    key: 'change API key for a provider',
     effort: 'set reasoning depth',
     thinking: 'toggle reasoning',
     budget: 'set token budget per turn',
@@ -377,6 +386,7 @@ const ru: Strings = {
   workingFor: (elapsed) => `думает ${elapsed}`,
   titleProvider: 'Провайдер',
   titleLogout: 'Выбрать API для выхода',
+  titleKeyChange: 'Сменить ключ провайдера',
   titleSessions: 'Восстановить сессию',
   titleSessionAction: 'Действие с сессией',
   resumed: (id, count) => `Сессия ${id} восстановлена — сообщений: ${count}`,
@@ -472,6 +482,9 @@ const ru: Strings = {
   logoutAskBody: 'Ключ будет удалён из auth.json, а провайдер — из конфига.',
   loggedOut: (provider) => `Выполнен выход из «${provider}».`,
   logoutNothing: 'Ни один провайдер не подключён.',
+  keyChangeAsk: (provider) => `Сменить ключ для «${provider}»?`,
+  keyChangeAskBody: 'Новый ключ заменит старый. Модели обновятся автоматически.',
+  keyChanged: (provider) => `Ключ обновлён для «${provider}».`,
   promptUsage: 'Использование: /prompt save <имя>',
   promptNothing: 'Пока нечего сохранять — сначала отправь сообщение.',
   promptSaved: (name) => `Промт «${name}» сохранён`,
@@ -507,6 +520,7 @@ const ru: Strings = {
     login: 'добавить провайдера (url + ключ)',
     provider: 'переключиться между провайдерами',
     logout: 'выбрать провайдера и удалить его ключ',
+    key: 'сменить ключ провайдера',
     effort: 'глубина размышлений',
     thinking: 'включить/выключить размышления',
     budget: 'лимит токенов за ход (0 = безлимит)',

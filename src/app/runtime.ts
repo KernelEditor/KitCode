@@ -435,6 +435,32 @@ export async function boot(options: {
       return { removed: providerId, wasActive, ...(nextModel ? { nextModel } : {}) }
     },
 
+    async changeProviderKey(providerId, newKey) {
+      const provider = config.providers[providerId]
+      if (!provider) throw new Error(`Provider "${providerId}" is not configured.`)
+
+      const previousKey = auth[providerId]
+      auth[providerId] = newKey
+
+      try {
+        const testRegistry = createRegistry(config, auth)
+        await loadModels(testRegistry.get(providerId))
+      } catch (error) {
+        auth[providerId] = previousKey
+        throw new Error(
+          `Key verification failed for "${providerId}": ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+
+      await saveAuth(auth)
+      registry = createRegistry(config, auth)
+      if (parseModelRef(modelRef)?.provider === providerId) {
+        const models = await loadModels(registry.get(providerId))
+        rememberModels(providerId, models)
+        void refreshModelContextWindow()
+      }
+    },
+
     sessionId: () => session.id,
 
     async newSession() {
@@ -792,9 +818,18 @@ export async function boot(options: {
     startupUpdateCheck: () => startupUpdate,
 
     async run(history, hooks, signal) {
-      
-      
       syncMcpTools()
+      const runProviderId = parseModelRef(modelRef)?.provider
+      if (runProviderId) {
+        try {
+          const models = await loadModels(registry.get(runProviderId))
+          rememberModels(runProviderId, models)
+        } catch (error) {
+          warnings.push(
+            `Could not refresh models for "${runProviderId}": ${error instanceof Error ? error.message : String(error)}`,
+          )
+        }
+      }
       let requestHistory = history
       const budget = createTurnBudget(config.budget, resolvePricing)
       const previousContext = runtime.modelContext()

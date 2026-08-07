@@ -8,6 +8,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'login' },
   { name: 'provider' },
   { name: 'logout', args: '[provider]' },
+  { name: 'key', args: '[provider]' },
   { name: 'effort' },
   { name: 'thinking' },
   { name: 'budget', args: '[tokens]' },
