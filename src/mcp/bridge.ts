@@ -1,5 +1,6 @@
 import type { CallToolResult, ContentBlock, Tool as McpTool } from '@modelcontextprotocol/sdk/types.js'
 import type { JsonSchema } from '../providers/types'
+import { redactSecrets } from '../providers/errors'
 import type { Tool, ToolResult } from '../tools/types'
 
 const MAX_RESULT_CHARS = 200_000
@@ -38,10 +39,16 @@ async function invoke(
   signal: AbortSignal,
 ): Promise<ToolResult> {
   try {
-    const result = await call(tool, input, signal)
+    // Validate input is a plain object (not null, not array, not primitive)
+    if (input !== null && typeof input !== 'object' || Array.isArray(input)) {
+      return { content: `MCP tool "${tool}" received invalid input: arguments must be a JSON object.`, isError: true }
+    }
+    const result = await call(tool, input ?? {}, signal)
     return { content: flattenResult(result), isError: result.isError }
   } catch (error) {
-    return { content: error instanceof Error ? error.message : String(error), isError: true }
+    const message = error instanceof Error ? error.message : String(error)
+    // Redact potential secrets from error messages
+    return { content: redactSecrets(message), isError: true }
   }
 }
 

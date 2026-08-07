@@ -62,11 +62,13 @@ export function createTurnBudget(
       }
 
       const pricing = resolvePricing(request.modelRef)
-      if (pricing && current.costUsd !== null) {
+      if (current.costUsd !== null) {
         const remainingUsd = limits.maxCostUsdPerTurn - current.costUsd
-        const inputUsd = (estimatedInput * pricing.input) / 1_000_000
+        // Use fallback pricing if model pricing is unknown to prevent unlimited spending
+        const effectivePricing = pricing ?? { input: 0.003, output: 0.015 } // Conservative fallback: $3/1M input, $15/1M output
+        const inputUsd = (estimatedInput * effectivePricing.input) / 1_000_000
         const affordableOutput = Math.floor(
-          ((remainingUsd - inputUsd) * 1_000_000) / pricing.output,
+          ((remainingUsd - inputUsd) * 1_000_000) / effectivePricing.output,
         )
         outputLimit = Math.min(outputLimit, affordableOutput)
         if (outputLimit < 1) {

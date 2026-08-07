@@ -165,4 +165,16 @@ not a table really`
     expect(blocks[0].type).toBe('paragraph')
     expect(blocks[0].text).toContain('bold')
   })
+
+  it('parses ASCII table without pipe borders', () => {
+    const md = `Name     Age   City
+───────────────────────
+Alice    30    Moscow
+Bob      25    SPb`
+    const blocks = extractBlocks(md)
+    expect(blocks[0].type).toBe('table')
+    expect(blocks[0].headers).toEqual(['Name', 'Age', 'City'])
+    expect(blocks[0].rows?.length).toBe(2)
+    expect(blocks[0].rows?.[0]).toEqual(['Alice', '30', 'Moscow'])
+  })
 })

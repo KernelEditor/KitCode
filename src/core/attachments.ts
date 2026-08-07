@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { readFile, stat } from 'node:fs/promises'
+import { lstat, readFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +15,8 @@ const SENSITIVE_AUTO_NAMES = new Set([
   '.netrc',
   '.npmrc',
   '.pypirc',
+  '.pgpass',
+  '.my.cnf',
   'auth.json',
   'credentials.json',
   'id_dsa',
@@ -25,8 +27,10 @@ const SENSITIVE_AUTO_NAMES = new Set([
   'secret.json',
   'secrets.json',
   'tokens.json',
+  'kubeconfig',
+  'service-account.json',
 ])
-const SENSITIVE_AUTO_EXTENSIONS = new Set(['.jks', '.key', '.keystore', '.p12', '.pem', '.pfx'])
+const SENSITIVE_AUTO_EXTENSIONS = new Set(['.jks', '.key', '.keystore', '.p12', '.pem', '.pfx', '.p8', '.der'])
 
 export interface LoadedAttachment {
   block: ImageBlock | FileBlock
@@ -38,6 +42,10 @@ export type ClipboardCommandRunner = (command: string, args: string[]) => Promis
 
 export async function loadAttachment(cwd: string, requestedPath: string): Promise<LoadedAttachment> {
   const resolved = resolveAttachmentPath(cwd, requestedPath)
+  const linkInfo = await lstat(resolved).catch(() => null)
+  if (linkInfo?.isSymbolicLink()) {
+    throw new Error(`Cannot attach symbolic links: ${path.basename(resolved)}`)
+  }
   const info = await stat(resolved).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') throw new Error(`Attachment not found: ${resolved}`)
     throw error
@@ -53,16 +61,61 @@ export async function loadAutomaticAttachment(
 ): Promise<LoadedAttachment | null> {
   if (!looksLikeAttachmentPath(requestedPath)) return null
   const resolved = resolveAttachmentPath(cwd, requestedPath)
-  const info = await stat(resolved).catch((error: NodeJS.ErrnoException) => {
-    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null
-    throw error
-  })
-  if (!info?.isFile()) return null
+  // Check sensitive files first — they always require explicit /attach
   if (isSensitiveAutomaticPath(resolved)) {
     throw new Error(
       `For safety, sensitive-looking files must be attached explicitly with /attach: ${path.basename(resolved)}`,
     )
   }
+  // Block absolute paths that point outside common project areas for auto-attachments
+  if (path.isAbsolute(resolved)) {
+    const normalized = resolved.toLowerCase()
+    const isProjectFile =
+      normalized.includes(path.sep + 'src' + path.sep) ||
+      normalized.includes(path.sep + 'lib' + path.sep) ||
+      normalized.includes(path.sep + 'app' + path.sep) ||
+      normalized.includes(path.sep + 'test' + path.sep) ||
+      normalized.includes(path.sep + 'tests' + path.sep) ||
+      normalized.includes(path.sep + 'public' + path.sep) ||
+      normalized.includes(path.sep + 'assets' + path.sep) ||
+      normalized.includes(path.sep + 'static' + path.sep) ||
+      normalized.endsWith('.ts') ||
+      normalized.endsWith('.js') ||
+      normalized.endsWith('.tsx') ||
+      normalized.endsWith('.jsx') ||
+      normalized.endsWith('.py') ||
+      normalized.endsWith('.go') ||
+      normalized.endsWith('.rs') ||
+      normalized.endsWith('.java') ||
+      normalized.endsWith('.c') ||
+      normalized.endsWith('.cpp') ||
+      normalized.endsWith('.h') ||
+      normalized.endsWith('.hpp') ||
+      normalized.endsWith('.css') ||
+      normalized.endsWith('.html') ||
+      normalized.endsWith('.json') ||
+      normalized.endsWith('.yaml') ||
+      normalized.endsWith('.yml') ||
+      normalized.endsWith('.md') ||
+      normalized.endsWith('.txt') ||
+      normalized.endsWith('.toml') ||
+      normalized.endsWith('.ini') ||
+      normalized.endsWith('.cfg') ||
+      normalized.endsWith('.sh') ||
+      normalized.endsWith('.bat') ||
+      normalized.endsWith('.cmd') ||
+      normalized.endsWith('.ps1') ||
+      normalized.endsWith('.dockerfile') ||
+      normalized.endsWith('.makefile')
+    if (!isProjectFile) return null
+  }
+  const linkInfo = await lstat(resolved).catch(() => null)
+  if (linkInfo?.isSymbolicLink()) return null
+  const info = await stat(resolved).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null
+    throw error
+  })
+  if (!info?.isFile()) return null
   return loadResolvedAttachment(resolved, info.size)
 }
 

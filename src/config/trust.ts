@@ -3,6 +3,9 @@ import { readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { ensureDir, trustPath, workspaceRootFor } from './paths'
 
+// Simple mutex to prevent concurrent trust file modifications
+let trustLock: Promise<void> = Promise.resolve()
+
 interface TrustFile {
   version: 1
   workspaces: string[]
@@ -41,6 +44,7 @@ export async function revokeWorkspaceTrust(cwd: string): Promise<string> {
 }
 
 async function loadTrust(): Promise<TrustFile> {
+  await trustLock
   let parsed: unknown
   try {
     parsed = JSON.parse(await readFile(trustPath, 'utf8'))
@@ -58,13 +62,22 @@ async function loadTrust(): Promise<TrustFile> {
 }
 
 async function saveTrust(value: TrustFile): Promise<void> {
-  await ensureDir(path.dirname(trustPath))
-  const temp = `${trustPath}.${randomUUID()}.tmp`
+  // Wait for any pending read to complete, then acquire lock
+  const release = trustLock
+  let resolveLock: () => void
+  trustLock = new Promise<void>((resolve) => { resolveLock = resolve })
+  await release
   try {
-    await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
-    await rename(temp, trustPath)
-  } catch (error) {
-    await rm(temp, { force: true })
-    throw error
+    await ensureDir(path.dirname(trustPath))
+    const temp = `${trustPath}.${randomUUID()}.tmp`
+    try {
+      await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+      await rename(temp, trustPath)
+    } catch (error) {
+      await rm(temp, { force: true })
+      throw error
+    }
+  } finally {
+    resolveLock!()
   }
 }

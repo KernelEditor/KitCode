@@ -41,6 +41,38 @@ const inheritedEnvKeys = new Set([
   'LOCALAPPDATA',
 ])
 
+// Environment variables that should NEVER be inherited by MCP servers
+const blockedEnvKeys = new Set([
+  'ANTHROPIC_API_KEY',
+  'OPENAI_API_KEY',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'GITHUB_TOKEN',
+  'GH_TOKEN',
+  'GIT_TOKEN',
+  'NPM_TOKEN',
+  'PYPI_TOKEN',
+  'TWINE_PASSWORD',
+  'DOCKER_PASSWORD',
+  'DATABASE_URL',
+  'REDIS_URL',
+  'MONGODB_URI',
+  'POSTGRES_PASSWORD',
+  'MYSQL_PASSWORD',
+  'PRIVATE_KEY',
+  'SSH_KEY',
+  'GPG_KEY',
+  'SIGNING_KEY',
+  'COOKIE',
+  'SESSION_SECRET',
+  'JWT_SECRET',
+  'ENCRYPTION_KEY',
+  'MASTER_KEY',
+  'API_KEY',
+  'API_SECRET',
+])
+
 interface Session {
   client: Client
   tools: Tool[]
@@ -216,7 +248,9 @@ function configuredSecrets(config: McpServerConfig): string[] {
 export function inheritedEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const env: Record<string, string> = {}
   for (const [key, value] of Object.entries(source)) {
-    if (value !== undefined && inheritedEnvKeys.has(key)) env[key] = value
+    if (value !== undefined && inheritedEnvKeys.has(key) && !blockedEnvKeys.has(key)) {
+      env[key] = value
+    }
   }
   return env
 }

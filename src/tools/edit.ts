@@ -1,4 +1,4 @@
-import { readFile, stat, writeFile } from 'node:fs/promises'
+import { lstat, readFile, stat, writeFile } from 'node:fs/promises'
 import { resolveInside } from './safepath'
 import { brief } from './summary'
 import type { Tool } from './types'
@@ -70,6 +70,11 @@ export const editTool: Tool = {
     const { path, oldString, newString, replaceAll = false } = input as EditInput
     const safe = resolveInside(ctx.cwd, path)
     if (!safe.ok) return { content: safe.reason, isError: true }
+
+    const linkInfo = await lstat(safe.path).catch(() => null)
+    if (linkInfo?.isSymbolicLink()) {
+      return { content: `Cannot edit ${path}: the path is a symbolic link. Remove the symlink first.`, isError: true }
+    }
 
     const info = await stat(safe.path).catch(() => null)
     if (info && info.size > MAX_FILE_BYTES) {

@@ -4,14 +4,26 @@ const sensitiveNames = new Set([
   '.npmrc',
   '.pypirc',
   '.git-credentials',
+  '.netrc',
+  '.pgpass',
+  '.my.cnf',
+  '.docker/config.json',
   'auth.json',
   'credentials',
   'credentials.json',
   'id_rsa',
   'id_ed25519',
+  'id_dsa',
+  'id_ecdsa',
+  'kubeconfig',
+  'known_hosts',
+  'secret.json',
+  'secrets.json',
+  'tokens.json',
+  'service-account.json',
 ])
 
-const sensitiveExtensions = new Set(['.pem', '.key', '.p12', '.pfx'])
+const sensitiveExtensions = new Set(['.pem', '.key', '.p12', '.pfx', '.jks', '.keystore', '.p8', '.der'])
 
 export function isSensitivePath(value: unknown): boolean {
   if (typeof value !== 'string') return false
@@ -29,7 +41,13 @@ export function mentionsSensitivePattern(value: unknown): boolean {
     isSensitivePath(lower) ||
     lower.includes('.env') ||
     lower.includes('.npmrc') ||
+    lower.includes('.netrc') ||
+    lower.includes('.pgpass') ||
     lower.includes('auth.json') ||
-    /\.(?:pem|key|p12|pfx)(?:$|[^a-z0-9])/.test(lower)
+    lower.includes('credentials') ||
+    lower.includes('kubeconfig') ||
+    lower.includes('secret') ||
+    lower.includes('tokens.json') ||
+    /\.(?:pem|key|p12|pfx|jks|keystore|p8|der)(?:$|[^a-z0-9])/.test(lower)
   )
 }

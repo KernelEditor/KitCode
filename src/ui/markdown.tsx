@@ -133,11 +133,12 @@ function TableView({ block }: { block: MdNode }) {
   for (const row of allRows) {
     for (let i = 0; i < colCount; i++) {
       const cell = row[i] ?? ''
-      colWidths[i] = Math.max(colWidths[i], cell.length)
+      colWidths[i] = Math.max(colWidths[i], [...cell].length)
     }
   }
 
-  const separator = colWidths.map((w, i) => (i === 0 ? '─'.repeat(w) : '─┼' + '─'.repeat(w))).join('')
+  // Build separator: ───┼───┼───
+  const separator = colWidths.map((w) => '─'.repeat(w)).join('┼')
 
   const lines: ReactNode[] = []
   allRows.forEach((row, rowIdx) => {
@@ -145,12 +146,18 @@ function TableView({ block }: { block: MdNode }) {
     for (let i = 0; i < colCount; i++) {
       const cell = row[i] ?? ''
       const align = block.colAligns?.[i] ?? 'left'
-      const padded =
-        align === 'right'
-          ? cell.padStart(colWidths[i])
-          : align === 'center'
-          ? cell.padStart(Math.floor((colWidths[i] + cell.length) / 2)).padEnd(colWidths[i])
-          : cell.padEnd(colWidths[i])
+      const visualWidth = [...cell].length
+      const padWidth = colWidths[i] + (cell.length - visualWidth)
+      let padded: string
+      if (align === 'right') {
+        padded = cell.padStart(padWidth)
+      } else if (align === 'center') {
+        const totalPad = padWidth - visualWidth
+        const left = Math.floor(totalPad / 2)
+        padded = ' '.repeat(left) + cell + ' '.repeat(totalPad - left)
+      } else {
+        padded = cell.padEnd(padWidth)
+      }
       cells.push(padded)
     }
     lines.push(
@@ -383,6 +390,49 @@ export function extractBlocks(src: string): MdNode[] {
           table = { headers: cells, rows: [], colAligns: [] }
         }
         continue
+      }
+    }
+
+    // ASCII table separator: line of ─ or - (for tables without pipe borders)
+    // Only match if it looks like a table separator (multiple dashes with optional spaces)
+    const asciiSepMatch = trimmed.match(/^[\s\-─┄┈━┅]{3,}$/)
+    if (asciiSepMatch) {
+      if (table && table.headers.length > 0 && table.colAligns.length === 0) {
+        // Infer left alignment for all columns
+        table.colAligns = table.headers.map(() => 'left')
+        continue
+      }
+      // Check if previous paragraph looks like table headers (2+ space-separated tokens)
+      // Must check BEFORE flushAll() clears paragraph
+      if (paragraph.length === 1) {
+        const prevLine = paragraph[0].trim()
+        const tokens = prevLine.split(/\s{2,}/).map((c) => c.trim()).filter((c) => c.length > 0)
+        if (tokens.length >= 2 && tokens.length <= 10) {
+          // Looks like ASCII table headers — convert paragraph to table
+          paragraph = []
+          flushList()
+          flushQuote()
+          flushCode()
+          table = { headers: tokens, rows: [], colAligns: tokens.map(() => 'left') }
+          continue
+        }
+      }
+    }
+
+    // ASCII table row without pipes: space-separated columns
+    // Only match if we already have a table context (headers parsed)
+    // Split by 2+ spaces to avoid splitting paths and code
+    if (table && table.headers.length > 0 && !trimmed.includes('|')) {
+      const tokens = trimmed.split(/\s{2,}/).map((c) => c.trim()).filter((c) => c.length > 0)
+      // Must have similar number of columns as headers (allow some flexibility)
+      if (tokens.length >= 2 && tokens.length <= table.headers.length + 2) {
+        // Don't match if it looks like code or a path
+        const looksLikeCode = tokens.some((t) => t.startsWith('//') || t.startsWith('#') || t.startsWith('/*'))
+        const looksLikePath = tokens.length === 2 && (/^[A-Za-z]:\\/.test(tokens[0]) || /^\\\\/.test(tokens[0]))
+        if (!looksLikeCode && !looksLikePath) {
+          table.rows.push(tokens)
+          continue
+        }
       }
     }
 

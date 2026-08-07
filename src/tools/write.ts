@@ -1,4 +1,4 @@
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { resolveInside } from './safepath'
 import { brief } from './summary'
@@ -60,6 +60,11 @@ export const writeTool: Tool = {
     }
     const safe = resolveInside(ctx.cwd, path)
     if (!safe.ok) return { content: safe.reason, isError: true }
+
+    const linkInfo = await lstat(safe.path).catch(() => null)
+    if (linkInfo?.isSymbolicLink()) {
+      return { content: `Cannot write ${path}: the path is a symbolic link. Remove the symlink first.`, isError: true }
+    }
 
     const beforeInfo = await stat(safe.path).catch(() => null)
     if (beforeInfo && beforeInfo.size > MAX_FILE_BYTES) {

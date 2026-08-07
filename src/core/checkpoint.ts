@@ -182,7 +182,8 @@ export function beginCheckpoint(options: {
       lastCheckpointTimestamp = Math.max(Date.now(), lastCheckpointTimestamp + 1)
       const id = `${String(lastCheckpointTimestamp).padStart(13, '0')}-${randomBytes(4).toString('hex')}`
       await writeCheckpoint(path.join(sessionDir, `${id}.json`), stored)
-      await pruneCheckpoints(sessionDir)
+      // Prune old checkpoints, but don't fail the commit if pruning fails
+      pruneCheckpoints(sessionDir).catch(() => undefined)
       return { id, paths: entries.map((entry) => entry.path) }
     },
   }
