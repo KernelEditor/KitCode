@@ -72,8 +72,7 @@ export const diagnosticsSchema = z.object({
 })
 
 export const updatesSchema = z.object({
-  
-  checkOnStart: z.boolean().default(false),
+  checkOnStart: z.boolean().default(true),
 })
 
 export const configSchema = z.object({
