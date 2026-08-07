@@ -43,7 +43,7 @@ OpenAI-compatible providers, including OpenRouter and local model servers.
 ## Install
 
 ```sh
-npm install -g kitcode
+npm i @kernelonpanic/kitcode
 ```
 
 ## Install from source
