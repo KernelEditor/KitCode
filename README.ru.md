@@ -43,7 +43,7 @@ OpenAI-совместимые провайдеры, включая OpenRouter и
 ## Установка
 
 ```sh
-npm i @kernelonpanic/kitcode
+npm i -g @kernelonpanic/kitcode
 ```
 
 ## Установка из исходников
