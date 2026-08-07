@@ -49,7 +49,7 @@ npm install -g kitcode
 ## Install from source
 
 ```sh
-git clone https://github.com/PanicOnKernel/KitCode.git
+git clone https://github.com/KernelEditor/KitCode.git
 cd KitCode
 npm install
 npm run build
