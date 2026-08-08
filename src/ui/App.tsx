@@ -1,5 +1,4 @@
-import { Box, Text, useApp, useInput } from 'ink'
-import { execFile, execFileSync } from 'node:child_process'
+import { Box, Text, useApp, useInput, useWindowSize } from 'ink'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from '../core/types'
 import { attachmentLabel, looksLikeAttachmentPath } from '../core/attachments'
@@ -17,6 +16,7 @@ import { PermissionPrompt } from './components/PermissionPrompt'
 import { Picker } from './components/Picker'
 import { PromptInput } from './components/PromptInput'
 import { StatusBar } from './components/StatusBar'
+import { TerminalViewport } from './components/TerminalViewport'
 import { Transcript } from './components/Transcript'
 import { appendInputHistory } from './history'
 import { LANGS, StringsContext, stringsFor } from './i18n'
@@ -31,17 +31,6 @@ import type { PickerItem } from './types'
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const STREAM_FRAME_MS = 50
 const MAX_ATTACHMENTS = 8
-
-const NEEDS_IDLE = new Set<string>([
-  'clear',
-  'resume',
-  'sessions',
-  'logout',
-  'bypass',
-  'undo',
-  'compact',
-  'checker',
-])
 
 type QueuedItem =
   | { kind: 'command'; line: string }
@@ -76,6 +65,7 @@ export function App({
   warnings?: string[]
 }) {
   const { exit } = useApp()
+  const { rows } = useWindowSize()
   const [transcript, setTranscript] = useState(() =>
     warnings.reduce((state, text) => pushNotice(state, 'warn', text), fromHistory(initialHistory)),
   )
@@ -85,8 +75,12 @@ export function App({
     inputHistoryFromMessages(initialHistory),
   )
   const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
   const [pendingCount, setPendingCount] = useState(0)
   const queueRef = useRef<QueuedItem[]>([])
+  const slashQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const slashPendingRef = useRef(0)
+  const drainQueueRef = useRef<() => void>(() => undefined)
   const [attachments, setAttachments] = useState<ContentBlock[]>([])
   const attachmentsRef = useRef<ContentBlock[]>([])
   const automaticAttachmentTask = useRef<Promise<boolean> | null>(null)
@@ -161,53 +155,6 @@ export function App({
     return () => clearInterval(timer)
   }, [turnStart])
 
-  
-  
-  
-  
-  
-  
-  
-  useEffect(() => {
-    // Clipboard polling is only supported on Linux (xclip) and macOS (handled elsewhere)
-    if (process.platform === 'darwin' || process.platform === 'win32') return
-    let last = ''
-    let cancelling = false
-    let giveUp = false
-    let polling = false
-    let interval: ReturnType<typeof setInterval> | null = null
-    const poll = () => {
-      if (cancelling || giveUp || polling) return
-      polling = true
-      execFile(
-        'xclip',
-        ['-o', '-selection', 'primary'],
-        { encoding: 'utf8' },
-        (error, stdout) => {
-          polling = false
-          if (cancelling) return
-          if (error) {
-            
-            giveUp = true
-            if (interval) clearInterval(interval)
-            return
-          }
-          const sel = stdout.trim()
-          if (sel && sel !== last) {
-            last = sel
-            copyToClipboard(sel)
-          }
-        },
-      )
-    }
-    poll()
-    interval = setInterval(poll, 750)
-    return () => {
-      cancelling = true
-      if (interval) clearInterval(interval)
-    }
-  }, [])
-
   const theme = useMemo(() => makeTheme(accent), [accent])
   const strings = useMemo(() => stringsFor(lang), [lang])
 
@@ -262,8 +209,10 @@ export function App({
   )
 
   const runAgent = useCallback(async () => {
+    if (busyRef.current) return
     const controller = new AbortController()
     abort.current = controller
+    busyRef.current = true
     setBusy(true)
     setTurnStart(Date.now())
     turns.current += 1
@@ -304,18 +253,10 @@ export function App({
     } finally {
       flushTranscriptEvents()
       abort.current = null
+      busyRef.current = false
       setBusy(false)
       setTurnStart(null)
-      
-      const queue = queueRef.current
-      if (queue.length > 0) {
-        const [next, ...rest] = queue
-        queueRef.current = rest
-        setPendingCount(rest.length)
-        queueMicrotask(() => enqueueNext(next))
-      } else {
-        setPendingCount(0)
-      }
+      drainQueueRef.current()
     }
   }, [flushTranscriptEvents, notice, queueTranscriptEvent, runtime])
 
@@ -947,6 +888,7 @@ export function App({
         case 'compact': {
           const controller = new AbortController()
           abort.current = controller
+          busyRef.current = true
           setBusy(true)
           setTurnStart(Date.now())
           notice('info', strings.compactStarting)
@@ -969,17 +911,9 @@ export function App({
             }
           } finally {
             abort.current = null
+            busyRef.current = false
             setBusy(false)
             setTurnStart(null)
-            const queue = queueRef.current
-            if (queue.length > 0) {
-              const [next, ...remaining] = queue
-              queueRef.current = remaining
-              setPendingCount(remaining.length)
-              if (next) queueMicrotask(() => enqueueNext(next))
-            } else {
-              setPendingCount(0)
-            }
           }
           forceRender((n) => n + 1)
           return
@@ -1200,18 +1134,48 @@ export function App({
     [applyAccent, appendAttachment, ask, exit, notice, pick, replaceAttachments, runtime, strings],
   )
 
+  const runSlash = useCallback(
+    (line: string) => {
+      slashPendingRef.current += 1
+      const task = slashQueueRef.current.catch(() => undefined).then(() => handleSlash(line))
+      slashQueueRef.current = task
+      void task.catch((error) =>
+        notice('error', error instanceof Error ? error.message : String(error)),
+      )
+      const finished = () => {
+        slashPendingRef.current = Math.max(0, slashPendingRef.current - 1)
+        drainQueueRef.current()
+      }
+      void task.then(finished, finished)
+    },
+    [handleSlash, notice],
+  )
+
   const enqueueNext = useCallback(
     (item: QueuedItem) => {
       if (item.kind === 'command') {
-        void handleSlash(item.line)
+        runSlash(item.line)
         return
       }
       setTranscript((state) => pushUser(state, userDisplay(item.text, item.content)))
       history.current = [...history.current, { role: 'user', content: item.content }]
       void runAgent()
     },
-    [handleSlash, runAgent],
+    [runAgent, runSlash],
   )
+
+  const drainQueue = useCallback(() => {
+    if (busyRef.current || slashPendingRef.current > 0) return
+    const [next, ...remaining] = queueRef.current
+    if (!next) {
+      setPendingCount(0)
+      return
+    }
+    queueRef.current = remaining
+    setPendingCount(remaining.length)
+    queueMicrotask(() => enqueueNext(next))
+  }, [enqueueNext])
+  drainQueueRef.current = drainQueue
 
   const tryQueueAutomaticAttachment = useCallback(
     (requestedPath: string): Promise<boolean> => {
@@ -1287,12 +1251,12 @@ export function App({
         
         
         if (!detachedInput) setInput('')
-        if (busy && slashNeedsIdle(text)) {
+        if (busyRef.current || slashPendingRef.current > 0) {
           queueRef.current = [...queueRef.current, { kind: 'command', line: text }]
           setPendingCount(queueRef.current.length)
           return
         }
-        void handleSlash(text)
+        runSlash(text)
       }
 
       if (isKnownSlashCommand(text)) {
@@ -1317,7 +1281,7 @@ export function App({
       ]
       replaceAttachments([])
       const item: QueuedItem = { kind: 'message', text, content }
-      if (busy) {
+      if (busyRef.current || slashPendingRef.current > 0) {
         queueRef.current = [...queueRef.current, item]
         setPendingCount(queueRef.current.length)
         return
@@ -1326,7 +1290,7 @@ export function App({
       history.current = [...history.current, { role: 'user', content }]
       void runAgent()
     },
-    [busy, handleSlash, replaceAttachments, runAgent, tryQueueAutomaticAttachment],
+    [replaceAttachments, runAgent, runSlash, tryQueueAutomaticAttachment],
   )
 
   useTerminalInput((_char, key) => {
@@ -1393,7 +1357,7 @@ export function App({
   }
 
   return shell(
-    <Box flexDirection="column">
+    <TerminalViewport rows={rows}>
       <Transcript
         key={transcriptRevision}
         bubbles={transcript.bubbles}
@@ -1486,7 +1450,7 @@ export function App({
           context,
         }}
       />
-    </Box>,
+    </TerminalViewport>,
   )
 }
 
@@ -1525,18 +1489,6 @@ function TextInputOverlay({
         <Text dimColor color={theme.accent}>enter submit · esc cancel</Text>
       </Box>
     </Box>
-  )
-}
-
-function slashNeedsIdle(line: string): boolean {
-  const [command = '', subcommand = ''] = line.slice(1).trim().toLowerCase().split(/\s+/)
-  return (
-    NEEDS_IDLE.has(command) ||
-    (command === 'mcp' &&
-      (subcommand === 'add' ||
-        subcommand === 'delete' ||
-        subcommand === 'enable' ||
-        subcommand === 'disable'))
   )
 }
 
@@ -1624,38 +1576,4 @@ function unquoteArg(value: string): string {
   return (first === '"' && last === '"') || (first === "'" && last === "'")
     ? value.slice(1, -1)
     : value
-}
-
-function copyToClipboard(text: string): void {
-  const run = (cmd: string, args: string[]) =>
-    execFileSync(cmd, args, { input: text, stdio: ['pipe', 'ignore', 'ignore'] })
-  if (process.platform === 'darwin') {
-    try {
-      run('pbcopy', [])
-    } catch {
-      // Silently fail if pbcopy is unavailable
-    }
-    return
-  }
-  if (process.platform === 'win32') {
-    try {
-      run('clip', [])
-    } catch {
-      // Silently fail if clip.exe is unavailable (e.g., no TTY)
-    }
-    return
-  }
-  const candidates: Array<[string, string[]]> = [
-    ['wl-copy', []],
-    ['xclip', ['-selection', 'clipboard']],
-    ['xsel', ['--clipboard', '--input']],
-  ]
-  for (const [cmd, args] of candidates) {
-    try {
-      run(cmd, args)
-      return
-    } catch {
-      // Try next candidate
-    }
-  }
 }

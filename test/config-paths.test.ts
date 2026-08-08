@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, afterEach, describe, expect, it } from 'vitest'
@@ -85,6 +85,20 @@ describe('workspace trust', () => {
 
     await revokeWorkspaceTrust(workspace)
   })
+
+  it('does not lose concurrent trust or revoke updates', async () => {
+    const first = path.join(bare, 'concurrent-first')
+    const second = path.join(bare, 'concurrent-second')
+    await Promise.all([mkdir(first), mkdir(second)])
+
+    await Promise.all([trustWorkspace(first), trustWorkspace(second)])
+    expect(await isWorkspaceTrusted(first)).toBe(true)
+    expect(await isWorkspaceTrusted(second)).toBe(true)
+
+    await Promise.all([revokeWorkspaceTrust(first), revokeWorkspaceTrust(second)])
+    expect(await isWorkspaceTrusted(first)).toBe(false)
+    expect(await isWorkspaceTrusted(second)).toBe(false)
+  })
 })
 
 describe('saveConfig', () => {
@@ -98,6 +112,14 @@ describe('saveConfig', () => {
     expect(await configLocation()).toEqual({ path: projectFile, scope: 'project' })
     expect(JSON.parse(await readFile(projectFile, 'utf8')).model).toBe('demo/model-x')
     await expect(readFile(configPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('does not make the workspace root private when saving project config', async () => {
+    if (isWindows) return
+    await chmod(workspace, 0o755)
+    const config = await loadConfig(nested)
+    await saveConfig(config)
+    expect((await stat(workspace)).mode & 0o777).toBe(0o755)
   })
 })
 

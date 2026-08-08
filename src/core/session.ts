@@ -42,8 +42,13 @@ export async function saveSession(state: SessionState): Promise<void> {
   await ensureDir(sessionsDir)
   const file = path.join(sessionsDir, `${state.id}.json`)
   const temp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`
-  await writeFile(temp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 })
-  await atomicRename(temp, file)
+  try {
+    await writeFile(temp, JSON.stringify(state), { encoding: 'utf8', mode: 0o600 })
+    await atomicRename(temp, file)
+  } catch (error) {
+    await unlink(temp).catch(() => undefined)
+    throw error
+  }
 }
 
 async function atomicRename(from: string, to: string, retries = 5): Promise<void> {
@@ -237,7 +242,9 @@ function readState(raw: string): SessionState | null {
   }
   if (typeof parsed !== 'object' || parsed === null) return null
   const state = parsed as Partial<SessionState>
-  if (typeof state.id !== 'string' || !Array.isArray(state.messages)) return null
+  if (typeof state.id !== 'string' || !validSessionId(state.id)) return null
+  const messages = readMessages(state.messages)
+  if (!messages) return null
   return {
     id: state.id,
     title: typeof state.title === 'string' ? state.title.slice(0, 120) : undefined,
@@ -245,10 +252,79 @@ function readState(raw: string): SessionState | null {
     createdAt: typeof state.createdAt === 'string' ? state.createdAt : '',
     updatedAt: typeof state.updatedAt === 'string' ? state.updatedAt : '',
     model: typeof state.model === 'string' ? state.model : '',
-    messages: state.messages as Message[],
-    usage: Array.isArray(state.usage) ? (state.usage as UsageEntry[]) : [],
+    messages,
+    usage: readUsageEntries(state.usage),
     context: readContextUsage(state.context),
   }
+}
+
+function readMessages(value: unknown): Message[] | null {
+  if (!Array.isArray(value)) return null
+  const messages: Message[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) return null
+    const candidate = item as { role?: unknown; content?: unknown }
+    if (candidate.role !== 'user' && candidate.role !== 'assistant') return null
+    if (!Array.isArray(candidate.content)) return null
+    const content: ContentBlock[] = []
+    for (const block of candidate.content) {
+      if (!validContentBlock(block)) return null
+      content.push(block)
+    }
+    messages.push({ role: candidate.role, content })
+  }
+  return messages
+}
+
+function validContentBlock(value: unknown): value is ContentBlock {
+  if (typeof value !== 'object' || value === null) return false
+  const block = value as Record<string, unknown>
+  switch (block.type) {
+    case 'text':
+    case 'thinking':
+      return typeof block.text === 'string'
+    case 'tool_use':
+      return typeof block.id === 'string' && typeof block.name === 'string'
+    case 'tool_result':
+      return (
+        typeof block.toolUseId === 'string' &&
+        typeof block.content === 'string' &&
+        (block.isError === undefined || typeof block.isError === 'boolean')
+      )
+    case 'image':
+      return (
+        typeof block.name === 'string' &&
+        typeof block.data === 'string' &&
+        block.data.length <= MAX_SESSION_BYTES * 2 &&
+        ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(String(block.mediaType))
+      )
+    case 'file':
+      return (
+        typeof block.name === 'string' &&
+        typeof block.mediaType === 'string' &&
+        typeof block.text === 'string'
+      )
+    default:
+      return false
+  }
+}
+
+function readUsageEntries(value: unknown): UsageEntry[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) => {
+    if (typeof item !== 'object' || item === null) return []
+    const candidate = item as { model?: unknown; usage?: unknown; requests?: unknown }
+    const usage = readUsage(candidate.usage)
+    if (
+      typeof candidate.model !== 'string' ||
+      !usage ||
+      !Number.isInteger(candidate.requests) ||
+      (candidate.requests as number) < 0
+    ) {
+      return []
+    }
+    return [{ model: candidate.model, usage, requests: candidate.requests as number, costUsd: null }]
+  })
 }
 
 async function resolveExportTarget(destination: string, state: SessionState): Promise<string> {
@@ -317,7 +393,14 @@ function readUsage(value: unknown): Usage | undefined {
   if (typeof value !== 'object' || value === null) return undefined
   const usage = value as Partial<Record<keyof Usage, unknown>>
   const fields: Array<keyof Usage> = ['input', 'output', 'cacheWrite', 'cacheRead']
-  if (fields.some((field) => typeof usage[field] !== 'number' || !Number.isFinite(usage[field]))) {
+  if (
+    fields.some(
+      (field) =>
+        typeof usage[field] !== 'number' ||
+        !Number.isFinite(usage[field]) ||
+        (usage[field] as number) < 0,
+    )
+  ) {
     return undefined
   }
   return {
@@ -356,7 +439,11 @@ export async function resolveSessionId(query: string): Promise<string> {
 }
 
 function assertSessionId(id: string): void {
-  if (!/^[A-Za-z0-9_-]{1,240}$/.test(id)) {
+  if (!validSessionId(id)) {
     throw new Error(`Invalid session id: ${id}`)
   }
+}
+
+function validSessionId(id: string): boolean {
+  return /^[A-Za-z0-9_-]{1,240}$/.test(id)
 }

@@ -9,6 +9,7 @@ import { createAnthropicProvider } from '../src/providers/anthropic'
 import { createOpenAiProvider } from '../src/providers/openai-compat'
 import { ProviderError } from '../src/providers/types'
 import type { ChatRequest, Provider, StreamEvent } from '../src/providers/types'
+import type { Tool } from '../src/tools/types'
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void
 
@@ -273,6 +274,76 @@ describe('runTurn refuses to fabricate a finished turn', () => {
     expect(events).toContainEqual(
       expect.objectContaining({ type: 'notice', text: expect.stringContaining('None were run') }),
     )
+  })
+
+  it('serializes permission prompts and stateful tool calls in model order', async () => {
+    let modelCall = 0
+    const provider: Provider = {
+      id: 'gateway',
+      kind: 'openai',
+      listModels: async () => [],
+      knownModels: () => [],
+      async *stream() {
+        if (modelCall++ === 0) {
+          yield {
+            type: 'done' as const,
+            stopReason: 'tool_use' as const,
+            content: [
+              { type: 'tool_use' as const, id: 'first', name: 'stateful', input: { order: 1 } },
+              { type: 'tool_use' as const, id: 'second', name: 'stateful', input: { order: 2 } },
+            ],
+          }
+          return
+        }
+        yield {
+          type: 'done' as const,
+          stopReason: 'end_turn' as const,
+          content: [{ type: 'text' as const, text: 'done' }],
+        }
+      },
+    }
+    const executed: number[] = []
+    const tool: Tool = {
+      name: 'stateful',
+      description: 'stateful test tool',
+      inputSchema: { type: 'object' },
+      defaultPermission: 'ask',
+      summarize: () => 'stateful call',
+      execute: async (input) => {
+        executed.push((input as { order: number }).order)
+        return { content: 'ok' }
+      },
+    }
+    let activePrompts = 0
+    let maxActivePrompts = 0
+    const hooks: AgentHooks = {
+      onEvent: () => undefined,
+      requestPermission: async () => {
+        activePrompts += 1
+        maxActivePrompts = Math.max(maxActivePrompts, activePrompts)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        activePrompts -= 1
+        return 'once'
+      },
+    }
+    const config: AgentConfig = {
+      ...agentConfig(provider),
+      tools: {
+        get: (name) => (name === tool.name ? tool : undefined),
+        schemas: () => [],
+      },
+      permissions: { decide: () => 'ask', grantForSession: () => undefined },
+    }
+
+    await runTurn(
+      config,
+      [{ role: 'user', content: [{ type: 'text', text: 'go' }] }],
+      hooks,
+      new AbortController().signal,
+    )
+
+    expect(maxActivePrompts).toBe(1)
+    expect(executed).toEqual([1, 2])
   })
 })
 

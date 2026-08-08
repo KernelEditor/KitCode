@@ -47,10 +47,43 @@ function cacheFile(providerId: string): string {
 
 async function readCache(file: string): Promise<ModelCache | undefined> {
   try {
-    return JSON.parse(await readFile(file, 'utf8')) as ModelCache
+    const parsed: unknown = JSON.parse(await readFile(file, 'utf8'))
+    if (typeof parsed !== 'object' || parsed === null) return undefined
+    const candidate = parsed as Partial<ModelCache>
+    if (
+      typeof candidate.fetchedAt !== 'number' ||
+      !Number.isFinite(candidate.fetchedAt) ||
+      !Array.isArray(candidate.models) ||
+      candidate.models.length > 10_000 ||
+      !candidate.models.every(validModel)
+    ) {
+      return undefined
+    }
+    return candidate as ModelCache
   } catch {
     return undefined
   }
+}
+
+function validModel(value: unknown): value is ModelInfo {
+  if (typeof value !== 'object' || value === null) return false
+  const model = value as Partial<ModelInfo>
+  if (typeof model.id !== 'string' || model.id === '') return false
+  if (model.name !== undefined && typeof model.name !== 'string') return false
+  if (
+    model.contextWindow !== undefined &&
+    (!Number.isInteger(model.contextWindow) || model.contextWindow < 1)
+  ) {
+    return false
+  }
+  if (model.pricing === undefined) return true
+  const prices = [
+    model.pricing.input,
+    model.pricing.output,
+    model.pricing.cacheWrite,
+    model.pricing.cacheRead,
+  ].filter((price): price is number => price !== undefined)
+  return prices.length >= 2 && prices.every((price) => Number.isFinite(price) && price >= 0)
 }
 
 async function writeCache(file: string, models: ModelInfo[]): Promise<void> {

@@ -29,6 +29,7 @@ export async function checkForUpdates(
       signal: controller.signal,
     })
     if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined)
       return { status: 'unknown', reason: `GitHub returned ${response.status}` }
     }
     const payload = (await readJsonBounded(response)) as { sha?: unknown; html_url?: unknown } | null
@@ -61,7 +62,10 @@ export async function checkForUpdates(
 
 async function readJsonBounded(response: Response): Promise<unknown | null> {
   const declared = Number(response.headers.get('content-length'))
-  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) return null
+  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+    await response.body?.cancel().catch(() => undefined)
+    return null
+  }
   if (!response.body) return null
   const reader = response.body.getReader()
   const chunks: Uint8Array[] = []

@@ -112,4 +112,18 @@ describe('detectProvider', () => {
       }),
     ).rejects.toThrow(/exceeded 5 MB/)
   })
+
+  it('rejects unsafe provider names before probing the endpoint', async () => {
+    let called = false
+    await expect(
+      detectProvider('https://api.example.com/v1', 'sk-test', {
+        name: '__proto__',
+        fetchImpl: async () => {
+          called = true
+          return jsonResponse(modelBody)
+        },
+      }),
+    ).rejects.toThrow(/Invalid provider name/)
+    expect(called).toBe(false)
+  })
 })

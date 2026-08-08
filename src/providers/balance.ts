@@ -32,7 +32,10 @@ export async function fetchProviderBalance(
           },
           signal: controller.signal,
         })
-        if (!response.ok) continue
+        if (!response.ok) {
+          await response.body?.cancel().catch(() => undefined)
+          continue
+        }
         const text = await limitedResponseText(response, MAX_RESPONSE_BYTES)
         if (text === null) continue
         const balance = endpoint.parse(JSON.parse(text))
@@ -175,7 +178,10 @@ function finiteNumber(value: unknown): number | null {
 
 async function limitedResponseText(response: Response, limit: number): Promise<string | null> {
   const declared = Number(response.headers.get('content-length'))
-  if (Number.isFinite(declared) && declared > limit) return null
+  if (Number.isFinite(declared) && declared > limit) {
+    await response.body?.cancel().catch(() => undefined)
+    return null
+  }
   if (!response.body) return ''
 
   const reader = response.body.getReader()

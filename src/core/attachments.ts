@@ -4,6 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ContentBlock, FileBlock, ImageBlock } from '../providers/types'
+import { resolveInside } from '../tools/safepath'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_TEXT_BYTES = 256 * 1024
@@ -60,54 +61,17 @@ export async function loadAutomaticAttachment(
   requestedPath: string,
 ): Promise<LoadedAttachment | null> {
   if (!looksLikeAttachmentPath(requestedPath)) return null
-  const resolved = resolveAttachmentPath(cwd, requestedPath)
+  const requested = resolveAttachmentPath(cwd, requestedPath)
+  // Pasting a path is an implicit action. Only auto-attach files inside the
+  // current workspace; /attach remains available for an intentional external file.
+  const safe = resolveInside(cwd, requested)
+  if (!safe.ok || safe.relative === '') return null
+  const resolved = safe.path
   // Check sensitive files first — they always require explicit /attach
   if (isSensitiveAutomaticPath(resolved)) {
     throw new Error(
       `For safety, sensitive-looking files must be attached explicitly with /attach: ${path.basename(resolved)}`,
     )
-  }
-  // Block absolute paths that point outside common project areas for auto-attachments
-  if (path.isAbsolute(resolved)) {
-    const normalized = resolved.toLowerCase()
-    const isProjectFile =
-      normalized.includes(path.sep + 'src' + path.sep) ||
-      normalized.includes(path.sep + 'lib' + path.sep) ||
-      normalized.includes(path.sep + 'app' + path.sep) ||
-      normalized.includes(path.sep + 'test' + path.sep) ||
-      normalized.includes(path.sep + 'tests' + path.sep) ||
-      normalized.includes(path.sep + 'public' + path.sep) ||
-      normalized.includes(path.sep + 'assets' + path.sep) ||
-      normalized.includes(path.sep + 'static' + path.sep) ||
-      normalized.endsWith('.ts') ||
-      normalized.endsWith('.js') ||
-      normalized.endsWith('.tsx') ||
-      normalized.endsWith('.jsx') ||
-      normalized.endsWith('.py') ||
-      normalized.endsWith('.go') ||
-      normalized.endsWith('.rs') ||
-      normalized.endsWith('.java') ||
-      normalized.endsWith('.c') ||
-      normalized.endsWith('.cpp') ||
-      normalized.endsWith('.h') ||
-      normalized.endsWith('.hpp') ||
-      normalized.endsWith('.css') ||
-      normalized.endsWith('.html') ||
-      normalized.endsWith('.json') ||
-      normalized.endsWith('.yaml') ||
-      normalized.endsWith('.yml') ||
-      normalized.endsWith('.md') ||
-      normalized.endsWith('.txt') ||
-      normalized.endsWith('.toml') ||
-      normalized.endsWith('.ini') ||
-      normalized.endsWith('.cfg') ||
-      normalized.endsWith('.sh') ||
-      normalized.endsWith('.bat') ||
-      normalized.endsWith('.cmd') ||
-      normalized.endsWith('.ps1') ||
-      normalized.endsWith('.dockerfile') ||
-      normalized.endsWith('.makefile')
-    if (!isProjectFile) return null
   }
   const linkInfo = await lstat(resolved).catch(() => null)
   if (linkInfo?.isSymbolicLink()) return null

@@ -65,8 +65,9 @@ function perMillion(value: unknown): number | undefined {
 
 function positiveInt(value: unknown): number | undefined {
   const parsed = toNumber(value)
-  if (parsed === undefined || parsed <= 0) return undefined
-  return Math.trunc(parsed)
+  if (parsed === undefined) return undefined
+  const integer = Math.trunc(parsed)
+  return integer >= 1 ? integer : undefined
 }
 
 function toNumber(value: unknown): number | undefined {

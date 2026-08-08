@@ -39,6 +39,10 @@ const inheritedEnvKeys = new Set([
   'PATHEXT',
   'APPDATA',
   'LOCALAPPDATA',
+  'USERPROFILE',
+  'HOMEDRIVE',
+  'HOMEPATH',
+  'USERNAME',
 ])
 
 // Environment variables that should NEVER be inherited by MCP servers
@@ -247,8 +251,11 @@ function configuredSecrets(config: McpServerConfig): string[] {
 
 export function inheritedEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const env: Record<string, string> = {}
+  const allowed = new Set([...inheritedEnvKeys].map((key) => key.toUpperCase()))
+  const blocked = new Set([...blockedEnvKeys].map((key) => key.toUpperCase()))
   for (const [key, value] of Object.entries(source)) {
-    if (value !== undefined && inheritedEnvKeys.has(key) && !blockedEnvKeys.has(key)) {
+    const normalized = key.toUpperCase()
+    if (value !== undefined && allowed.has(normalized) && !blocked.has(normalized)) {
       env[key] = value
     }
   }

@@ -39,6 +39,8 @@ export async function addProvider(
   }
   const config = options.local ? await loadProjectConfig(cwd) : (await loadRuntimeConfig(cwd)).config
   const auth = await loadAuth()
+  const configBefore = structuredClone(config)
+  const authBefore = { ...auth }
 
   config.providers[detected.id] = detected.config
   auth[detected.id] = key
@@ -49,8 +51,16 @@ export async function addProvider(
     if (chosen) config.model = formatModelRef(detected.id, chosen)
   }
 
-  await saveConfig(config)
-  await saveAuth(auth)
+  try {
+    await saveConfig(config)
+    await saveAuth(auth)
+  } catch (error) {
+    Object.assign(config, configBefore)
+    for (const id of Object.keys(auth)) delete auth[id]
+    Object.assign(auth, authBefore)
+    await Promise.allSettled([saveConfig(config), saveAuth(auth)])
+    throw error
+  }
   const location = await configLocation()
 
   const protocol = detected.config.type === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible'

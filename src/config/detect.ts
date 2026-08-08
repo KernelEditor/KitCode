@@ -1,7 +1,7 @@
 import { redactSecrets } from '../providers/errors'
 import { modelInfoFromRaw } from '../providers/model-info'
 import type { ModelInfo } from '../providers/types'
-import { isAllowedEndpointUrl } from './schema'
+import { isAllowedEndpointUrl, providerIdSchema } from './schema'
 import type { ProviderConfig } from './schema'
 
 export interface DetectedProvider {
@@ -32,7 +32,12 @@ export async function detectProvider(
   if (!isAllowedEndpointUrl(baseUrl)) {
     throw new Error('API URL must use https; plain http is only allowed for localhost or 127.0.0.1.')
   }
-  const id = opts.name ?? providerIdFromUrl(baseUrl)
+  const candidateId = opts.name ?? providerIdFromUrl(baseUrl)
+  const parsedId = providerIdSchema.safeParse(candidateId)
+  if (!parsedId.success) {
+    throw new Error(`Invalid provider name "${candidateId}": ${parsedId.error.issues[0]?.message ?? 'invalid name'}`)
+  }
+  const id = parsedId.data
 
   if (hostname(baseUrl) === anthropicHost) {
     const probed = await probe(
@@ -92,7 +97,8 @@ export function providerIdFromUrl(url: string): string {
   }
   const labels = host.split('.')
   const label = labels.find((part) => part !== 'api' && part !== '') ?? 'provider'
-  return label.replace(/[^a-z0-9-]/g, '-')
+  const candidate = label.replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '') || 'provider'
+  return providerIdSchema.safeParse(candidate).success ? candidate : `provider-${candidate}`
 }
 
 function isAddressLiteral(host: string): boolean {

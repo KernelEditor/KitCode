@@ -3,6 +3,8 @@ import type { Usage } from '../providers/types'
 import { costOf, pricingFor } from '../providers/pricing'
 import type { PricingResolver } from './usage'
 
+const UNKNOWN_MODEL_PRICING = { input: 3, output: 15 } as const
+
 export interface BudgetLimits {
   maxTokensPerTurn: number
   maxCostUsdPerTurn: number
@@ -65,7 +67,7 @@ export function createTurnBudget(
       if (current.costUsd !== null) {
         const remainingUsd = limits.maxCostUsdPerTurn - current.costUsd
         // Use fallback pricing if model pricing is unknown to prevent unlimited spending
-        const effectivePricing = pricing ?? { input: 0.003, output: 0.015 } // Conservative fallback: $3/1M input, $15/1M output
+        const effectivePricing = pricing ?? UNKNOWN_MODEL_PRICING
         const inputUsd = (estimatedInput * effectivePricing.input) / 1_000_000
         const affordableOutput = Math.floor(
           ((remainingUsd - inputUsd) * 1_000_000) / effectivePricing.output,
@@ -82,9 +84,10 @@ export function createTurnBudget(
       return { allowed: true, maxOutputTokens: Math.floor(outputLimit) }
     },
     record(modelRef, next) {
-      usage = addUsage(usage, normalizeUsage(next))
-      const priced = costOf(usage, resolvePricing(modelRef))
-      costUsd = priced
+      const normalized = normalizeUsage(next)
+      usage = addUsage(usage, normalized)
+      const priced = costOf(normalized, resolvePricing(modelRef) ?? UNKNOWN_MODEL_PRICING)
+      costUsd = (costUsd ?? 0) + (priced ?? 0)
     },
     snapshot,
   }

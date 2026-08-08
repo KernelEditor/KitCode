@@ -12,12 +12,20 @@ import { Logo } from './Logo'
 const HEADER = { kind: 'header' } as const
 type StaticTranscriptItem = typeof HEADER | Bubble
 
-export const Transcript = memo(function Transcript({ bubbles, workspace }: TranscriptProps) {
-  const liveAt = bubbles.findLastIndex(
+export function firstMutableBubbleIndex(bubbles: Bubble[]): number {
+  return bubbles.findIndex(
     (bubble) =>
       (bubble.kind === 'assistant' && bubble.streaming) ||
-      (bubble.kind === 'tool' && bubble.state === 'running'),
+      (bubble.kind === 'tool' && bubble.state === 'running') ||
+      (bubble.kind === 'subagent' && bubble.state === 'running'),
   )
+}
+
+export const Transcript = memo(function Transcript({ bubbles, workspace }: TranscriptProps) {
+  // A Static item cannot be updated after Ink writes it to scrollback. Keep the
+  // whole suffix starting at the first mutable bubble live: several tools or
+  // subagents may be running concurrently.
+  const liveAt = firstMutableBubbleIndex(bubbles)
   const stableCount = liveAt === -1 ? bubbles.length : liveAt
   const stableRef = useRef<Bubble[]>([])
   if (stableRef.current.length < stableCount) {
@@ -28,13 +36,11 @@ export const Transcript = memo(function Transcript({ bubbles, workspace }: Trans
   } else if (stableRef.current.length > stableCount) {
     stableRef.current = bubbles.slice(0, stableCount)
   }
-  const stable = stableRef.current
   const live = liveAt === -1 ? [] : bubbles.slice(liveAt)
-  const staticItems: StaticTranscriptItem[] = [HEADER, ...stable]
+  const staticItems: StaticTranscriptItem[] = [HEADER, ...stableRef.current]
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      {}
+    <Box flexDirection="column" marginBottom={1} flexShrink={1} overflowY="hidden">
       <Static items={staticItems}>
         {(item) =>
           item.kind === 'header' ? (
@@ -44,9 +50,17 @@ export const Transcript = memo(function Transcript({ bubbles, workspace }: Trans
           )
         }
       </Static>
-      {live.map((bubble) => (
-        <BubbleView key={bubble.id} bubble={bubble} />
-      ))}
+
+      <Box
+        flexDirection="column"
+        flexShrink={1}
+        overflowY="hidden"
+        justifyContent="flex-end"
+      >
+        {live.map((bubble) => (
+          <BubbleView key={bubble.id} bubble={bubble} />
+        ))}
+      </Box>
     </Box>
   )
 })

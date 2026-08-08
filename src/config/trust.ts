@@ -3,7 +3,7 @@ import { readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { ensureDir, trustPath, workspaceRootFor } from './paths'
 
-// Simple mutex to prevent concurrent trust file modifications
+// Serialize complete read-modify-write operations, not only the final rename.
 let trustLock: Promise<void> = Promise.resolve()
 
 interface TrustFile {
@@ -26,25 +26,33 @@ export async function isWorkspaceTrusted(cwd: string): Promise<boolean> {
 
 export async function trustWorkspace(cwd: string): Promise<string> {
   const workspace = await canonicalWorkspace(cwd)
-  const trust = await loadTrust()
-  if (!trust.workspaces.includes(workspace)) {
-    trust.workspaces.push(workspace)
-    trust.workspaces.sort()
-    await saveTrust(trust)
-  }
+  await withTrustLock(async () => {
+    const trust = await readTrust()
+    if (!trust.workspaces.includes(workspace)) {
+      trust.workspaces.push(workspace)
+      trust.workspaces.sort()
+      await writeTrust(trust)
+    }
+  })
   return workspace
 }
 
 export async function revokeWorkspaceTrust(cwd: string): Promise<string> {
   const workspace = await canonicalWorkspace(cwd)
-  const trust = await loadTrust()
-  const workspaces = trust.workspaces.filter((entry) => entry !== workspace)
-  if (workspaces.length !== trust.workspaces.length) await saveTrust({ version: 1, workspaces })
+  await withTrustLock(async () => {
+    const trust = await readTrust()
+    const workspaces = trust.workspaces.filter((entry) => entry !== workspace)
+    if (workspaces.length !== trust.workspaces.length) await writeTrust({ version: 1, workspaces })
+  })
   return workspace
 }
 
 async function loadTrust(): Promise<TrustFile> {
   await trustLock
+  return readTrust()
+}
+
+async function readTrust(): Promise<TrustFile> {
   let parsed: unknown
   try {
     parsed = JSON.parse(await readFile(trustPath, 'utf8'))
@@ -61,23 +69,28 @@ async function loadTrust(): Promise<TrustFile> {
   }
 }
 
-async function saveTrust(value: TrustFile): Promise<void> {
-  // Wait for any pending read to complete, then acquire lock
-  const release = trustLock
-  let resolveLock: () => void
-  trustLock = new Promise<void>((resolve) => { resolveLock = resolve })
-  await release
+async function writeTrust(value: TrustFile): Promise<void> {
+  await ensureDir(path.dirname(trustPath))
+  const temp = `${trustPath}.${randomUUID()}.tmp`
   try {
-    await ensureDir(path.dirname(trustPath))
-    const temp = `${trustPath}.${randomUUID()}.tmp`
-    try {
-      await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
-      await rename(temp, trustPath)
-    } catch (error) {
-      await rm(temp, { force: true })
-      throw error
-    }
+    await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+    await rename(temp, trustPath)
+  } catch (error) {
+    await rm(temp, { force: true })
+    throw error
+  }
+}
+
+async function withTrustLock<T>(action: () => Promise<T>): Promise<T> {
+  const previous = trustLock
+  let release!: () => void
+  trustLock = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await previous
+  try {
+    return await action()
   } finally {
-    resolveLock!()
+    release()
   }
 }

@@ -269,11 +269,20 @@ function retryAfterFromError(error: unknown): number {
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const id = setTimeout(resolve, ms)
-    signal.addEventListener('abort', () => {
+    if (signal.aborted) {
+      reject(signal.reason ?? new Error('Aborted'))
+      return
+    }
+    const finish = () => {
+      signal.removeEventListener('abort', onAbort)
+      resolve()
+    }
+    const onAbort = () => {
       clearTimeout(id)
       reject(signal.reason ?? new Error('Aborted'))
-    }, { once: true })
+    }
+    const id = setTimeout(finish, ms)
+    signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -300,10 +309,10 @@ async function runToolCalls(
   signal: AbortSignal,
 ): Promise<ToolResultBlock[]> {
   const calls = content.filter((block): block is ToolUseBlock => block.type === 'tool_use')
+  // Calls may share the permission overlay, checkpoint, filesystem, or process
+  // state. Preserve call order so one prompt cannot overwrite another and hang.
   const results: ToolResultBlock[] = []
-  for (const call of calls) {
-    results.push(await runOneCall(cfg, call, hooks, signal))
-  }
+  for (const call of calls) results.push(await runOneCall(cfg, call, hooks, signal))
   return results
 }
 

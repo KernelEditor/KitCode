@@ -13,7 +13,7 @@ import { compactCutIndex, compactHistory, shouldAutoCompact } from '../src/core/
 import { checkForUpdates } from '../src/core/update'
 import { configSchema } from '../src/config/schema'
 import { formatRateLimits, parseRateLimits } from '../src/providers/rate-limits'
-import type { Message, Provider, StreamEvent } from '../src/providers/types'
+import type { ChatRequest, Message, Provider, StreamEvent } from '../src/providers/types'
 
 const scratch = await mkdtemp(path.join(tmpdir(), 'kitcode-features-'))
 
@@ -73,6 +73,20 @@ describe('attachments', () => {
     await expect(loadAttachment(scratch, file)).resolves.toMatchObject({
       block: { type: 'file', name: '.env' },
     })
+  })
+
+  it('never auto-attaches a pasted path outside the workspace', async () => {
+    const externalDir = await mkdtemp(path.join(tmpdir(), 'kitcode-feature-external-'))
+    try {
+      const file = path.join(externalDir, 'innocent-looking.txt')
+      await writeFile(file, 'private outside-workspace text', 'utf8')
+      await expect(loadAutomaticAttachment(scratch, file)).resolves.toBeNull()
+      await expect(loadAttachment(scratch, file)).resolves.toMatchObject({
+        block: { type: 'file', text: 'private outside-workspace text' },
+      })
+    } finally {
+      await rm(externalDir, { recursive: true, force: true })
+    }
   })
 
   it('converts an image returned by the platform clipboard reader', async () => {
@@ -171,6 +185,62 @@ describe('context compaction', () => {
     expect(shouldAutoCompact(79_999, 100_000)).toBe(false)
     expect(shouldAutoCompact(80_000, 100_000)).toBe(true)
     expect(shouldAutoCompact(999_999, null)).toBe(false)
+  })
+
+  it('chunks the rendered payload accurately and fills a worker pool without exceeding maxTokens', async () => {
+    const largeHistory: Message[] = Array.from({ length: 72 }, (_, index) => [
+      { role: 'user', content: [{ type: 'text', text: `question ${index}` }] } as Message,
+      {
+        role: 'assistant',
+        content: [
+          {
+            type: 'tool_result',
+            toolUseId: `tool-${index}`,
+            content: `result ${index} ${'x'.repeat(100_000)}`,
+          },
+        ],
+      } as Message,
+    ]).flat()
+    const summarySources: string[] = []
+    const requestedMaxTokens: number[] = []
+    let active = 0
+    let maxActive = 0
+    let calls = 0
+    const provider: Provider = {
+      id: 'test',
+      kind: 'openai',
+      knownModels: () => [],
+      listModels: async () => [],
+      async *stream(request: ChatRequest): AsyncIterable<StreamEvent> {
+        requestedMaxTokens.push(request.maxTokens)
+        if (request.system.startsWith('You are summarizing')) {
+          const block = request.messages[0]?.content[0]
+          summarySources.push(block?.type === 'text' ? block.text : '')
+          active += 1
+          maxActive = Math.max(maxActive, active)
+          await new Promise((resolve) => setTimeout(resolve, 10))
+          active -= 1
+        }
+        const text = `summary-${++calls}`
+        yield { type: 'done', stopReason: 'end_turn', content: [{ type: 'text', text }] }
+      },
+    }
+
+    const result = await compactHistory({
+      provider,
+      model: 'model',
+      history: largeHistory,
+      maxTokens: 32,
+      maxTotalOutputTokens: 10,
+      signal: new AbortController().signal,
+    })
+
+    expect(result.compacted).toBe(true)
+    expect(summarySources.length).toBeGreaterThanOrEqual(3)
+    expect(summarySources.length).toBeLessThan(10)
+    expect(summarySources.every((source) => source.length <= 35_000)).toBe(true)
+    expect(maxActive).toBe(3)
+    expect(requestedMaxTokens.every((tokens) => tokens <= 2)).toBe(true)
   })
 })
 

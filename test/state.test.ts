@@ -257,6 +257,18 @@ describe('saveSession', () => {
     }
   })
 
+  it('rejects malformed message blocks instead of trusting a session cast', async () => {
+    const session = createSession('/tmp', 'provider/model')
+    await saveSession(session)
+    await writeFile(
+      path.join(sessionsDir, `${session.id}.json`),
+      JSON.stringify({ ...session, messages: [{ role: 'assistant', content: [{ type: 'text', text: 42 }] }] }),
+      'utf8',
+    )
+    await expect(loadSession(session.id)).rejects.toThrow(/not readable as a session/)
+    expect((await listSessions(100)).some((entry) => entry.id === session.id)).toBe(false)
+  })
+
   it('concurrent writes for the same session both finish without clobbering', async () => {
     const session = createSession('/tmp', 'provider/model')
     session.messages = [{ role: 'user', content: [{ type: 'text', text: 'seed' }] }]

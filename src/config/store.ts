@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { chmod, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { z } from 'zod'
 import type { ConfigLocation } from './paths'
@@ -57,7 +57,7 @@ async function loadConfigAt(location: ConfigLocation): Promise<Config> {
 
 export async function saveConfig(config: Config): Promise<void> {
   const location = await configLocation()
-  await writeJsonAtomic(location.path, config)
+  await writeJsonAtomic(location.path, config, location.scope === 'project' ? undefined : 0o600)
 }
 
 export async function initProjectConfig(dir: string): Promise<ConfigLocation> {
@@ -134,15 +134,23 @@ async function readJson(file: string): Promise<unknown> {
 }
 
 async function writeJsonAtomic(file: string, value: unknown, mode?: number): Promise<void> {
-  await ensureDir(path.dirname(file))
+  const parent = path.dirname(file)
+  if (isInside(homeDir, parent)) await ensureDir(parent)
+  else await mkdir(parent, { recursive: true })
   const temp = `${file}.${randomUUID()}.tmp`
   try {
     await writeFile(temp, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', mode })
     await rename(temp, file)
+    if (mode !== undefined) await chmod(file, mode)
   } catch (error) {
     await rm(temp, { force: true })
     throw error
   }
+}
+
+function isInside(root: string, candidate: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate))
+  return relative === '' || (!path.isAbsolute(relative) && relative.split(path.sep)[0] !== '..')
 }
 
 function formatIssues(file: string, error: z.ZodError): string {

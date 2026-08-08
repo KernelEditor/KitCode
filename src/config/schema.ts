@@ -1,5 +1,20 @@
 import { z } from 'zod'
 
+const reservedRecordKeys = new Set(['__proto__', 'prototype', 'constructor'])
+
+const safeRecordKeySchema = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((value) => !reservedRecordKeys.has(value) && !/[\0-\x1f\x7f]/.test(value), {
+    message: 'contains a reserved or unsafe key',
+  })
+
+export const providerIdSchema = safeRecordKeySchema.regex(
+  /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/,
+  'must start with a letter or digit and contain only letters, digits, dots, underscores, or dashes',
+)
+
 export function isAllowedEndpointUrl(value: string): boolean {
   try {
     const url = new URL(value)
@@ -90,12 +105,12 @@ export const configSchema = z.object({
   }),
   diagnostics: diagnosticsSchema.default({ autoRun: true, commands: [] }),
   updates: updatesSchema.default({ checkOnStart: false }),
-  providers: z.record(z.string(), providerConfigSchema).default({}),
-  permissions: z.record(z.string(), permissionModeSchema).default({}),
-  mcp: z.record(z.string(), mcpServerSchema).default({}),
+  providers: z.record(providerIdSchema, providerConfigSchema).default({}),
+  permissions: z.record(safeRecordKeySchema, permissionModeSchema).default({}),
+  mcp: z.record(safeRecordKeySchema, mcpServerSchema).default({}),
 })
 
-export const authSchema = z.record(z.string(), z.string())
+export const authSchema = z.record(providerIdSchema, z.string())
 
 export type ProviderConfig = z.infer<typeof providerConfigSchema>
 export type McpServerConfig = z.infer<typeof mcpServerSchema>

@@ -28,7 +28,7 @@ import {
 import {
   compactCutIndex,
   compactHistory,
-  estimateCompactTokens,
+  estimateCompactBudget,
   shouldAutoCompact,
 } from '../core/compact'
 import { buildSystemPrompt } from '../core/prompt'
@@ -150,7 +150,7 @@ export async function boot(options: {
   }
 
   const usage = createUsageTracker(session.usage, resolvePricing)
-  const skillCatalogue = formatSkillCatalogue(skills)
+  let skillCatalogue = formatSkillCatalogue(skills)
   const mainSystemPrompt = () =>
     buildSystemPrompt({
       cwd: options.cwd,
@@ -280,9 +280,20 @@ export async function boot(options: {
 
   let persistQueue: Promise<void> = Promise.resolve()
 
-  const persistConfig = async (mutate: (draft: Config) => void) => {
-    mutate(config)
-    await saveConfig(config)
+  let configQueue: Promise<void> = Promise.resolve()
+  const persistConfig = (mutate: (draft: Config) => void): Promise<void> => {
+    const save = configQueue.catch(() => undefined).then(async () => {
+      const before = structuredClone(config)
+      mutate(config)
+      try {
+        await saveConfig(config)
+      } catch (error) {
+        Object.assign(config, before)
+        throw error
+      }
+    })
+    configQueue = save
+    return save
   }
 
   const compactWithBudget = async (
@@ -294,17 +305,19 @@ export async function boot(options: {
       return { history, compacted: false as const, removedMessages: 0 }
     }
     const resolved = registry.resolve(modelRef)
+    const estimate = estimateCompactBudget(history, config.maxTokens)
     const budgetDecision = budget.beforeRequest({
       modelRef,
-      maxOutputTokens: Math.min(4_096, config.maxTokens),
-      estimatedInputTokens: estimateCompactTokens(history),
+      maxOutputTokens: estimate.maxOutputTokens,
+      estimatedInputTokens: estimate.inputTokens,
     })
     if (!budgetDecision.allowed) throw new Error(budgetDecision.reason)
     const result = await compactHistory({
       provider: resolved.provider,
       model: resolved.modelId,
       history,
-      maxTokens: budgetDecision.maxOutputTokens,
+      maxTokens: config.maxTokens,
+      maxTotalOutputTokens: budgetDecision.maxOutputTokens,
       signal,
     })
     if (result.usage) {
@@ -328,14 +341,24 @@ export async function boot(options: {
     async addProvider(url, key) {
       const detected = await detectProvider(url, key)
       rememberModels(detected.id, detected.models)
+      const configBefore = structuredClone(config)
+      const authBefore = { ...auth }
       config.providers[detected.id] = detected.config
       auth[detected.id] = key
 
       const chosen = preferredModel(detected.models)
       if (chosen) config.model = formatModelRef(detected.id, chosen)
 
-      await saveConfig(config)
-      await saveAuth(auth)
+      try {
+        await saveConfig(config)
+        await saveAuth(auth)
+      } catch (error) {
+        Object.assign(config, configBefore)
+        for (const id of Object.keys(auth)) delete auth[id]
+        Object.assign(auth, authBefore)
+        await Promise.allSettled([saveConfig(config), saveAuth(auth)])
+        throw error
+      }
 
       registry = createRegistry(config, auth)
       const nextRef = config.model ?? ''
@@ -440,19 +463,28 @@ export async function boot(options: {
       if (!provider) throw new Error(`Provider "${providerId}" is not configured.`)
 
       const previousKey = auth[providerId]
+      const restoreKey = () => {
+        if (previousKey === undefined) delete auth[providerId]
+        else auth[providerId] = previousKey
+      }
       auth[providerId] = newKey
 
       try {
         const testRegistry = createRegistry(config, auth)
-        await loadModels(testRegistry.get(providerId))
+        await testRegistry.get(providerId).listModels()
       } catch (error) {
-        auth[providerId] = previousKey
+        restoreKey()
         throw new Error(
           `Key verification failed for "${providerId}": ${error instanceof Error ? error.message : String(error)}`,
         )
       }
 
-      await saveAuth(auth)
+      try {
+        await saveAuth(auth)
+      } catch (error) {
+        restoreKey()
+        throw error
+      }
       registry = createRegistry(config, auth)
       if (parseModelRef(modelRef)?.provider === providerId) {
         const models = await loadModels(registry.get(providerId))
@@ -759,8 +791,10 @@ export async function boot(options: {
 
     async installSkill(source) {
       const result = await installSkill(source)
-      
       skills = await discoverSkills(skillRoots)
+      skillCatalogue = formatSkillCatalogue(skills)
+      tools.unregister(['skill'])
+      if (skills.length > 0) tools.register([createSkillTool(skills)])
       return result
     },
 
@@ -933,7 +967,7 @@ export async function boot(options: {
     warnings,
     async shutdown() {
       try {
-        await persistQueue
+        await Promise.all([persistQueue, configQueue])
       } finally {
         await mcp.close()
       }

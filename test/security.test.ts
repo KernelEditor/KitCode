@@ -2,6 +2,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { parseGitHubUrl } from '../src/skills/install'
 import { createTurnBudget } from '../src/core/budget'
 import { isAllowedEndpointUrl } from '../src/config/schema'
 import { bridgeMcpTool } from '../src/mcp/bridge'
@@ -36,6 +37,43 @@ describe('endpoint transport policy', () => {
   })
 })
 
+describe('configuration record keys', () => {
+  it('rejects or strips prototype-mutating provider, auth, and MCP ids', async () => {
+    const { authSchema, configSchema } = await import('../src/config/schema')
+    const parsed = configSchema.parse({ providers: JSON.parse('{"__proto__":{}}') })
+    expect(Object.hasOwn(parsed.providers, '__proto__')).toBe(false)
+    expect(configSchema.safeParse({ mcp: { constructor: {} } }).success).toBe(false)
+    expect(authSchema.safeParse({ prototype: 'secret' }).success).toBe(false)
+  })
+})
+
+describe('GitHub skill source validation', () => {
+  it('parses a repository or a safe subdirectory', () => {
+    expect(parseGitHubUrl('https://github.com/openai/skills')).toEqual({
+      owner: 'openai',
+      repo: 'skills',
+    })
+    expect(
+      parseGitHubUrl('https://github.com/openai/skills/tree/main/skills/docs'),
+    ).toEqual({
+      owner: 'openai',
+      repo: 'skills',
+      branch: 'main',
+      subdir: 'skills/docs',
+    })
+  })
+
+  it.each([
+    'http://github.com/openai/skills',
+    'https://user:password@github.com/openai/skills',
+    'https://github.com/openai/skills/tree/main/../../victim',
+    'https://github.com/openai/skills/tree/main/%2e%2e/%2e%2e/victim',
+    'https://github.com/openai/skills/tree/main/safe%2F..%2Fvictim',
+  ])('rejects an unsafe source before any filesystem operation: %s', (source) => {
+    expect(() => parseGitHubUrl(source)).toThrow()
+  })
+})
+
 describe('terminal output sanitizing', () => {
   it('removes CSI, OSC, DCS, control bytes, and bidi overrides', () => {
     const unsafe =
@@ -59,6 +97,9 @@ describe('secret handling', () => {
         KITCODE_CUSTOM_KEY: 'private',
       }),
     ).toEqual({ PATH: '/usr/bin', HOME: '/tmp/home' })
+    expect(inheritedEnv({ Path: 'C:\\Windows\\System32', openai_api_key: 'private' })).toEqual({
+      Path: 'C:\\Windows\\System32',
+    })
   })
 
   it('redacts named, bearer, known, and common provider secrets', () => {
@@ -140,6 +181,27 @@ describe('turn budget', () => {
       cacheRead: 0,
     })
     expect(budget.beforeRequest(request('openrouter/custom/model'))).toMatchObject({
+      allowed: false,
+      reason: expect.stringMatching(/cost budget/),
+    })
+  })
+
+  it('keeps enforcing a conservative cost limit when model pricing is unknown', () => {
+    const budget = createTurnBudget({
+      maxTokensPerTurn: 1_000_000,
+      maxCostUsdPerTurn: 0.01,
+    })
+    expect(budget.beforeRequest(request('unknown/model'))).toEqual({
+      allowed: true,
+      maxOutputTokens: 666,
+    })
+    budget.record('unknown/model', {
+      input: 0,
+      output: 1_000,
+      cacheWrite: 0,
+      cacheRead: 0,
+    })
+    expect(budget.beforeRequest(request('unknown/model'))).toMatchObject({
       allowed: false,
       reason: expect.stringMatching(/cost budget/),
     })
