@@ -37,6 +37,6 @@ describe('workspace path in the header', () => {
     )
 
     expect(frame).toContain('kitcode')
-    expect(frame).toContain('v1.2.0')
+    expect(frame).toContain('v1.2.1')
   })
 })

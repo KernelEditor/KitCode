@@ -323,6 +323,30 @@ describe('saveSession', () => {
     await expect(loadSession(session.id)).rejects.toThrow(/No session found/)
   })
 
+  it('keeps exported Markdown valid around metadata and attached file contents', async () => {
+    const session = createSession('/tmp/project_[draft]', 'provider/model_*')
+    session.title = 'Release *review* [draft]'
+    session.messages = [
+      user({
+        type: 'file',
+        mediaType: 'text/plain',
+        name: 'notes [draft].md',
+        text: 'before\n```\nafter',
+      }),
+    ]
+    await saveSession(session)
+
+    const exported = await exportSession(session.id, home)
+    const markdown = await readFile(exported.path, 'utf8')
+    expect(markdown).toContain('# Release \\*review\\* \\[draft\\]')
+    expect(markdown).toContain('- Workspace: /tmp/project\\_\\[draft\\]')
+    expect(markdown).toContain('- Model: provider/model\\_\\*')
+    expect(markdown).toContain('[File attached: notes \\[draft\\].md]')
+    expect(markdown).toContain('~~~\nbefore\n```\nafter\n~~~')
+
+    expect(await deleteSession(session.id)).toBe(session.id)
+  })
+
   it('deletes every session file without touching unrelated files', async () => {
     const first = createSession('/tmp/one', 'provider/model')
     const second = createSession('/tmp/two', 'provider/model')

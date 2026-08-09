@@ -350,12 +350,12 @@ function exportFileName(state: SessionState): string {
 
 function renderSessionMarkdown(state: SessionState): string {
   const lines = [
-    `# ${state.title || `KitCode session ${shortSessionId(state.id)}`}`,
+    `# ${escapeMarkdownInline(state.title || `KitCode session ${shortSessionId(state.id)}`)}`,
     '',
-    `- Session: ${state.id}`,
-    `- Workspace: ${state.cwd}`,
-    `- Model: ${state.model || 'unknown'}`,
-    `- Updated: ${state.updatedAt}`,
+    `- Session: ${escapeMarkdownInline(state.id)}`,
+    `- Workspace: ${escapeMarkdownInline(state.cwd)}`,
+    `- Model: ${escapeMarkdownInline(state.model || 'unknown')}`,
+    `- Updated: ${escapeMarkdownInline(state.updatedAt)}`,
     '',
   ]
   for (const message of state.messages) {
@@ -370,15 +370,45 @@ function renderMessage(content: ContentBlock[]): string {
   const sections: string[] = []
   for (const block of content) {
     if (block.type === 'text') sections.push(block.text)
-    else if (block.type === 'image') sections.push(`[Image attached: ${block.name}]`)
-    else if (block.type === 'file') sections.push(`[File attached: ${block.name}]\n\n${block.text}`)
-    else if (block.type === 'tool_use') sections.push(`> Tool: ${block.name}`)
-    else if (block.type === 'tool_result') {
-      sections.push(`> Tool result${block.isError ? ' (error)' : ''}:\n> ${block.content.replace(/\n/g, '\n> ')}`)
+    else if (block.type === 'image') {
+      sections.push(`[Image attached: ${escapeMarkdownInline(block.name)}]`)
+    } else if (block.type === 'file') {
+      sections.push(
+        `[File attached: ${escapeMarkdownInline(block.name)}]\n\n${markdownCodeFence(block.text)}`,
+      )
+    } else if (block.type === 'tool_use') {
+      sections.push(`> Tool: ${escapeMarkdownInline(block.name)}`)
+    } else if (block.type === 'tool_result') {
+      const result = block.content
+        .replace(/\r\n?/g, '\n')
+        .split('\n')
+        .map((line) => `> ${line}`)
+        .join('\n')
+      sections.push(`> Tool result${block.isError ? ' (error)' : ''}:\n${result}`)
     }
-    
   }
   return sections.join('\n\n').trim()
+}
+
+function escapeMarkdownInline(value: string): string {
+  return value
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/([\\`*_[\]<>])/g, '\\$1')
+}
+
+function markdownCodeFence(value: string): string {
+  const normalized = value.replace(/\r\n?/g, '\n')
+  const backtickLength = longestMarkerRun(normalized, /`+/g) + 1
+  const tildeLength = longestMarkerRun(normalized, /~+/g) + 1
+  const marker = backtickLength <= tildeLength ? '`' : '~'
+  const fence = marker.repeat(Math.max(3, Math.min(backtickLength, tildeLength)))
+  return `${fence}\n${normalized}${normalized.endsWith('\n') ? '' : '\n'}${fence}`
+}
+
+function longestMarkerRun(value: string, pattern: RegExp): number {
+  let longest = 0
+  for (const match of value.matchAll(pattern)) longest = Math.max(longest, match[0].length)
+  return longest
 }
 
 function readContextUsage(value: unknown): ContextUsage | undefined {

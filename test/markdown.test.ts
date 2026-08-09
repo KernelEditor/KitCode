@@ -123,13 +123,33 @@ Alice| 30`
     ])
   })
 
-  it('single pipe line without a separator row falls back to paragraph', () => {
+  it('does not invent a table without a delimiter row', () => {
     const md = `just | some | text
 not a table really`
     const blocks = extractBlocks(md)
-    expect(blocks).toEqual([
-      { type: 'table', headers: ['just', 'some', 'text'], rows: [], colAligns: [] },
-      { type: 'paragraph', text: 'not a table really' },
+    expect(blocks).toEqual([{ type: 'paragraph', text: 'just | some | text not a table really' }])
+  })
+
+  it('requires at least three dashes in every table delimiter cell', () => {
+    const md = `| A | B |
+| - | - |
+| C | D |`
+    expect(extractBlocks(md)).toEqual([
+      { type: 'paragraph', text: '| A | B | | - | - | | C | D |' },
+    ])
+  })
+
+  it('supports empty cells and pipes escaped or wrapped in code spans', () => {
+    const md = `| A | B | C |
+|---|---|---|
+| x \\| y | | \`a|b\` |`
+    expect(extractBlocks(md)).toEqual([
+      {
+        type: 'table',
+        headers: ['A', 'B', 'C'],
+        rows: [['x | y', '', '`a|b`']],
+        colAligns: ['left', 'left', 'left'],
+      },
     ])
   })
 
@@ -164,6 +184,83 @@ not a table really`
     const blocks = extractBlocks(md)
     expect(blocks[0].type).toBe('paragraph')
     expect(blocks[0].text).toContain('bold')
+  })
+
+  it('accepts common fenced-code info strings', () => {
+    const md = '```c++ title="demo"\nstd::cout << "ok";\n```'
+    expect(extractBlocks(md)).toEqual([
+      { type: 'code', lang: 'c++', text: 'std::cout << "ok";' },
+    ])
+  })
+
+  it('normalizes lone carriage returns and preserves hard line breaks', () => {
+    expect(extractBlocks('first\r\rsecond')).toEqual([
+      { type: 'paragraph', text: 'first' },
+      { type: 'paragraph', text: 'second' },
+    ])
+    expect(extractBlocks('first  \nsecond')).toEqual([
+      { type: 'paragraph', text: 'first\nsecond' },
+    ])
+  })
+
+  it('parses setext headings and ordered-list starting numbers', () => {
+    expect(extractBlocks('Long title\n==========')).toEqual([
+      { type: 'heading', level: 1, text: 'Long title' },
+    ])
+    expect(extractBlocks('3. third\n4. fourth')).toEqual([
+      {
+        type: 'ol',
+        start: 3,
+        items: [
+          { type: 'paragraph', text: 'third' },
+          { type: 'paragraph', text: 'fourth' },
+        ],
+      },
+    ])
+  })
+
+  it('keeps indented list continuation text in its item', () => {
+    expect(extractBlocks('- first\n  indented\nlazy continuation')).toEqual([
+      { type: 'ul', items: [{ type: 'paragraph', text: 'first indented lazy continuation' }] },
+    ])
+  })
+
+  it('keeps a lazy blockquote continuation inside the quote', () => {
+    expect(extractBlocks('> first line\nlazy continuation')).toEqual([
+      { type: 'blockquote', text: 'first line\nlazy continuation' },
+    ])
+  })
+
+  it('preserves nested list structure', () => {
+    expect(extractBlocks('- parent\n  - child one\n  - child two\n- sibling')).toEqual([
+      {
+        type: 'ul',
+        items: [
+          {
+            type: 'paragraph',
+            text: 'parent',
+            children: [
+              {
+                type: 'ul',
+                items: [
+                  { type: 'paragraph', text: 'child one' },
+                  { type: 'paragraph', text: 'child two' },
+                ],
+              },
+            ],
+          },
+          { type: 'paragraph', text: 'sibling' },
+        ],
+      },
+    ])
+  })
+
+  it('bounds deeply nested lists instead of overflowing the stack', () => {
+    const markdown = Array.from(
+      { length: 100 },
+      (_, depth) => `${'  '.repeat(depth)}- level ${depth}`,
+    ).join('\n')
+    expect(() => extractBlocks(markdown)).not.toThrow()
   })
 
   it('parses ASCII table without pipe borders', () => {

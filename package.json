@@ -1,6 +1,6 @@
 {
   "name": "@kernelonpanic/kitcode",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Terminal coding agent with a config you never have to write by hand",
   "type": "module",
   "license": "MIT",
@@ -41,6 +41,7 @@
     "ink-text-input": "^6.0.0",
     "openai": "^7.3.0",
     "react": "^19.2.8",
+    "string-width": "^8.2.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
