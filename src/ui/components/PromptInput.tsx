@@ -181,7 +181,7 @@ export const PromptInput = memo(function PromptInput({
   const visible = suggestions.slice(start, start + WINDOW)
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    <Box flexDirection="column" marginTop={1} flexShrink={0}>
       <Box
         width="100%"
         borderStyle="round"

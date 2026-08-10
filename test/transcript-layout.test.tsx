@@ -96,8 +96,10 @@ describe('transcript layout', () => {
 })
 
 describe('terminal viewport', () => {
-  it('always leaves one terminal row outside Ink\'s changing frame', () => {
-    expect(interactiveViewportRows(24)).toBe(23)
+  it('leaves a blank row after Ink\'s trailing frame newline', () => {
+    expect(interactiveViewportRows(24)).toBe(22)
+    expect(interactiveViewportRows(Number.NaN)).toBe(22)
+    expect(interactiveViewportRows(3)).toBe(1)
     expect(interactiveViewportRows(1)).toBe(1)
   })
 
@@ -118,8 +120,86 @@ describe('terminal viewport', () => {
       { columns: 80 },
     )
 
-    expect(frame.split('\n')).toHaveLength(7)
+    expect(frame.split('\n')).toHaveLength(6)
     expect(frame).not.toContain('line 0')
     expect(frame).toContain('line 19')
+  })
+
+  it('keeps the footer visible when a long transcript reaches the viewport limit', () => {
+    const frame = renderToString(
+      <TerminalViewport rows={8}>
+        <Box
+          flexDirection="column"
+          flexGrow={1}
+          flexShrink={1}
+          minHeight={0}
+          overflowY="hidden"
+          justifyContent="flex-end"
+        >
+          {Array.from({ length: 20 }, (_, index) => (
+            <Text key={index}>stream {index}</Text>
+          ))}
+        </Box>
+        <Box flexDirection="column" flexShrink={0}>
+          <Text>prompt</Text>
+          <Text>status bottom</Text>
+        </Box>
+      </TerminalViewport>,
+      { columns: 80 },
+    )
+    const lines = frame.split('\n')
+
+    expect(lines).toHaveLength(6)
+    expect(frame).not.toContain('stream 0')
+    expect(frame).toContain('stream 19')
+    expect(lines.at(-2)).toContain('prompt')
+    expect(lines.at(-1)).toContain('status bottom')
+  })
+
+  it('collapses an idle frame instead of leaving an empty screen above the footer', () => {
+    const frame = renderToString(
+      <TerminalViewport rows={8}>
+        <Box flexGrow={1} flexShrink={1} minHeight={0} overflowY="hidden">
+          <Text>finished answer</Text>
+        </Box>
+        <Box flexDirection="column" flexShrink={0}>
+          <Text>prompt</Text>
+          <Text>status</Text>
+        </Box>
+      </TerminalViewport>,
+      { columns: 80 },
+    )
+
+    expect(frame.split('\n')).toEqual(['finished answer', 'prompt', 'status'])
+  })
+
+  it('keeps the live prompt next to an answer committed through Static', () => {
+    const frame = renderToString(
+      <TerminalViewport rows={24}>
+        <Transcript
+          workspace="/workspace/KitCode"
+          bubbles={[
+            {
+              kind: 'assistant',
+              id: 'assistant-1',
+              text: 'completed answer',
+              thinking: '',
+              streaming: false,
+            },
+          ]}
+        />
+        <Box flexDirection="column" flexShrink={0}>
+          <Text>prompt</Text>
+          <Text>status</Text>
+        </Box>
+      </TerminalViewport>,
+      { columns: 80 },
+    )
+    const lines = frame.split('\n')
+    const answerLine = lines.findIndex((line) => line.includes('completed answer'))
+    const promptLine = lines.findIndex((line) => line.includes('prompt'))
+
+    expect(answerLine).toBeGreaterThanOrEqual(0)
+    expect(promptLine - answerLine).toBeLessThanOrEqual(3)
   })
 })

@@ -50,7 +50,13 @@ export const Transcript = memo(function Transcript({ bubbles, workspace }: Trans
   const staticItems: StaticTranscriptItem[] = [HEADER, ...stableRef.current]
 
   return (
-    <Box flexDirection="column" marginBottom={1} flexShrink={1} overflowY="hidden">
+    <Box
+      flexDirection="column"
+      marginBottom={1}
+      flexShrink={1}
+      minHeight={0}
+      overflowY="hidden"
+    >
       <Static items={staticItems}>
         {(item) =>
           item.kind === 'header' ? (
@@ -64,6 +70,7 @@ export const Transcript = memo(function Transcript({ bubbles, workspace }: Trans
       <Box
         flexDirection="column"
         flexShrink={1}
+        minHeight={0}
         overflowY="hidden"
         justifyContent="flex-end"
       >

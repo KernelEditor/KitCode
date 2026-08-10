@@ -86,6 +86,7 @@ export function StatusBar({ status }: StatusBarProps) {
   return (
     <Box
       width="100%"
+      flexShrink={0}
       marginTop={1}
       paddingX={1}
       borderStyle="single"

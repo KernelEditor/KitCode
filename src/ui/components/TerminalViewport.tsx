@@ -2,14 +2,17 @@ import { Box } from 'ink'
 import type { ReactNode } from 'react'
 
 export function interactiveViewportRows(rows: number): number {
-  if (!Number.isFinite(rows)) return 23
-  return Math.max(1, Math.floor(rows) - 1)
+  if (!Number.isFinite(rows)) return 22
+  // Ink appends a newline after every non-fullscreen interactive frame. Keep
+  // another row free so that newline cannot scroll the Windows console and
+  // desynchronize subsequent incremental cursor updates.
+  return Math.max(1, Math.floor(rows) - 2)
 }
 
 /**
- * Keep Ink's changing output below the terminal's full height. Fullscreen
- * frames may be cleared on redraw by terminals on both Windows and Unix,
- * which resets the user's scrollback position while a response is streaming.
+ * Keep Ink's changing output plus its trailing newline below the terminal's
+ * full height. Reaching the bottom-right cell scrolls Windows consoles and
+ * leaves incremental redraws at the wrong cursor position.
  */
 export function TerminalViewport({ children, rows }: { children: ReactNode; rows: number }) {
   return (
