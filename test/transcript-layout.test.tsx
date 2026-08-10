@@ -1,7 +1,11 @@
 import { Box, Text, renderToString } from 'ink'
 import { describe, expect, it } from 'vitest'
 import { TerminalViewport, interactiveViewportRows } from '../src/ui/components/TerminalViewport'
-import { Transcript, firstMutableBubbleIndex } from '../src/ui/components/Transcript'
+import {
+  Transcript,
+  assistantThinkingForFrame,
+  firstMutableBubbleIndex,
+} from '../src/ui/components/Transcript'
 import type { Bubble } from '../src/ui/types'
 
 describe('transcript layout', () => {
@@ -72,6 +76,22 @@ describe('transcript layout', () => {
     ]
 
     expect(firstMutableBubbleIndex(bubbles)).toBe(1)
+  })
+
+  it('freezes thinking above a streamed answer until the final render', () => {
+    const streaming: Extract<Bubble, { kind: 'assistant' }> = {
+      kind: 'assistant',
+      id: 'assistant-1',
+      text: 'visible answer',
+      thinking: 'growing private reasoning',
+      streaming: true,
+    }
+
+    const frozen = assistantThinkingForFrame(streaming)
+    const later = { ...streaming, thinking: `${streaming.thinking}\nlater delta` }
+
+    expect(assistantThinkingForFrame(later, frozen)).toBe(streaming.thinking)
+    expect(assistantThinkingForFrame({ ...later, streaming: false }, frozen)).toBe(later.thinking)
   })
 })
 

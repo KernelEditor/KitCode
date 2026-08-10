@@ -11,6 +11,16 @@ import { Logo } from './Logo'
 
 const HEADER = { kind: 'header' } as const
 type StaticTranscriptItem = typeof HEADER | Bubble
+type AssistantBubble = Extract<Bubble, { kind: 'assistant' }>
+
+export function assistantThinkingForFrame(
+  bubble: AssistantBubble,
+  frozenThinking?: string,
+): string {
+  return bubble.streaming && bubble.text !== ''
+    ? (frozenThinking ?? bubble.thinking)
+    : bubble.thinking
+}
 
 export function firstMutableBubbleIndex(bubbles: Bubble[]): number {
   return bubbles.findIndex(
@@ -89,21 +99,7 @@ const BubbleView = memo(function BubbleView({ bubble }: { bubble: Bubble }) {
   }
 
   if (bubble.kind === 'assistant') {
-    return (
-      <Box flexDirection="column" marginTop={1}>
-        {bubble.thinking.trim() !== '' && (
-          <Text dimColor italic>
-            {bubble.thinking.trim()}
-          </Text>
-        )}
-        {bubble.streaming ? <Text>{bubble.text}</Text> : <Markdown>{bubble.text}</Markdown>}
-        {bubble.streaming && bubble.text === '' && (
-          <Text dimColor>
-            <Spinner type="dots" /> thinking
-          </Text>
-        )}
-      </Box>
-    )
+    return <AssistantView bubble={bubble} />
   }
 
   if (bubble.kind === 'subagent') {
@@ -112,6 +108,32 @@ const BubbleView = memo(function BubbleView({ bubble }: { bubble: Bubble }) {
 
   return <ToolView bubble={bubble} />
 })
+
+function AssistantView({ bubble }: { bubble: AssistantBubble }) {
+  const frozenThinking = useRef<string | undefined>(undefined)
+  const answering = bubble.streaming && bubble.text !== ''
+  if (!answering) frozenThinking.current = undefined
+  if (answering && frozenThinking.current === undefined) {
+    frozenThinking.current = bubble.thinking
+  }
+  const visibleThinking = assistantThinkingForFrame(bubble, frozenThinking.current)
+
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      {visibleThinking.trim() !== '' && (
+        <Text dimColor italic>
+          {visibleThinking.trim()}
+        </Text>
+      )}
+      {bubble.streaming ? <Text>{bubble.text}</Text> : <Markdown>{bubble.text}</Markdown>}
+      {bubble.streaming && bubble.text === '' && (
+        <Text dimColor>
+          <Spinner type="dots" /> thinking
+        </Text>
+      )}
+    </Box>
+  )
+}
 
 function ToolView({ bubble }: { bubble: Extract<Bubble, { kind: 'tool' }> }) {
   const theme = useTheme()

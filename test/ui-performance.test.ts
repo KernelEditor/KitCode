@@ -2,6 +2,7 @@ import { renderToString } from 'ink'
 import { createElement } from 'react'
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../src/core/types'
+import { TUI_RENDER_OPTIONS } from '../src/app/tui'
 import { normalizeOpenAiUsage } from '../src/providers/openai-compat'
 import { StatusBar } from '../src/ui/components/StatusBar'
 import { stringsFor, StringsContext } from '../src/ui/i18n'
@@ -9,6 +10,13 @@ import { makeTheme, ThemeContext } from '../src/ui/theme'
 import { applyEvents, emptyTranscript } from '../src/ui/transcript'
 
 describe('stream rendering', () => {
+  it('keeps unchanged streamed lines with bounded incremental rendering', () => {
+    expect(TUI_RENDER_OPTIONS).toMatchObject({
+      incrementalRendering: true,
+      maxFps: 30,
+    })
+  })
+
   it('applies a frame of small deltas as one assistant bubble', () => {
     const events: AgentEvent[] = Array.from({ length: 100 }, () => ({
       type: 'text_delta',
