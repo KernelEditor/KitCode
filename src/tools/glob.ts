@@ -27,6 +27,7 @@ export const globTool: Tool = {
     additionalProperties: false,
   },
   defaultPermission: 'allow',
+  readOnly: true,
   summarize(input) {
     return `glob(${brief((input as GlobInput).pattern)})`
   },

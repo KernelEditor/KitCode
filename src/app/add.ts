@@ -6,8 +6,9 @@ import {
   configLocation,
   initProjectConfig,
   loadAuth,
+  loadConfig,
+  loadGlobalConfig,
   loadProjectConfig,
-  loadRuntimeConfig,
   saveAuth,
   saveConfig,
 } from '../config/store'
@@ -37,7 +38,11 @@ export async function addProvider(
     await initProjectConfig(cwd)
     await trustWorkspace(cwd)
   }
-  const config = options.local ? await loadProjectConfig(cwd) : (await loadRuntimeConfig(cwd)).config
+  const config = options.local
+    ? await loadProjectConfig(cwd)
+    : process.env.KITCODE_CONFIG
+      ? await loadConfig(cwd)
+      : await loadGlobalConfig()
   const auth = await loadAuth()
   const configBefore = structuredClone(config)
   const authBefore = { ...auth }

@@ -31,6 +31,10 @@ export async function loadProjectConfig(dir: string): Promise<Config> {
   return loadConfigAt({ path: projectConfigPath(dir), scope: 'project' })
 }
 
+export async function loadGlobalConfig(): Promise<Config> {
+  return loadConfigAt({ path: configPath, scope: 'global' })
+}
+
 export interface RuntimeConfigLoad {
   config: Config
   ignoredProject?: ConfigLocation

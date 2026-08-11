@@ -51,6 +51,15 @@ describe('markdown rendering', () => {
     expect(output).toBe('both and italic and *literal*')
   })
 
+  it('renders a mixed Russian inline-formatting run without leaking syntax', () => {
+    const output = renderToString(
+      <Markdown>{'**жирный** *курсив* ~~зачёркнутый~~ `код` [ссылка](url) ![img](src)'}</Markdown>,
+      { columns: 120 },
+    )
+
+    expect(output).toBe('жирный курсив зачёркнутый код ссылка(url) [img: img]')
+  })
+
   it('does not mistake multiplication or identifiers for emphasis', () => {
     const output = renderToString(
       <Markdown>{'2 * 3 * 4 and foo_bar_baz'}</Markdown>,
@@ -81,6 +90,23 @@ describe('markdown rendering', () => {
       .filter((line) => line.includes('│'))
       .map((line) => stringWidth(line.slice(0, line.indexOf('│'))))
     expect(dividerColumns).toEqual([5, 5, 5])
+  })
+
+  it('aligns table separator junctions with padded column dividers', () => {
+    const output = renderToString(
+      <Markdown>{`| Сущность | Кризис | Причина |
+|---|---|---|
+| Человек | «В чём смысл?» | Слишком много свободы |
+| DevOps | «Почему прод упал?» | Слишком много переменных |`}</Markdown>,
+      { columns: 120 },
+    )
+    const lines = output.split('\n')
+    const header = lines[0] ?? ''
+    const separator = lines[1] ?? ''
+
+    const dividerColumns = [...header.matchAll(/│/g)].map((match) => stringWidth(header.slice(0, match.index)))
+    const junctionColumns = [...separator.matchAll(/┼/g)].map((match) => stringWidth(separator.slice(0, match.index)))
+    expect(junctionColumns).toEqual(dividerColumns)
   })
 
   it('fits wide tables into a narrow terminal without wrapping rows', () => {

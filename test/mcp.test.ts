@@ -66,11 +66,11 @@ describe('dynamic MCP connections', () => {
   it('connects a server added after startup, exposes its tools, and removes it', async () => {
     const servers: Record<string, McpServerConfig> = {}
     const manager = createMcpManager(servers)
-    const fixture = fileURLToPath(new URL('./fixtures/mcp-stdio-server.ts', import.meta.url))
+    const fixture = fileURLToPath(new URL('./fixtures/mcp-stdio-server.mjs', import.meta.url))
     servers.demo = {
       type: 'stdio',
       command: process.execPath,
-      args: ['--import', 'tsx', fixture],
+      args: [fixture],
       env: {},
       enabled: true,
     }

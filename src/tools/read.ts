@@ -29,6 +29,7 @@ export const readTool: Tool = {
     additionalProperties: false,
   },
   defaultPermission: 'allow',
+  readOnly: true,
   permission(input, ctx) {
     const target = (input as Partial<ReadInput> | null)?.path
     if (isSensitivePath(target)) return 'ask'

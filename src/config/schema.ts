@@ -86,10 +86,6 @@ export const diagnosticsSchema = z.object({
   commands: z.array(z.string().trim().min(1).max(20_000)).max(8).default([]),
 })
 
-export const updatesSchema = z.object({
-  checkOnStart: z.boolean().default(true),
-})
-
 export const configSchema = z.object({
   version: z.literal(1).default(1),
   model: z.string().optional(),
@@ -104,7 +100,6 @@ export const configSchema = z.object({
     maxSubagentsPerTurn: 3,
   }),
   diagnostics: diagnosticsSchema.default({ autoRun: true, commands: [] }),
-  updates: updatesSchema.default({ checkOnStart: false }),
   providers: z.record(providerIdSchema, providerConfigSchema).default({}),
   permissions: z.record(safeRecordKeySchema, permissionModeSchema).default({}),
   mcp: z.record(safeRecordKeySchema, mcpServerSchema).default({}),

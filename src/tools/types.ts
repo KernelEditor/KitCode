@@ -33,6 +33,7 @@ export interface Tool {
   description: string
   inputSchema: JsonSchema
   defaultPermission: PermissionMode
+  readOnly?: boolean
   permission?(input: unknown, ctx?: ToolContext): PermissionMode | undefined
   summarize(input: unknown): string
   preview?(input: unknown, ctx: ToolContext): Promise<ToolDisplay | undefined>

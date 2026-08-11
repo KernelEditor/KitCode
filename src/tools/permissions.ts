@@ -39,7 +39,7 @@ export function createPermissionEngine(
     decide(tool, requested) {
       const configured = resolve(tool, requested)
       if (configured === 'deny') return 'deny'
-      if (current === 'plan' && configured !== 'allow') return 'deny'
+      if (current === 'plan' && tool.readOnly !== true) return 'deny'
       if (configured === 'allow') return 'allow'
       if (bypassEnabled) return 'allow'
       if (current === 'accept' && isFileEdit(tool)) return 'allow'
@@ -51,8 +51,9 @@ export function createPermissionEngine(
     },
     denyReason(tool, requested) {
       const configured = resolve(tool, requested)
+      if (current === 'plan' && tool.readOnly !== true) return PLAN_REFUSAL
       if (configured === 'deny' || configured === 'allow') return undefined
-      return current === 'plan' ? PLAN_REFUSAL : undefined
+      return undefined
     },
     bypass: {
       enable() {

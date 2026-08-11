@@ -23,6 +23,7 @@ export function createSkillTool(skills: SkillMeta[]): Tool {
       additionalProperties: false,
     },
     defaultPermission: 'allow',
+    readOnly: true,
     summarize(input) {
       return `skill(${brief((input as SkillInput).name)})`
     },

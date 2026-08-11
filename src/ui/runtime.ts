@@ -79,7 +79,8 @@ export interface Runtime {
   loadClipboardImage(): Promise<ContentBlock>
   compact(history: Message[], signal: AbortSignal): Promise<CompactResult>
   checkerReport(): Promise<string>
-  startupUpdateCheck(): Promise<UpdateCheck> | null
+  startupUpdateCheck(): Promise<UpdateCheck>
+  checkForUpdates(): Promise<UpdateCheck>
   run(history: Message[], hooks: AgentHooks, signal: AbortSignal): Promise<Message[]>
   persist(history: Message[]): Promise<void>
 }

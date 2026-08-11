@@ -168,6 +168,58 @@ describe('legitimate turns still work', () => {
     expect(events.some((event) => event.type === 'tool_call')).toBe(true)
   })
 
+  it('rejects malformed tool arguments instead of executing an empty object', async () => {
+    const call = {
+      index: 0,
+      id: 'call_broken',
+      type: 'function',
+      function: { name: 'write', arguments: '{"path":' },
+    }
+    const provider = openAi(
+      await sseServer(sse({ tool_calls: [call] }, null) + sse({}, 'tool_calls')),
+    )
+
+    const events = collect(provider.stream(chatRequest()))
+    await expect(events).rejects.toBeInstanceOf(ProviderError)
+    await expect(events).rejects.toThrow(/malformed JSON arguments; the tool was not run/)
+  })
+
+  it('treats a user cancellation during partial tool JSON as a normal cancellation', async () => {
+    const call = {
+      index: 0,
+      id: 'call_cancelled',
+      type: 'function',
+      function: { name: 'write', arguments: '{"path":' },
+    }
+    const url = await startServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.write(sse({ tool_calls: [call] }, null))
+    })
+    const controller = new AbortController()
+    const events = collect(openAi(url).stream(chatRequest(controller.signal)))
+    setTimeout(() => controller.abort(), 20)
+
+    await expect(events).resolves.toContainEqual(
+      expect.objectContaining({ type: 'done', stopReason: 'aborted', content: [] }),
+    )
+  })
+
+  it('rejects non-object JSON tool arguments', async () => {
+    const call = {
+      index: 0,
+      id: 'call_array',
+      type: 'function',
+      function: { name: 'write', arguments: '[]' },
+    }
+    const provider = openAi(
+      await sseServer(sse({ tool_calls: [call] }, null) + sse({}, 'tool_calls')),
+    )
+
+    await expect(collect(provider.stream(chatRequest()))).rejects.toThrow(
+      /arguments must be a JSON object; the tool was not run/,
+    )
+  })
+
   it('accepts an SSE turn whose only text is whitespace', async () => {
     const provider = openAi(await sseServer(sse({ content: '   ' }, null) + sse({}, 'stop')))
 

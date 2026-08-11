@@ -1,5 +1,7 @@
-import { lstat, readFile, stat, writeFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { resolveInside } from './safepath'
+import { atomicWriteSafeFile, readSafeFileSnapshot } from './safe-write'
+import type { SafeFileSnapshot } from './safe-write'
 import { brief } from './summary'
 import type { Tool } from './types'
 
@@ -70,21 +72,14 @@ export const editTool: Tool = {
     const { path, oldString, newString, replaceAll = false } = input as EditInput
     const safe = resolveInside(ctx.cwd, path)
     if (!safe.ok) return { content: safe.reason, isError: true }
-
-    const linkInfo = await lstat(safe.path).catch(() => null)
-    if (linkInfo?.isSymbolicLink()) {
-      return { content: `Cannot edit ${path}: the path is a symbolic link. Remove the symlink first.`, isError: true }
+    let snapshot: SafeFileSnapshot
+    try {
+      snapshot = await readSafeFileSnapshot(safe.path, MAX_FILE_BYTES)
+    } catch (error) {
+      return { content: `Cannot edit ${path}: ${(error as Error).message}.`, isError: true }
     }
-
-    const info = await stat(safe.path).catch(() => null)
-    if (info && info.size > MAX_FILE_BYTES) {
-      return {
-        content: `Cannot edit ${path}: the file exceeds the ${MAX_FILE_BYTES / 1_000_000} MB limit.`,
-        isError: true,
-      }
-    }
-    const beforeBuffer = await readFile(safe.path).catch(() => null)
-    if (beforeBuffer === null) return { content: `Cannot read ${path}.`, isError: true }
+    if (!snapshot.exists) return { content: `Cannot read ${path}.`, isError: true }
+    const beforeBuffer = snapshot.data
     if (beforeBuffer.subarray(0, 8192).includes(0)) {
       return { content: `Cannot edit ${path}: it is a binary file, not text.`, isError: true }
     }
@@ -119,7 +114,7 @@ export const editTool: Tool = {
       return { content: `Checkpoint capture failed: ${(error as Error).message}`, isError: true }
     }
     try {
-      await writeFile(safe.path, after, 'utf8')
+      await atomicWriteSafeFile(safe.path, after, snapshot)
       ctx.checkpoint?.markChanged(safe.path)
     } catch (error) {
       return { content: `Failed to write ${path}: ${(error as Error).message}`, isError: true }

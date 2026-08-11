@@ -9,6 +9,12 @@ export function interactiveViewportRows(rows: number): number {
   return Math.max(1, Math.floor(rows) - 2)
 }
 
+const INTERACTIVE_CHROME_ROWS = 14
+
+export function liveTranscriptRows(rows: number): number {
+  return Math.max(1, interactiveViewportRows(rows) - INTERACTIVE_CHROME_ROWS)
+}
+
 /**
  * Keep Ink's changing output plus its trailing newline below the terminal's
  * full height. Reaching the bottom-right cell scrolls Windows consoles and

@@ -42,6 +42,7 @@ export const grepTool: Tool = {
     additionalProperties: false,
   },
   defaultPermission: 'allow',
+  readOnly: true,
   permission(input, ctx) {
     const { path, glob } = (input as Partial<GrepInput> | null) ?? {}
     if (isSensitivePath(path) || mentionsSensitivePattern(glob)) return 'ask'

@@ -57,8 +57,8 @@ export function createAnthropicProvider(args: {
   return {
     id: args.id,
     kind: 'anthropic',
-    stream: (req) => streamTurn(client, args.id, req),
-    listModels: () => listModels(client, args.id),
+    stream: (req) => streamTurn(client, args.id, args.apiKey, req),
+    listModels: () => listModels(client, args.id, args.apiKey),
     knownModels: () => KNOWN_MODELS,
   }
 }
@@ -66,6 +66,7 @@ export function createAnthropicProvider(args: {
 async function* streamTurn(
   client: Anthropic,
   providerId: string,
+  apiKey: string,
   req: ChatRequest,
 ): AsyncGenerator<StreamEvent> {
   const params: Anthropic.MessageStreamParams = {
@@ -112,9 +113,9 @@ async function* streamTurn(
     const limits = parseRateLimits(capture.headers())
     if (limits) yield { type: 'rate_limits', limits }
     if (events === 0 && capture.succeeded() && !isConnectionFailure(error)) {
-      throw await invalidStreamError(providerId, capture, error)
+      throw await invalidStreamError(providerId, capture, error, [apiKey])
     }
-    throw toProviderError(error, providerId)
+    throw toProviderError(error, providerId, [apiKey])
   }
 
   const stopReason = STOP_REASONS[final.stop_reason ?? ''] ?? 'end_turn'
@@ -136,7 +137,11 @@ async function* streamTurn(
   }
 }
 
-async function listModels(client: Anthropic, providerId: string): Promise<ModelInfo[]> {
+async function listModels(
+  client: Anthropic,
+  providerId: string,
+  apiKey: string,
+): Promise<ModelInfo[]> {
   try {
     const models: ModelInfo[] = []
     for await (const model of client.models.list({ limit: 100 })) {
@@ -150,7 +155,7 @@ async function listModels(client: Anthropic, providerId: string): Promise<ModelI
     }
     return models
   } catch (error) {
-    throw toProviderError(error, providerId)
+    throw toProviderError(error, providerId, [apiKey])
   }
 }
 

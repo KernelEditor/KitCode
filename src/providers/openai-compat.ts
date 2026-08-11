@@ -10,7 +10,7 @@ import {
 import { modelInfoFromRaw } from './model-info'
 import { pricingFor } from './pricing'
 import { parseRateLimits } from './rate-limits'
-import { emptyUsage } from './types'
+import { emptyUsage, ProviderError } from './types'
 import type {
   ChatRequest,
   ContentBlock,
@@ -59,8 +59,8 @@ export function createOpenAiProvider(args: {
   return {
     id: args.id,
     kind: 'openai',
-    stream: (req) => streamTurn(client, args.id, req),
-    listModels: () => listModels(client, args.id),
+    stream: (req) => streamTurn(client, args.id, args.apiKey, req),
+    listModels: () => listModels(client, args.id, args.apiKey),
     knownModels: () => [],
   }
 }
@@ -68,6 +68,7 @@ export function createOpenAiProvider(args: {
 async function* streamTurn(
   client: OpenAI,
   providerId: string,
+  apiKey: string,
   req: ChatRequest,
 ): AsyncGenerator<StreamEvent> {
   let text = ''
@@ -119,13 +120,15 @@ async function* streamTurn(
     if (!isUserAbort(error, req.signal)) {
       const limits = parseRateLimits(capture.headers())
       if (limits) yield { type: 'rate_limits', limits }
-      throw toProviderError(error, providerId)
+      throw toProviderError(error, providerId, [apiKey])
     }
     aborted = true
   }
 
-  const content = toContentBlocks(thinking, text, calls)
   if (aborted || req.signal?.aborted) {
+    // A cancelled stream may end halfway through a tool-call JSON payload. Do
+    // not parse or surface that partial call: no tool is going to run.
+    const content = toTextContentBlocks(thinking, text)
     if (sawUsage) yield { type: 'usage', usage }
     const limits = parseRateLimits(capture.headers())
     if (limits) yield { type: 'rate_limits', limits }
@@ -133,8 +136,9 @@ async function* streamTurn(
     return
   }
 
-  if (recognised === 0) throw await invalidStreamError(providerId, capture)
+  if (recognised === 0) throw await invalidStreamError(providerId, capture, undefined, [apiKey])
 
+  const content = toContentBlocks(providerId, thinking, text, calls)
   for (const block of content) {
     if (block.type === 'tool_use') {
       yield { type: 'tool_call', id: block.id, name: block.name, input: block.input }
@@ -153,7 +157,7 @@ function resolveStop(finishReason: string | null, hasCalls: boolean): StopReason
   return mapped ?? 'end_turn'
 }
 
-async function listModels(client: OpenAI, providerId: string): Promise<ModelInfo[]> {
+async function listModels(client: OpenAI, providerId: string, apiKey: string): Promise<ModelInfo[]> {
   try {
     const models: ModelInfo[] = []
     for await (const model of client.models.list()) {
@@ -162,7 +166,7 @@ async function listModels(client: OpenAI, providerId: string): Promise<ModelInfo
     }
     return models
   } catch (error) {
-    throw toProviderError(error, providerId)
+    throw toProviderError(error, providerId, [apiKey])
   }
 }
 
@@ -175,13 +179,12 @@ function accumulate(calls: Map<number, PartialCall>, delta: ToolCallDelta): void
 }
 
 function toContentBlocks(
+  providerId: string,
   thinking: string,
   text: string,
   calls: Map<number, PartialCall>,
 ): ContentBlock[] {
-  const content: ContentBlock[] = []
-  if (thinking) content.push({ type: 'thinking', text: thinking })
-  if (text) content.push({ type: 'text', text })
+  const content = toTextContentBlocks(thinking, text)
   const sorted = [...calls.entries()].sort((a, b) => a[0] - b[0])
   const tmpId = (position: number) => `call_${position}`
   for (const [position, [, call]] of sorted.entries()) {
@@ -189,19 +192,40 @@ function toContentBlocks(
       type: 'tool_use',
       id: call.id || tmpId(position),
       name: call.name,
-      input: parseArguments(call.args),
+      input: parseArguments(providerId, call.name, call.args),
     })
   }
   return content
 }
 
-function parseArguments(args: string): Record<string, unknown> {
-  if (!args) return {}
+function toTextContentBlocks(thinking: string, text: string): ContentBlock[] {
+  const content: ContentBlock[] = []
+  if (thinking) content.push({ type: 'thinking', text: thinking })
+  if (text) content.push({ type: 'text', text })
+  return content
+}
+
+function parseArguments(
+  providerId: string,
+  toolName: string,
+  args: string,
+): Record<string, unknown> {
+  let parsed: unknown
   try {
-    return JSON.parse(args) as Record<string, unknown>
+    parsed = JSON.parse(args)
   } catch {
-    return {}
+    throw new ProviderError(
+      `Tool "${toolName || 'unknown'}" returned malformed JSON arguments; the tool was not run.`,
+      providerId,
+    )
   }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new ProviderError(
+      `Tool "${toolName || 'unknown'}" arguments must be a JSON object; the tool was not run.`,
+      providerId,
+    )
+  }
+  return parsed as Record<string, unknown>
 }
 
 function toChatMessages(

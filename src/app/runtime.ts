@@ -99,7 +99,7 @@ export async function boot(options: {
   const warnings: string[] = []
   const workspaceRoot = await canonicalWorkspace(options.cwd)
   const workspaceTrusted = await isWorkspaceTrusted(options.cwd)
-  const startupUpdate = config.updates.checkOnStart ? checkForUpdates() : null
+  let startupUpdate: Promise<Awaited<ReturnType<typeof checkForUpdates>>> | undefined
   if (loadedConfig.ignoredProject) {
     warnings.push(
       `Project config ignored until this workspace is trusted: ${loadedConfig.ignoredProject.path}. ` +
@@ -820,7 +820,7 @@ export async function boot(options: {
       const states = mcp.states()
       const lines = [
         `KitCode ${KITCODE_VERSION} · ${KITCODE_COMMIT.slice(0, 12)}`,
-        `updates: ${config.updates.checkOnStart ? 'enabled' : 'disabled'}`,
+        'updates: npm check runs on every app start',
         `runtime: Node ${process.versions.node} · ${process.platform}/${process.arch}`,
         `workspace: ${options.cwd}`,
         `config: ${location.path}`,
@@ -849,7 +849,8 @@ export async function boot(options: {
       return lines.join('\n')
     },
 
-    startupUpdateCheck: () => startupUpdate,
+    startupUpdateCheck: () => (startupUpdate ??= checkForUpdates()),
+    checkForUpdates: () => checkForUpdates(),
 
     async run(history, hooks, signal) {
       syncMcpTools()

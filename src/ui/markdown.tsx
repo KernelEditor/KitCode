@@ -140,8 +140,14 @@ function TableView({ block }: { block: MdNode }) {
   }
   const colWidths = fitColumnWidths(naturalWidths, Math.max(1, columns))
 
-  // Build separator: ───┼───┼───
-  const separator = colWidths.map((w) => '─'.repeat(w)).join('┼')
+  // Row separators include a space on either side of each vertical bar. Make
+  // the junctions land in the same terminal columns as those bars.
+  const separator = colWidths
+    .map((width, index) => {
+      const edge = index === 0 || index === colWidths.length - 1
+      return '─'.repeat(width + (edge ? 1 : 2))
+    })
+    .join('┼')
 
   const lines: ReactNode[] = []
   allRows.forEach((row, rowIdx) => {

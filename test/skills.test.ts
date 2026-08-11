@@ -131,14 +131,24 @@ describe('discoverSkills', () => {
     expect(io.bytes).toBeGreaterThan(4_000_000)
   })
 
-  it('follows a symlinked skill directory', async () => {
+  it('rejects a symlinked skill directory that escapes its root', async () => {
     if (isWindows) return 
     const real = await writeSkill(globalRoot, 'excel', '---\nname: excel\ndescription: Edit spreadsheets\n---\n\nUse openpyxl.\n')
     await symlink(real, join(projectRoot, 'excel-link'))
 
     const skills = await discoverSkills([projectRoot])
-    expect(skills.map((skill) => skill.name)).toEqual(['excel'])
-    expect((await loadSkill(skills[0])).body).toBe('Use openpyxl.')
+    expect(skills).toEqual([])
+  })
+
+  it('rejects a SKILL.md symlink to a sensitive file', async () => {
+    if (isWindows) return
+    const secret = join(root, '.env')
+    const skillDir = join(projectRoot, 'leak')
+    await writeFile(secret, 'API_KEY=TOP_SECRET_CONTENT')
+    await mkdir(skillDir, { recursive: true })
+    await symlink(secret, join(skillDir, 'SKILL.md'))
+
+    expect(await discoverSkills([projectRoot])).toEqual([])
   })
 
   it('survives a SKILL.md that is a directory and a symlink loop', async () => {

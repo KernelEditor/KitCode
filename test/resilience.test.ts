@@ -197,6 +197,20 @@ describe('transient provider faults', () => {
     expect(error.message).not.toContain('\n')
     expect(isRetryableFailure(error)).toBe(false)
   })
+
+  it('redacts the configured key even when it has a nonstandard format', async () => {
+    const apiKey = 'tenant/custom.key+$value?private'
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(400, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: { message: `invalid credential ${apiKey}` } }))
+    })
+    const provider = createOpenAiProvider({ id: 'custom', apiKey, baseUrl: `${baseUrl}/v1` })
+
+    const error = (await failure(provider.listModels())) as ProviderError
+
+    expect(error.message).not.toContain(apiKey)
+    expect(error.message).toContain('[redacted]')
+  })
 })
 
 describe('cancellation and timeout stay distinct', () => {
@@ -293,14 +307,15 @@ describe('detectProvider timeouts', () => {
   }, 5_000)
 
   it('keeps a key echoed by the probed host out of the onboarding error', async () => {
+    const apiKey = 'tenant/custom.key+$value?private'
     const baseUrl = await startServer((_req, res) => {
       res.writeHead(401, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ error: 'invalid key sk-live-abcdef123456' }))
+      res.end(JSON.stringify({ error: `invalid key ${apiKey}` }))
     })
 
-    const error = (await failure(detectProvider(baseUrl, 'sk-live-abcdef123456'))) as Error
+    const error = (await failure(detectProvider(baseUrl, apiKey))) as Error
 
-    expect(error.message).not.toContain('sk-live-abcdef123456')
+    expect(error.message).not.toContain(apiKey)
     expect(error.message).toContain('[redacted]')
   }, 10_000)
 

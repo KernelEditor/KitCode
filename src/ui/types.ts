@@ -52,6 +52,7 @@ export interface PickerItem {
 export interface TranscriptProps {
   bubbles: Bubble[]
   workspace: string
+  maxLiveRows?: number
 }
 
 export interface StatusBarProps {

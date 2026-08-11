@@ -9,6 +9,7 @@ const names = (line: string) => matchCommands(line).map((command) => command.nam
 describe('matchCommands', () => {
   it('lists everything for a bare slash', () => {
     expect(matchCommands('/')).toHaveLength(COMMANDS.length)
+    expect(names('/up')).toContain('update')
   })
 
   it('prefers prefix matches', () => {

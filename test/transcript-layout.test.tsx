@@ -1,9 +1,14 @@
 import { Box, Text, renderToString } from 'ink'
 import { describe, expect, it } from 'vitest'
-import { TerminalViewport, interactiveViewportRows } from '../src/ui/components/TerminalViewport'
+import {
+  TerminalViewport,
+  interactiveViewportRows,
+  liveTranscriptRows,
+} from '../src/ui/components/TerminalViewport'
 import {
   Transcript,
   assistantThinkingForFrame,
+  clipTextToRows,
   firstMutableBubbleIndex,
 } from '../src/ui/components/Transcript'
 import type { Bubble } from '../src/ui/types'
@@ -101,6 +106,7 @@ describe('terminal viewport', () => {
     expect(interactiveViewportRows(Number.NaN)).toBe(22)
     expect(interactiveViewportRows(3)).toBe(1)
     expect(interactiveViewportRows(1)).toBe(1)
+    expect(liveTranscriptRows(24)).toBe(8)
   })
 
   it('clips changing output before it becomes a fullscreen frame', () => {
@@ -154,6 +160,44 @@ describe('terminal viewport', () => {
     expect(frame).toContain('stream 19')
     expect(lines.at(-2)).toContain('prompt')
     expect(lines.at(-1)).toContain('status bottom')
+  })
+
+  it('keeps the footer visible under one multiline streamed answer', () => {
+    const frame = renderToString(
+      <TerminalViewport rows={12}>
+        <Transcript
+          workspace="/workspace/KitCode"
+          maxLiveRows={4}
+          bubbles={[
+            {
+              kind: 'assistant',
+              id: 'assistant-stream',
+              text: Array.from({ length: 30 }, (_, index) => `streamed ${index}`).join('\n'),
+              thinking: '',
+              streaming: true,
+            },
+          ]}
+        />
+        <Box flexDirection="column" flexShrink={0}>
+          <Text>prompt bottom</Text>
+          <Text>status bottom</Text>
+        </Box>
+      </TerminalViewport>,
+      { columns: 80 },
+    )
+    const lines = frame.split('\n')
+
+    // Static writes the four-line logo to scrollback outside Yoga's live box.
+    expect(lines.length).toBeLessThanOrEqual(14)
+    expect(frame).toContain('streamed 29')
+    expect(frame).not.toContain('streamed 0\n')
+    expect(lines.at(-2)).toContain('prompt bottom')
+    expect(lines.at(-1)).toContain('status bottom')
+  })
+
+  it('clips wrapped streaming text from the start and keeps the newest rows', () => {
+    expect(clipTextToRows('one\ntwo\nthree\nfour', 3, 80)).toBe('…\nthree\nfour')
+    expect(clipTextToRows('123456789', 2, 4)).toBe('…\n9')
   })
 
   it('collapses an idle frame instead of leaving an empty screen above the footer', () => {

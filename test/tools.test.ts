@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { bashTool } from '../src/tools/bash'
 import { editTool } from '../src/tools/edit'
 import { grepTool } from '../src/tools/grep'
-import { createPermissionEngine } from '../src/tools/permissions'
+import { PLAN_REFUSAL, createPermissionEngine } from '../src/tools/permissions'
 import { readTool } from '../src/tools/read'
 import { resolveInside } from '../src/tools/safepath'
 import type { Tool, ToolContext } from '../src/tools/types'
@@ -160,6 +160,35 @@ describe('edit', () => {
     expect(order).toEqual(['capture:before', `changed:${safe.ok ? safe.path : ''}`])
   })
 
+  it('aborts if the file becomes a symlink after the safety check', async () => {
+    if (isWindows) return
+    const outside = await mkdtemp(join(tmpdir(), 'kitcode-edit-race-'))
+    const outsideFile = join(outside, 'outside.txt')
+    await writeFile(join(cwd, file), 'before')
+    await writeFile(outsideFile, 'outside')
+    try {
+      const result = await editTool.execute(
+        { path: file, oldString: 'before', newString: 'pwned' },
+        {
+          ...context(),
+          checkpoint: {
+            async capture(absolutePath) {
+              await rm(absolutePath)
+              await symlink(outsideFile, absolutePath)
+            },
+            markChanged() {},
+          },
+        },
+      )
+
+      expect(result.isError).toBe(true)
+      expect(result.content).toContain('destination changed')
+      expect(await readFile(outsideFile, 'utf8')).toBe('outside')
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
   it('refuses two matches without replaceAll and accepts them with it', async () => {
     await writeFile(join(cwd, file), 'x = 1\nx = 1\n')
     const ambiguous = await editTool.execute({ path: file, oldString: 'x = 1', newString: 'x = 2' }, context())
@@ -216,6 +245,35 @@ describe('write', () => {
     expect(order).toEqual([`capture:${canonical}`, `changed:${canonical}`])
   })
 
+  it('aborts if a destination is swapped for a symlink during the write', async () => {
+    if (isWindows) return
+    const outside = await mkdtemp(join(tmpdir(), 'kitcode-write-race-'))
+    const outsideFile = join(outside, 'outside.txt')
+    await writeFile(join(cwd, file), 'inside')
+    await writeFile(outsideFile, 'outside')
+    try {
+      const result = await writeTool.execute(
+        { path: file, content: 'pwned' },
+        {
+          ...context(),
+          checkpoint: {
+            async capture(absolutePath) {
+              await rm(absolutePath)
+              await symlink(outsideFile, absolutePath)
+            },
+            markChanged() {},
+          },
+        },
+      )
+
+      expect(result.isError).toBe(true)
+      expect(result.content).toContain('destination changed')
+      expect(await readFile(outsideFile, 'utf8')).toBe('outside')
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
   it('refuses to overwrite a binary file', async () => {
     const bin = 'blob.data'
     await writeFile(join(cwd, bin), Buffer.from([0x00, 0x01, 0x02, 0x03]))
@@ -251,6 +309,7 @@ describe('permission engine', () => {
     description: '',
     inputSchema: {},
     defaultPermission,
+    readOnly: name === 'read',
     summarize: () => name,
     execute: async () => ({ content: '' }),
   })
@@ -292,6 +351,7 @@ describe('agent modes', () => {
     description: '',
     inputSchema: {},
     defaultPermission,
+    readOnly: name === 'read',
     summarize: () => name,
     execute: async () => ({ content: '' }),
   })
@@ -338,6 +398,13 @@ describe('agent modes', () => {
     engine.bypass.enable()
     engine.mode.set('plan')
     expect(engine.decide(bash)).toBe('deny')
+  })
+
+  it('plan mode outranks an explicit allow for bash', () => {
+    const engine = createPermissionEngine({ bash: 'allow' })
+    engine.mode.set('plan')
+    expect(engine.decide(bash)).toBe('deny')
+    expect(engine.denyReason(bash)).toBe(PLAN_REFUSAL)
   })
 
   it('a configured deny still wins in every mode', () => {

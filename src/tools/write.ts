@@ -1,6 +1,8 @@
-import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { resolveInside } from './safepath'
+import { atomicWriteSafeFile, readSafeFileSnapshot } from './safe-write'
+import type { SafeFileSnapshot } from './safe-write'
 import { brief } from './summary'
 import type { Tool } from './types'
 
@@ -60,33 +62,30 @@ export const writeTool: Tool = {
     }
     const safe = resolveInside(ctx.cwd, path)
     if (!safe.ok) return { content: safe.reason, isError: true }
-
-    const linkInfo = await lstat(safe.path).catch(() => null)
-    if (linkInfo?.isSymbolicLink()) {
-      return { content: `Cannot write ${path}: the path is a symbolic link. Remove the symlink first.`, isError: true }
-    }
-
-    const beforeInfo = await stat(safe.path).catch(() => null)
-    if (beforeInfo && beforeInfo.size > MAX_FILE_BYTES) {
-      return {
-        content: `Cannot replace ${path}: the existing file exceeds the ${MAX_FILE_BYTES / 1_000_000} MB limit.`,
-        isError: true,
-      }
-    }
-    const beforeBuffer = await readFile(safe.path).catch(() => null)
-    if (beforeBuffer instanceof Buffer && beforeBuffer.subarray(0, 8192).includes(0)) {
-      return { content: `Cannot write ${path}: the existing file is binary, not text.`, isError: true }
-    }
-    let before = ''
-    if (beforeBuffer) before = beforeBuffer.toString('utf8')
+    let target = safe.path
+    let snapshot: SafeFileSnapshot
     try {
-      await mkdir(dirname(safe.path), { recursive: true })
-      await ctx.checkpoint?.capture(safe.path)
-      await writeFile(safe.path, content, 'utf8')
-      ctx.checkpoint?.markChanged(safe.path)
+      await mkdir(dirname(target), { recursive: true })
+      const rechecked = resolveInside(ctx.cwd, path)
+      if (!rechecked.ok || rechecked.path !== target) {
+        return {
+          content: `Cannot write ${path}: the path changed while its parent was created.`,
+          isError: true,
+        }
+      }
+      target = rechecked.path
+      snapshot = await readSafeFileSnapshot(target, MAX_FILE_BYTES)
+      if (snapshot.exists && snapshot.data.subarray(0, 8192).includes(0)) {
+        return { content: `Cannot write ${path}: the existing file is binary, not text.`, isError: true }
+      }
+      await ctx.checkpoint?.capture(target)
+      await atomicWriteSafeFile(target, content, snapshot)
+      ctx.checkpoint?.markChanged(target)
     } catch (error) {
       return { content: `Failed to write ${path}: ${(error as Error).message}`, isError: true }
     }
+
+    const before = snapshot.exists ? snapshot.data.toString('utf8') : ''
 
     const lines = content === '' ? 0 : content.replace(/\n$/, '').split('\n').length
     return {

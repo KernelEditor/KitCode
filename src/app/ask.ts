@@ -18,6 +18,13 @@ export async function ask(
 
   for (const warning of warnings) console.error(sanitizeTerminalText(warning))
 
+  const update = await runtime.startupUpdateCheck()
+  if (update.status === 'available') {
+    console.error(
+      `A newer KitCode version is available (${update.latest}). Update with: npm install -g @kernelonpanic/kitcode@latest\n${update.url}`,
+    )
+  }
+
   const controller = new AbortController()
   const onInterrupt = () => controller.abort()
   process.on('SIGINT', onInterrupt)

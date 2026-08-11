@@ -82,7 +82,7 @@ export async function detectProvider(
     if (!attempt.ok && attempt.status !== 404 && attempt.status !== 0) break
   }
 
-  throw new Error(describeFailure(last!))
+  throw new Error(describeFailure(last!, apiKey))
 }
 
 export function normaliseBaseUrl(rawUrl: string): string {
@@ -252,9 +252,9 @@ function stringList(value: unknown): string[] {
   return value.filter((item): item is string => typeof item === 'string')
 }
 
-function describeFailure(attempt: Probe): string {
+function describeFailure(attempt: Probe, apiKey: string): string {
   const status = attempt.status === 0 ? 'request failed' : `HTTP ${attempt.status}`
-  const snippet = redactSecrets(attempt.text.trim()).slice(0, 200)
+  const snippet = redactSecrets(attempt.text.trim(), [apiKey]).slice(0, 200)
   const detail = snippet === '' ? '' : `: ${snippet}`
   return `No OpenAI- or Anthropic-compatible API found at ${attempt.url} (${status})${detail}`
 }

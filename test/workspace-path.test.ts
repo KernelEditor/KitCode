@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { describe, expect, it } from 'vitest'
 import { Logo } from '../src/ui/components/Logo'
 import { formatWorkspacePath } from '../src/ui/workspace'
+import { KITCODE_VERSION } from '../src/version'
 
 describe('workspace path in the header', () => {
   it('replaces the home directory with a tilde', () => {
@@ -37,6 +38,6 @@ describe('workspace path in the header', () => {
     )
 
     expect(frame).toContain('kitcode')
-    expect(frame).toContain('v1.2.3')
+    expect(frame).toContain(`v${KITCODE_VERSION}`)
   })
 })

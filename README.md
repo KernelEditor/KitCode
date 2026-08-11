@@ -198,13 +198,14 @@ Minimal manual provider configuration:
 }
 ```
 
-The main settings are `model`, `effort`, `thinking`, `maxTokens`, `budget`, `diagnostics`, `updates`,
+The main settings are `model`, `effort`, `thinking`, `maxTokens`, `budget`, and `diagnostics`,
 `theme`, `permissions`, `providers`, and `mcp`. `budget` controls local per-message safety limits for model
 requests, tokens, estimated cost (when model pricing is available), and subagents. These values are
 not the provider's account balance or rate limits. `diagnostics.autoRun`
 enables checks after file edits; `diagnostics.commands` can replace automatic detection with up to
-eight explicit commands. The GitHub startup check is present but disabled by default with
-`updates.checkOnStart: false`; no update request is made in that state. Manual editing is usually unnecessary: add a provider during onboarding
+eight explicit commands. KitCode checks npm for a newer version on every app start and prints the
+upgrade command when one is available. `/update` repeats the check manually.
+Manual editing is usually unnecessary: add a provider during onboarding
 or with `/login`.
 
 Project settings and project skills are enabled after reviewing the workspace and running:

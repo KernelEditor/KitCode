@@ -21,6 +21,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'mcp', args: '[add|list|delete|enable|disable]' },
   { name: 'attach', args: '<path|clipboard|clear>' },
   { name: 'compact' },
+  { name: 'update' },
   { name: 'checker' },
   { name: 'sessions', args: '[list|rename|delete [all]|export]' },
   { name: 'config' },

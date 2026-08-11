@@ -10,7 +10,15 @@ process.env.KITCODE_HOME = home
 delete process.env.KITCODE_CONFIG
 
 const { authPath, configPath, homeDir, resolveConfigLocation, trustPath } = await import('../src/config/paths')
-const { configLocation, loadConfig, loadProjectConfig, loadRuntimeConfig, saveAuth, saveConfig } = await import('../src/config/store')
+const {
+  configLocation,
+  loadConfig,
+  loadGlobalConfig,
+  loadProjectConfig,
+  loadRuntimeConfig,
+  saveAuth,
+  saveConfig,
+} = await import('../src/config/store')
 const { isWorkspaceTrusted, revokeWorkspaceTrust, trustWorkspace } = await import('../src/config/trust')
 
 const workspace = await mkdtemp(path.join(tmpdir(), 'kitcode-cfg-ws-'))
@@ -120,6 +128,21 @@ describe('saveConfig', () => {
     const config = await loadConfig(nested)
     await saveConfig(config)
     expect((await stat(workspace)).mode & 0o777).toBe(0o755)
+  })
+
+  it('can explicitly update global config without touching a trusted project config', async () => {
+    await trustWorkspace(workspace)
+    const projectBefore = await readFile(projectFile, 'utf8')
+    const config = await loadGlobalConfig()
+
+    config.providers.demo = { type: 'openai', baseUrl: 'https://example.test/v1' }
+    await saveConfig(config)
+
+    expect(await configLocation()).toEqual({ path: configPath, scope: 'global' })
+    expect(JSON.parse(await readFile(configPath, 'utf8')).providers.demo.baseUrl).toBe(
+      'https://example.test/v1',
+    )
+    expect(await readFile(projectFile, 'utf8')).toBe(projectBefore)
   })
 })
 

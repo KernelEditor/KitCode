@@ -32,7 +32,11 @@ const CONNECTION_REASONS: Record<string, string> = {
   UNABLE_TO_VERIFY_LEAF_SIGNATURE: 'the TLS certificate chain cannot be verified',
 }
 
-export function describeProviderFailure(error: unknown, providerId: string): string {
+export function describeProviderFailure(
+  error: unknown,
+  providerId: string,
+  knownSecrets: Iterable<string> = [],
+): string {
   const abort = abortKind(error)
   if (abort === 'user') return `Request to "${providerId}" was cancelled.`
   if (abort === 'timeout') {
@@ -40,14 +44,14 @@ export function describeProviderFailure(error: unknown, providerId: string): str
   }
 
   const status = statusOf(error)
-  if (status !== undefined) return describeStatus(status, providerId, error)
+  if (status !== undefined) return describeStatus(status, providerId, error, knownSecrets)
 
-  const reason = connectionReason(error)
+  const reason = connectionReason(error, knownSecrets)
   if (reason) {
     return `Cannot reach "${providerId}": ${reason}. Check the base URL and your network.`
   }
 
-  return `Request to "${providerId}" failed — ${snippet(messageOf(error))}`
+  return `Request to "${providerId}" failed — ${snippet(messageOf(error), 160, knownSecrets)}`
 }
 
 export function isRetryableFailure(error: unknown): boolean {
@@ -74,8 +78,12 @@ export function isConnectionFailure(error: unknown): boolean {
   return connectionReason(error) !== undefined
 }
 
-export function toProviderError(error: unknown, providerId: string): ProviderError {
-  return new ProviderError(describeProviderFailure(error, providerId), providerId, statusOf(error), {
+export function toProviderError(
+  error: unknown,
+  providerId: string,
+  knownSecrets: Iterable<string> = [],
+): ProviderError {
+  return new ProviderError(describeProviderFailure(error, providerId, knownSecrets), providerId, statusOf(error), {
     cause: error,
   })
 }
@@ -136,8 +144,9 @@ export async function invalidStreamError(
   providerId: string,
   capture: ResponseCapture,
   cause?: unknown,
+  knownSecrets: Iterable<string> = [],
 ): Promise<ProviderError> {
-  const excerpt = snippet(await capture.head(), EXCERPT_CHARS)
+  const excerpt = snippet(await capture.head(), EXCERPT_CHARS, knownSecrets)
   const detail = excerpt === '' ? 'the body was empty' : `the body began: ${excerpt}`
   return new ProviderError(
     `"${providerId}" returned a response that is not a valid streaming chat completion — no stream events arrived and ${detail}. The endpoint may speak a different protocol than the one configured for it.`,
@@ -147,8 +156,13 @@ export async function invalidStreamError(
   )
 }
 
-function describeStatus(status: number, providerId: string, error: unknown): string {
-  const detail = detailOf(error, status)
+function describeStatus(
+  status: number,
+  providerId: string,
+  error: unknown,
+  knownSecrets: Iterable<string>,
+): string {
+  const detail = detailOf(error, status, knownSecrets)
   const wait = retryAfterSeconds(error)
   const after = wait === undefined ? undefined : `retry after ${wait}s`
 
@@ -189,7 +203,7 @@ function abortKind(error: unknown): 'user' | 'timeout' | undefined {
   return undefined
 }
 
-function connectionReason(error: unknown): string | undefined {
+function connectionReason(error: unknown, knownSecrets: Iterable<string> = []): string | undefined {
   const links = chain(error)
   for (const link of links) {
     for (const candidate of [link, ...siblings(link)]) {
@@ -200,10 +214,14 @@ function connectionReason(error: unknown): string | undefined {
   }
 
   const deepest = links[links.length - 1]
-  if (links.length > 1 && deepest instanceof Error) return snippet(deepest.message)
+  if (links.length > 1 && deepest instanceof Error) {
+    return snippet(deepest.message, 160, knownSecrets)
+  }
 
   const message = messageOf(error)
-  return /fetch failed|connection error|socket|network/i.test(message) ? snippet(message) : undefined
+  return /fetch failed|connection error|socket|network/i.test(message)
+    ? snippet(message, 160, knownSecrets)
+    : undefined
 }
 
 function chain(error: unknown): unknown[] {
@@ -242,9 +260,9 @@ function header(error: unknown, name: string): string | undefined {
   return typeof value === 'string' ? value : undefined
 }
 
-function detailOf(error: unknown, status: number): string {
+function detailOf(error: unknown, status: number, knownSecrets: Iterable<string>): string {
   const raw = bodyMessage(error) ?? messageOf(error).replace(new RegExp(`^${status}\\s+`), '')
-  const text = snippet(raw)
+  const text = snippet(raw, 160, knownSecrets)
   if (text === '' || text === String(status) || text === 'status code (no body)') return ''
   return ` — ${text}`
 }
@@ -264,8 +282,8 @@ function messageOf(error: unknown): string {
   return String(error)
 }
 
-function snippet(text: string, limit = 160): string {
-  return redactSecrets(oneLine(text)).slice(0, limit)
+function snippet(text: string, limit = 160, knownSecrets: Iterable<string> = []): string {
+  return redactSecrets(oneLine(text), knownSecrets).slice(0, limit)
 }
 
 function oneLine(text: string): string {

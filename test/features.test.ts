@@ -245,29 +245,42 @@ describe('context compaction', () => {
 })
 
 describe('update checking', () => {
-  it('is disabled by default while the repository is private', () => {
-    expect(configSchema.parse({}).updates).toEqual({ checkOnStart: false })
+  it('cannot be disabled by a stale config flag', () => {
+    expect(configSchema.parse({ updates: { checkOnStart: false } })).not.toHaveProperty('updates')
   })
 
-  it('compares an embedded commit with GitHub only when explicitly invoked', async () => {
-    const current = 'a'.repeat(40)
-    const fetcher = vi.fn(async () =>
-      new Response(JSON.stringify({ sha: 'b'.repeat(40), html_url: 'https://github.com/example' }), {
+  it('compares the installed semver with the latest npm package', async () => {
+    const fetcher = vi.fn(async (_input: string | URL | Request) =>
+      new Response(JSON.stringify({ version: '1.3.0' }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       }),
     )
-    await expect(checkForUpdates(fetcher as typeof fetch, current)).resolves.toMatchObject({
+    await expect(checkForUpdates(fetcher as typeof fetch, '1.2.3')).resolves.toEqual({
       status: 'available',
-      current,
-      latest: 'b'.repeat(40),
+      current: '1.2.3',
+      latest: '1.3.0',
+      url: 'https://www.npmjs.com/package/@kernelonpanic/kitcode/v/1.3.0',
     })
     expect(fetcher).toHaveBeenCalledOnce()
+    expect(fetcher.mock.calls[0]?.[0]).toContain('registry.npmjs.org')
+  })
 
-    fetcher.mockClear()
-    await expect(checkForUpdates(fetcher as typeof fetch, 'development')).resolves.toMatchObject({
-      status: 'unknown',
+  it('handles current, prerelease, and malformed npm versions', async () => {
+    const response = (version: string) =>
+      vi.fn(async () => new Response(JSON.stringify({ version }), { status: 200 }))
+
+    await expect(checkForUpdates(response('1.2.3') as typeof fetch, '1.2.3')).resolves.toEqual({
+      status: 'current',
+      current: '1.2.3',
+      latest: '1.2.3',
     })
-    expect(fetcher).not.toHaveBeenCalled()
+    await expect(checkForUpdates(response('1.2.3') as typeof fetch, '1.2.3-beta.1')).resolves.toMatchObject({
+      status: 'available',
+    })
+    await expect(checkForUpdates(response('latest') as typeof fetch, '1.2.3')).resolves.toMatchObject({
+      status: 'unknown',
+      reason: expect.stringContaining('valid version'),
+    })
   })
 })

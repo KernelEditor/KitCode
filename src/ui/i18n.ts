@@ -101,6 +101,8 @@ export interface Strings {
   sessionActionDelete: string
   sessionActionExport: string
   updateAvailable: (version: string, url: string) => string
+  updateCurrent: (version: string) => string
+  updateFailed: (reason: string) => string
   accentSet: (name: string, hex: string) => string
   reasoning: (on: boolean) => string
   effortSet: (value: string) => string
@@ -260,7 +262,10 @@ const en: Strings = {
   sessionActionRename: 'rename',
   sessionActionDelete: 'delete',
   sessionActionExport: 'export Markdown',
-  updateAvailable: (version, url) => `A newer KitCode build is available (${version}): ${url}`,
+  updateAvailable: (version, url) =>
+    `A newer KitCode version is available (${version}). Update with:\nnpm install -g @kernelonpanic/kitcode@latest\n${url}`,
+  updateCurrent: (version) => `KitCode ${version} is up to date.`,
+  updateFailed: (reason) => `Could not check for updates: ${reason}.`,
   accentSet: (name, hex) => `Accent: ${name} (${hex})`,
   reasoning: (on) => `Reasoning ${on ? 'on' : 'off'}`,
   effortSet: (value) => `Effort: ${value}`,
@@ -339,6 +344,7 @@ const en: Strings = {
     'mcp disable': 'disconnect without removing an MCP server',
     attach: 'attach an image or text file to the next message',
     compact: 'summarize older context and keep recent turns',
+    update: 'check npm for a newer KitCode version',
     checker: 'check local setup without spending model tokens',
     sessions: 'search and manage saved sessions',
     'sessions list': 'list saved sessions',
@@ -461,7 +467,10 @@ const ru: Strings = {
   sessionActionRename: 'переименовать',
   sessionActionDelete: 'удалить',
   sessionActionExport: 'экспортировать Markdown',
-  updateAvailable: (version, url) => `Доступна новая версия KitCode (${version}): ${url}`,
+  updateAvailable: (version, url) =>
+    `Доступна новая версия KitCode (${version}). Обновить:\nnpm install -g @kernelonpanic/kitcode@latest\n${url}`,
+  updateCurrent: (version) => `Установлена актуальная версия KitCode ${version}.`,
+  updateFailed: (reason) => `Не удалось проверить обновления: ${reason}.`,
   accentSet: (name, hex) => `Цвет: ${name} (${hex})`,
   reasoning: (on) => `Размышления ${on ? 'включены' : 'выключены'}`,
   effortSet: (value) => `Глубина: ${value}`,
@@ -538,6 +547,7 @@ const ru: Strings = {
     'mcp disable': 'отключить MCP без удаления',
     attach: 'прикрепить картинку или текстовый файл к сообщению',
     compact: 'сжать старый контекст, сохранив последние ходы',
+    update: 'проверить новую версию KitCode в npm',
     checker: 'проверить настройку без траты токенов модели',
     sessions: 'поиск и управление сохранёнными сессиями',
     'sessions list': 'список сохранённых сессий',
