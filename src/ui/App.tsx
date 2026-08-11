@@ -16,7 +16,7 @@ import { PermissionPrompt } from './components/PermissionPrompt'
 import { Picker } from './components/Picker'
 import { PromptInput } from './components/PromptInput'
 import { StatusBar } from './components/StatusBar'
-import { TerminalViewport } from './components/TerminalViewport'
+import { TerminalViewport, liveTranscriptRows } from './components/TerminalViewport'
 import { Transcript } from './components/Transcript'
 import { appendInputHistory } from './history'
 import { LANGS, StringsContext, stringsFor } from './i18n'
@@ -168,11 +168,10 @@ export function App({
 
   useEffect(() => {
     const check = runtime.startupUpdateCheck()
-    if (!check) return
     let active = true
     void check.then((result) => {
       if (active && result.status === 'available') {
-        notice('info', strings.updateAvailable(result.latest.slice(0, 12), result.url))
+        notice('info', strings.updateAvailable(result.latest, result.url))
       }
     })
     return () => {
@@ -504,6 +503,18 @@ export function App({
         case 'config':
           notice('info', strings.configAt(runtime.configPath()))
           return
+
+        case 'update': {
+          const result = await runtime.checkForUpdates()
+          if (result.status === 'available') {
+            notice('info', strings.updateAvailable(result.latest, result.url))
+          } else if (result.status === 'current') {
+            notice('info', strings.updateCurrent(result.current))
+          } else {
+            notice('warn', strings.updateFailed(result.reason))
+          }
+          return
+        }
 
         case 'login':
           setSetup(true)
@@ -1301,6 +1312,10 @@ export function App({
       return
     }
     if (!key.escape) return
+    if (input !== '') {
+      setInput('')
+      return
+    }
     if (busy && abort.current) {
       abort.current.abort()
       queueRef.current = []
@@ -1362,6 +1377,7 @@ export function App({
         key={transcriptRevision}
         bubbles={transcript.bubbles}
         workspace={runtime.cwd}
+        maxLiveRows={liveTranscriptRows(rows)}
       />
 
       {overlay.kind === 'permission' && (
