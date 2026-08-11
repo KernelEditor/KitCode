@@ -88,7 +88,7 @@ http://localhost:11434/v1
 | `kitcode -r <id>` | Resume a session by id. |
 | `kitcode --cwd <path>` | Use another working directory. |
 | `kitcode --model <provider/model>` | Start with a selected model. |
-| `kitcode --mode <normal\|accept\|plan>` | Select the initial agent mode. |
+| `kitcode --mode <normal|accept|plan>` | Select the initial agent mode. |
 | `kitcode sessions` | List saved sessions. |
 | `kitcode ask "question"` | Run one request without the TUI. |
 | `kitcode add <url>` | Add a provider; the key is entered in a hidden prompt. |
@@ -112,17 +112,21 @@ Press `/` to open the command list.
 | `/effort` · `/thinking` | Configure reasoning depth and output. |
 | `/resume` · `/clear` | Resume a session or start a new one. |
 | `/sessions` | Search sessions, then resume, rename, delete, or export one. |
+| `/sessions list` | List all saved sessions. |
 | `/sessions rename <id> <title>` | Give a saved session a title. |
+| `/sessions delete <id>` | Delete a saved session. |
 | `/sessions delete all` | Delete every saved chat after two separate confirmations. |
 | `/sessions export <id> [path]` | Export a session to a private Markdown file (default: `.kitcode-exports/`). |
 | `/attach <path>` · `/attach clipboard` · `/attach clear` | Manage attachments for the next message. |
 | `/compact` | Replace older conversation context with a concise model-generated summary. |
+| `/update` | Check npm for a newer KitCode version. |
 | `/subagents` | Show the current number of active sub-agents. |
 | `/undo` | Undo built-in file edits from the latest message. |
 | `/usage` | Show tokens, requests, cost, balance/key limits, and response rate-limit headers when available. |
 | `/checker` | Check the local setup and provider model listing without sending a paid chat request. |
 | `/prompt` | Insert a saved prompt. |
 | `/prompt save <name>` | Save the latest message as a prompt. |
+| `/prompt delete <name>` | Delete a saved prompt. |
 | `/skills` | Show discovered skills. |
 | `/mcp add <name> <https://url>` | Add and connect a remote MCP server. |
 | `/mcp add <name> -- <command> [args]` | Add and connect a local MCP server. |
