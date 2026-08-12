@@ -75,12 +75,14 @@ describe('attachments', () => {
     })
   })
 
-  it('never auto-attaches a pasted path outside the workspace', async () => {
+  it('auto-attaches a pasted path outside the workspace', async () => {
     const externalDir = await mkdtemp(path.join(tmpdir(), 'kitcode-feature-external-'))
     try {
       const file = path.join(externalDir, 'innocent-looking.txt')
       await writeFile(file, 'private outside-workspace text', 'utf8')
-      await expect(loadAutomaticAttachment(scratch, file)).resolves.toBeNull()
+      await expect(loadAutomaticAttachment(scratch, file)).resolves.toMatchObject({
+        block: { type: 'file', text: 'private outside-workspace text' },
+      })
       await expect(loadAttachment(scratch, file)).resolves.toMatchObject({
         block: { type: 'file', text: 'private outside-workspace text' },
       })

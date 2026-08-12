@@ -1312,8 +1312,11 @@ export function App({
       return
     }
     if (!key.escape) return
-    if (input !== '') {
+    if (input !== '' || attachmentsRef.current.length > 0) {
       setInput('')
+      replaceAttachments([])
+      if (automaticAttachmentTask.current) automaticAttachmentTask.current = null
+      if (clipboardPasteTask.current) clipboardPasteTask.current = null
       return
     }
     if (busy && abort.current) {

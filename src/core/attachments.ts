@@ -1,10 +1,9 @@
 import { execFile } from 'node:child_process'
-import { lstat, readFile, stat } from 'node:fs/promises'
+import { lstat, readdir, readFile, stat } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { ContentBlock, FileBlock, ImageBlock } from '../providers/types'
-import { resolveInside } from '../tools/safepath'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_TEXT_BYTES = 256 * 1024
@@ -51,6 +50,11 @@ export async function loadAttachment(cwd: string, requestedPath: string): Promis
     if (error.code === 'ENOENT') throw new Error(`Attachment not found: ${resolved}`)
     throw error
   })
+  if (info.isDirectory()) {
+    const attachment = await loadFirstImageFromDirectory(resolved)
+    if (attachment) return attachment
+    throw new Error(`No supported images found in directory: ${path.basename(resolved)}`)
+  }
   if (!info.isFile()) throw new Error(`Attachment is not a regular file: ${resolved}`)
 
   return loadResolvedAttachment(resolved, info.size)
@@ -61,12 +65,7 @@ export async function loadAutomaticAttachment(
   requestedPath: string,
 ): Promise<LoadedAttachment | null> {
   if (!looksLikeAttachmentPath(requestedPath)) return null
-  const requested = resolveAttachmentPath(cwd, requestedPath)
-  // Pasting a path is an implicit action. Only auto-attach files inside the
-  // current workspace; /attach remains available for an intentional external file.
-  const safe = resolveInside(cwd, requested)
-  if (!safe.ok || safe.relative === '') return null
-  const resolved = safe.path
+  const resolved = resolveAttachmentPath(cwd, requestedPath)
   // Check sensitive files first — they always require explicit /attach
   if (isSensitiveAutomaticPath(resolved)) {
     throw new Error(
@@ -79,13 +78,17 @@ export async function loadAutomaticAttachment(
     if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null
     throw error
   })
+  if (info?.isDirectory()) return loadFirstImageFromDirectory(resolved)
   if (!info?.isFile()) return null
   return loadResolvedAttachment(resolved, info.size)
 }
 
+const MAX_PATH_CHARS = 2048
+
 export function looksLikeAttachmentPath(value: string): boolean {
   const trimmed = value.trim()
   if (!trimmed || /[\r\n\0]/.test(trimmed)) return false
+  if (trimmed.length > MAX_PATH_CHARS) return false
   const candidate = normalizeInputPath(trimmed)
   if (/^file:\/\//i.test(candidate)) return true
   if (path.isAbsolute(candidate)) return true
@@ -165,6 +168,21 @@ async function loadResolvedAttachment(resolved: string, size: number): Promise<L
     bytes: data.length,
     block: { type: 'file', mediaType: textMime(resolved), text, name },
   }
+}
+
+async function loadFirstImageFromDirectory(dirPath: string): Promise<LoadedAttachment | null> {
+  const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
+  const entries = await readdir(dirPath, { withFileTypes: true }).catch(() => null)
+  if (!entries) return null
+  const sorted = entries
+    .filter((entry) => entry.isFile() && IMAGE_EXTENSIONS.has(path.extname(entry.name).toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name))
+  if (sorted.length === 0) return null
+  const first = sorted[0]!
+  const filePath = path.join(dirPath, first.name)
+  const info = await stat(filePath).catch(() => null)
+  if (!info?.isFile()) return null
+  return loadResolvedAttachment(filePath, info.size)
 }
 
 function resolveAttachmentPath(cwd: string, requestedPath: string): string {
