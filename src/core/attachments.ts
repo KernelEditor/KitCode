@@ -93,7 +93,15 @@ export function looksLikeAttachmentPath(value: string): boolean {
   if (/^file:\/\//i.test(candidate)) return true
   if (path.isAbsolute(candidate)) return true
   if (/^(?:~|\.{1,2})[\\/]/.test(candidate)) return true
-  if (candidate.includes('/') || candidate.includes('\\')) return true
+  // A path-like string embedded in a longer message (e.g. pasted terminal
+  // output containing /Users/...) should not be treated as an attachment.
+  // Only treat short relative paths with slashes as attachments; longer text
+  // must start with a path prefix to qualify.
+  if (candidate.includes('/') || candidate.includes('\\')) {
+    // Long strings with slashes are likely pasted terminal output, not a path.
+    if (trimmed.length > 200) return false
+    return true
+  }
   const basename = path.basename(candidate).toLowerCase()
   return path.extname(basename) !== '' || AUTO_PATH_NAMES.has(basename)
 }

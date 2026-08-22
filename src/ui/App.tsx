@@ -1210,9 +1210,10 @@ export function App({
           notice('info', strings.attachmentAdded(attachmentLabel(block) ?? 'attachment'))
           return true
         })
-        .catch((error) => {
-          notice('error', error instanceof Error ? error.message : String(error))
-          return true
+        .catch(() => {
+          // Not a real file (ENOENT, ENAMETOOLONG, etc.) — let the text through
+          // as a normal message rather than swallowing it.
+          return false
         })
       automaticAttachmentTask.current = task
       void task.finally(() => {
@@ -1274,9 +1275,13 @@ export function App({
         submitSlash()
         return
       }
-      if (text && looksLikeAttachmentPath(text) && (await tryQueueAutomaticAttachment(text))) {
-        if (!detachedInput) setInput('')
-        return
+      if (text && looksLikeAttachmentPath(text)) {
+        const attached = await tryQueueAutomaticAttachment(text)
+        if (attached) {
+          if (!detachedInput) setInput('')
+          return
+        }
+        // Not a real file — fall through and send the text as a message.
       }
       if (text.startsWith('/')) {
         submitSlash()
