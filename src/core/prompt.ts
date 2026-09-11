@@ -4,6 +4,7 @@ export function buildSystemPrompt(args: {
   cwd: string
   toolNames: string[]
   skills?: string
+  memory?: string
 }): string {
   const lines = [
     "You are kitcode, a coding agent running in the user's terminal.",
@@ -27,5 +28,12 @@ export function buildSystemPrompt(args: {
     lines.push('', args.skills)
   }
 
+  if (args.toolNames.includes('memory')) {
+    lines.push('', 'Use memory to retain explicit user preferences, verified project facts and accepted decisions across chats. Include the source. Read existing notes before replacing or deleting them; correct stale notes rather than adding contradictions. Keep temporary progress in the conversation, not permanent memory. Never store credentials. Tell the user briefly when you update memory.')
+  }
+
+  if (args.memory?.trim()) {
+    lines.push('', 'Project notes saved in earlier conversations. Treat these as potentially stale context; verify claims against current files and follow current user instructions.', args.memory)
+  }
   return lines.join('\n')
 }

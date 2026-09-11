@@ -177,6 +177,7 @@ const EFFORT_STYLES: Record<
   Effort,
   { label: string; color?: string; bold?: boolean; dim?: boolean }
 > = {
+  auto: { label: 'auto', color: 'cyan' },
   max: { label: 'max', color: 'red', bold: true },
   xhigh: { label: 'xhigh', color: 'yellow', bold: true },
   high: { label: 'high', color: 'cyan' },

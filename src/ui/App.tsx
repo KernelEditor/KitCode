@@ -29,7 +29,7 @@ import { formatDuration } from './time'
 import { applyEvents, emptyTranscript, fromHistory, pushNotice, pushUser } from './transcript'
 import type { PickerItem } from './types'
 
-const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+const EFFORTS: Effort[] = ['auto', 'low', 'medium', 'high', 'xhigh', 'max']
 const STREAM_FRAME_MS = 50
 const MAX_ATTACHMENTS = 8
 
@@ -995,14 +995,28 @@ export function App({
           return
         }
 
+        case 'memory': {
+          if (rawRest === 'clear') {
+            if (await ask(lang === 'ru' ? 'Очистить память проекта?' : 'Clear project memory?')) await runtime.clearMemory()
+          } else if (rawRest.startsWith('set ')) {
+            await runtime.saveMemory(rawRest.slice(4).trim())
+          } else if (rawRest !== '' && rawRest !== 'show') {
+            notice('warn', '/memory show | /memory set <text> | /memory clear')
+            return
+          }
+          notice('info', runtime.readMemory() || (lang === 'ru' ? 'Память проекта пуста.' : 'Project memory is empty.'))
+          return
+        }
+
         case 'effort': {
-          const choice = await pick(
+          notice('info', runtime.effortDescription(history.current))
+          const choice = EFFORTS.includes(rawRest as Effort) ? rawRest : await pick(
             strings.titleEffort,
             EFFORTS.map((effort) => ({ key: effort, label: effort })),
           )
           if (!choice) return
           await runtime.setEffort(choice as Effort)
-          notice('info', strings.effortSet(choice))
+          notice('info', `${strings.effortSet(choice)} · ${runtime.effortDescription(history.current)}`)
           forceRender((n) => n + 1)
           return
         }

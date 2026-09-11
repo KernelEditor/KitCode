@@ -48,7 +48,7 @@ export const providerConfigSchema = z.object({
   headers: z.record(z.string(), z.string()).optional(),
 })
 
-export const effortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max'])
+export const effortSchema = z.enum(['auto', 'low', 'medium', 'high', 'xhigh', 'max'])
 
 export const permissionModeSchema = z.enum(['allow', 'ask', 'deny'])
 

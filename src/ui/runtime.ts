@@ -37,6 +37,10 @@ export interface Runtime {
   installSkill(source: string): Promise<{ name: string; dir: string; source: string }>
   getModelRef(): string
   setModelRef(ref: string): Promise<void>
+  readMemory(): string
+  saveMemory(text: string): Promise<void>
+  clearMemory(): Promise<void>
+  effortDescription(history: Message[]): string
   getEffort(): Effort
   setEffort(effort: Effort): Promise<void>
   getThinking(): boolean

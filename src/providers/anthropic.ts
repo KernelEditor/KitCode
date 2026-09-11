@@ -1,3 +1,4 @@
+import { resolveEffort } from './effort'
 import Anthropic from '@anthropic-ai/sdk'
 import {
   captureResponseHead,
@@ -78,7 +79,8 @@ async function* streamTurn(
     tools: toToolParams(req.tools),
   }
   if (req.thinking) params.thinking = { type: 'adaptive', display: 'summarized' }
-  if (req.effort) params.output_config = { effort: req.effort }
+  const effort = resolveEffort(req.effort, req.messages)
+  if (effort) params.output_config = { effort }
 
   let thinking = ''
   let text = ''

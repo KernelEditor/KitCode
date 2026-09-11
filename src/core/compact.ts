@@ -36,12 +36,21 @@ const SYSTEM_SUMMARIZE =
   'Extract and preserve ONLY: concrete requirements, user preferences, files changed, ' +
   'commands run and their results, errors encountered, bugs found, architectural decisions, ' +
   'and unfinished work. Be terse and factual. Do NOT include greetings, acknowledgments, ' +
-  'chain-of-thought, or step-by-step narration. Return only the summary.'
+  'chain-of-thought, or step-by-step narration. ' +
+  'Use these sections: Requirements; Verified facts (with file paths or tool evidence); ' +
+  'Changes made; Verification (exact commands, pass/fail/not run, and unresolved error excerpts); ' +
+  'Decisions and assumptions; Remaining work. ' +
+  'Keep plans and assumptions separate from verified facts. Never turn an intended command into a completed check. ' +
+  'When checks conflict, retain the latest result and mark earlier results as superseded. ' +
+  'Preserve explicit user corrections and project constraints. Do not retain credentials or secret values. Return only the summary.'
 
 const SYSTEM_MERGE =
   'Merge these partial summaries of a coding conversation into one coherent summary. ' +
   'Remove duplicates. Preserve: requirements, files changed, commands run, errors, ' +
-  'decisions, and unfinished work. Be terse. Return only the merged summary.'
+  'decisions, and unfinished work. Keep the structured sections and evidence from the source summaries. ' +
+  'Separate verified facts, assumptions, and planned work; keep exact verification commands and their latest outcomes. ' +
+  'Do not resolve conflicting evidence by guessing. Do not retain credentials or secret values. ' +
+  'Be terse. Return only the merged summary.'
 
 export interface CompactResult {
   history: Message[]

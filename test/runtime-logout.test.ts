@@ -49,6 +49,25 @@ async function seed(): Promise<void> {
 }
 
 describe('provider logout', () => {
+  it('keeps project memory across new sessions and restarts', async () => {
+    await seed()
+    const first = await boot({ cwd: home })
+    try {
+      await first.runtime.saveMemory('Check tests before committing')
+      await first.runtime.newSession()
+      expect(first.runtime.readMemory()).toBe('Check tests before committing')
+    } finally {
+      await first.shutdown()
+    }
+    const second = await boot({ cwd: home })
+    try {
+      expect(second.runtime.readMemory()).toBe('Check tests before committing')
+      await second.runtime.clearMemory()
+      expect(second.runtime.readMemory()).toBe('')
+    } finally {
+      await second.shutdown()
+    }
+  })
   it('starts a new session without overwriting the saved conversation', async () => {
     await seed()
     const app = await boot({ cwd: home })

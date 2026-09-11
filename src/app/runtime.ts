@@ -1,3 +1,6 @@
+import { createMemoryTool } from '../tools/memory'
+import { readProjectMemory, saveProjectMemory, clearProjectMemory } from '../core/memory'
+import { openAiEffort, resolveEffort } from '../providers/effort'
 import { detectProvider } from '../config/detect'
 import { formatModelRef, parseModelRef } from '../config/schema'
 import type { Config } from '../config/schema'
@@ -151,11 +154,18 @@ export async function boot(options: {
 
   const usage = createUsageTracker(session.usage, resolvePricing)
   let skillCatalogue = formatSkillCatalogue(skills)
+  let projectMemory = await readProjectMemory(workspaceRoot)
+  const saveMemory = async (text: string) => {
+    await saveProjectMemory(workspaceRoot, text)
+    projectMemory = await readProjectMemory(workspaceRoot)
+  }
+  tools.register([createMemoryTool({ read: () => projectMemory, save: saveMemory })])
   const mainSystemPrompt = () =>
     buildSystemPrompt({
       cwd: options.cwd,
       toolNames: tools.list().map((tool) => tool.name),
       skills: skillCatalogue,
+      memory: projectMemory,
     })
 
   let modelRef = session.model || config.model || ''
@@ -580,6 +590,21 @@ export async function boot(options: {
       void refreshModelContextWindow()
     },
 
+    readMemory: () => projectMemory,
+    async saveMemory(text) {
+      await saveMemory(text)
+    },
+    async clearMemory() {
+      await clearProjectMemory(workspaceRoot)
+      projectMemory = ''
+    },
+    effortDescription(history) {
+      if (!modelRef) return 'unavailable'
+      const { provider, modelId } = registry.resolve(modelRef)
+      const requested = resolveEffort(config.effort, history)
+      const effective = provider.kind === 'openai' ? openAiEffort(modelId, requested) : requested
+      return effective ? `${config.effort} → ${effective} (API request)` : `${config.effort} → not sent: unknown model support`
+    },
     getEffort: () => config.effort,
     async setEffort(effort: Effort) {
       await persistConfig((draft) => {

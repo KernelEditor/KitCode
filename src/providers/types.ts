@@ -1,4 +1,4 @@
-export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type Effort = 'auto' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export type JsonSchema = Record<string, unknown>
 

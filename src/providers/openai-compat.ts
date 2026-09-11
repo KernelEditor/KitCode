@@ -1,3 +1,4 @@
+import { openAiEffort, resolveEffort } from './effort'
 import OpenAI from 'openai'
 import {
   captureResponseHead,
@@ -81,11 +82,13 @@ async function* streamTurn(
   const calls = new Map<number, PartialCall>()
   const capture = captureResponseHead()
 
+  const effort = openAiEffort(req.model, resolveEffort(req.effort, req.messages))
   try {
     const stream = await client.withOptions({ fetch: capture.fetch }).chat.completions.create(
       {
         model: req.model,
         max_tokens: req.maxTokens,
+        ...(effort ? { reasoning_effort: effort } : {}),
         messages: toChatMessages(req.system, req.messages),
         ...(req.tools.length > 0 ? { tools: toChatTools(req.tools) } : {}),
         stream: true,

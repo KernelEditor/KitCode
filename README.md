@@ -109,7 +109,8 @@ Press `/` to open the command list.
 | `/provider` | Switch providers. |
 | `/login` · `/logout [provider]` | Add a provider or choose exactly which provider to remove. |
 | `/key [provider]` | Change API key for a provider. |
-| `/effort` · `/thinking` | Configure reasoning depth and output. |
+| `/effort [auto|low|medium|high|xhigh|max]` · `/thinking` | Select reasoning effort and configure reasoning output. |
+| `/memory show` · `/memory set <text>` · `/memory clear` | View, replace, or clear this project's persistent notes. |
 | `/resume` · `/clear` | Resume a session or start a new one. |
 | `/sessions` | Search sessions, then resume, rename, delete, or export one. |
 | `/sessions list` | List all saved sessions. |
@@ -170,6 +171,44 @@ Before the built-in `write` and `edit` tools change a file, KitCode creates a pr
 `/undo` restores the latest checkpoint and leaves files with newer manual changes untouched.
 After a message changes files, KitCode detects common project checks such as `lint`, `typecheck`,
 and `test`. The exact commands are shown for approval before they run.
+
+## Reasoning effort
+
+Use `/effort` to open the picker or `/effort high` to choose a level directly. The command shows
+both the selected level and the value KitCode will send to the API for the current conversation.
+This confirms request encoding, not whether a gateway honors the parameter.
+
+`auto` uses `medium` for short general requests and `high` for long requests or messages containing
+coding-task keywords. It is a local heuristic, not a model-based difficulty assessment. Manual
+levels bypass this heuristic. For the original GPT-5, GPT-5.1 and o-series, KitCode maps `xhigh`
+and `max` to `high`; for GPT-5.2–5.4, it maps `max` to `xhigh`. It omits effort for unrecognized
+OpenAI-compatible model names. The Anthropic adapter sends the resolved level in `output_config`.
+Supported levels and their effect depend on the model and provider.
+
+## Project memory
+
+Project notes persist across chats, `/clear`, and restarts. Manage them with:
+
+```text
+/memory show
+/memory set Run npm test before committing. Put changelogs only in GitHub Releases.
+/memory clear
+```
+
+`set` replaces the whole note; `clear` asks for confirmation. Notes are limited to 16,000 characters
+and stored under `~/.kitcode/memory/`, separately for each canonical workspace path.
+
+The agent can also use the `memory` tool to read, add, replace, or delete notes. Mutations require
+a source, such as a user instruction or file/tool evidence. Updates appear in the tool transcript
+with a diff. Exact-match replacement and deletion help avoid overwriting unrelated notes.
+The tool is allowed by default in normal and accept modes; set `permissions.memory` to `ask` or
+`deny` to restrict it. Plan mode blocks the tool, including its read action.
+
+The agent is instructed to retain confirmed project facts, explicit preferences and accepted
+decisions, and to verify potentially stale notes against current files. Temporary progress belongs
+in the conversation. Secret-pattern redaction is best effort; do not put credentials in memory.
+Context compaction separately asks the model to preserve requirements, evidence, verification
+commands and outcomes, assumptions, and remaining work. Generated summaries can still omit details.
 
 ## Configuration
 

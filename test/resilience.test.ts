@@ -97,6 +97,30 @@ async function failure(promise: Promise<unknown>): Promise<unknown> {
 }
 
 describe('transient provider faults', () => {
+  it.each([
+    ['gpt-5', 'low', 'low'],
+    ['gpt-5', 'high', 'high'],
+    ['o3', 'max', 'high'],
+    ['gateway/o4-mini', 'medium', 'medium'],
+    ['gpt-5.2', 'xhigh', 'xhigh'],
+    ['gpt-5.2', 'max', 'xhigh'],
+    ['gpt-5', 'auto', 'medium'],
+    ['test-model', 'high', undefined],
+  ] as const)('encodes effort for %s (%s)', async (model, effort, expected) => {
+    let body: Record<string, unknown> = {}
+    const baseUrl = await startServer((req, res) => {
+      let raw = ''
+      req.on('data', (chunk) => { raw += chunk.toString() })
+      req.on('end', () => {
+        body = JSON.parse(raw)
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end(sseChunk({ content: 'ok' }, 'stop') + 'data: [DONE]\n\n')
+      })
+    })
+    const provider = createOpenAiProvider({ id: 'test', apiKey: 'test', baseUrl })
+    await collect(provider.stream({ ...chatRequest(), model, effort }))
+    expect(body.reasoning_effort).toBe(expected)
+  })
   it.each(['stream error', 'invalid tool JSON'])('preserves received usage on %s', async (failureMode) => {
     const baseUrl = await startServer((_req, res) => {
       res.writeHead(200, { 'content-type': 'text/event-stream' })

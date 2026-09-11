@@ -20,6 +20,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'usage' },
   { name: 'mcp', args: '[add|list|delete|enable|disable]' },
   { name: 'attach', args: '<path|clipboard|clear>' },
+  { name: 'memory', args: '[show|set <text>|clear]' },
   { name: 'compact' },
   { name: 'update' },
   { name: 'checker' },
