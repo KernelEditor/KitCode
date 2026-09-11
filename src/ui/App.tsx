@@ -1,7 +1,7 @@
-import { useTerminalSize } from './terminal-size'
-import { Box, Text, useApp, useInput } from 'ink'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Box, Text, useApp, useInput, useStdout } from 'ink'
 import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from '../core/types'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTerminalSize } from './terminal-size'
 import { attachmentLabel, looksLikeAttachmentPath } from '../core/attachments'
 import { parseMcpAddArgs } from '../mcp/add'
 import type { McpAddError } from '../mcp/add'
@@ -65,7 +65,8 @@ export function App({
   initialHistory: Message[]
   warnings?: string[]
 }) {
-  const { exit } = useApp()
+  const { exit, suspendTerminal } = useApp()
+  const { stdout } = useStdout()
   const { rows } = useTerminalSize()
   const [transcript, setTranscript] = useState(() =>
     warnings.reduce((state, text) => pushNotice(state, 'warn', text), fromHistory(initialHistory)),
@@ -102,6 +103,9 @@ export function App({
   const transcriptEvents = useRef<AgentEvent[]>([])
   const transcriptTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  const clearScreen = useCallback(() => {
+    if (stdout.isTTY) stdout.write('\x1b[2J\x1b[3J\x1b[H')
+  }, [stdout])
   const replaceAttachments = useCallback((next: ContentBlock[]) => {
     attachmentsRef.current = next
     setAttachments(next)
@@ -297,12 +301,20 @@ export function App({
           return
 
         case 'clear':
+          if (busyRef.current && abort.current) {
+            abort.current.abort()
+          }
+          queueRef.current = []
+          setPendingCount(0)
           await runtime.newSession()
           history.current = []
           replaceAttachments([])
           setPromptHistory([])
-          setTranscript(emptyTranscript())
-          setTranscriptRevision((revision) => revision + 1)
+          await suspendTerminal(async () => {
+            setTranscript(emptyTranscript())
+            setTranscriptRevision((revision) => revision + 1)
+            clearScreen()
+          })
           sessionStart.current = Date.now()
           turns.current = 0
           void runtime

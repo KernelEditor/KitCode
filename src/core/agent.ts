@@ -78,6 +78,10 @@ export async function runTurn(
   let steps = 0
 
   for (;;) {
+    if (signal.aborted) {
+      hooks.onEvent({ type: 'turn_end', stopReason: 'aborted' })
+      return sanitizeHistory(messages)
+    }
     if (++steps > MAX_TURN_STEPS) {
       hooks.onEvent({
         type: 'notice',
@@ -180,13 +184,17 @@ async function consumeStream(
   }
 
   let outcome: StreamOutcome | undefined
+  let text = ''
+  let thinking = ''
 
   for await (const event of streamWithRetry(cfg.provider, request, cfg.modelRef, signal)) {
     switch (event.type) {
       case 'text_delta':
+        text += event.text
         hooks.onEvent({ type: 'text_delta', text: event.text })
         break
       case 'thinking_delta':
+        thinking += event.text
         hooks.onEvent({ type: 'thinking_delta', text: event.text })
         break
       case 'usage':
@@ -206,7 +214,12 @@ async function consumeStream(
   }
 
   if (outcome) return outcome
-  if (signal.aborted) return { content: [], stopReason: 'aborted' }
+  if (signal.aborted) {
+    const content: ContentBlock[] = []
+    if (thinking) content.push({ type: 'thinking', text: thinking })
+    if (text) content.push({ type: 'text', text })
+    return { content, stopReason: 'aborted' }
+  }
   throw new Error(
     `"${cfg.provider.id}" ended the stream without completing the turn — nothing was generated. The endpoint answered, but not with a usable ${cfg.provider.kind} response.`,
   )
@@ -222,8 +235,31 @@ async function* streamWithRetry(
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (signal.aborted) return
     try {
-      for await (const event of provider.stream(request)) {
-        yield event
+      const stream = provider.stream(request)[Symbol.asyncIterator]()
+      let cancel!: () => void
+      let cancelTimer: ReturnType<typeof setTimeout> | undefined
+      const cancelled = new Promise<IteratorResult<import('../providers/types').StreamEvent>>((resolve) => {
+        // Let cooperative adapters flush final usage and partial content, but
+        // do not wait indefinitely for an endpoint that ignores cancellation.
+        cancel = () => {
+          cancelTimer ??= setTimeout(() => resolve({ done: true, value: undefined }), 100)
+        }
+        signal.addEventListener('abort', cancel, { once: true })
+        if (signal.aborted) cancel()
+      })
+      try {
+        for (;;) {
+          const next = await Promise.race([stream.next(), cancelled])
+          if (next.done) break
+          if (!signal.aborted || next.value.type === 'usage' || next.value.type === 'done') {
+            yield next.value
+          }
+          if (next.value.type === 'done') break
+        }
+      } finally {
+        signal.removeEventListener('abort', cancel)
+        if (cancelTimer !== undefined) clearTimeout(cancelTimer)
+        void stream.return?.().catch(() => undefined)
       }
       return
     } catch (error) {
