@@ -233,6 +233,44 @@ describe('subagent runner', () => {
     expect(answer).toBe(SUBAGENT_CANCELLED)
   }, 2_000)
 
+  it('reserves the last model call for a tool-free final summary', async () => {
+    const calls: string[] = []
+    const summary = 'foo is defined in src/a.ts:1. Checking its callers remains unfinished.'
+    const { provider, requests } = scripted([
+      ...Array.from({ length: MAX_SUBAGENT_STEPS - 1 }, (_, index) =>
+        callTurn(`c${index}`, 'read', { path: 'src/a.ts' }),
+      ),
+      answerTurn(summary),
+    ])
+    const runner = createSubagentRunner(makeConfigWith(provider), lookupOf([fakeRead(calls)]))
+
+    const answer = await runner.run({
+      prompt: 'find foo and its callers',
+      signal: new AbortController().signal,
+      onProgress: () => {},
+    })
+
+    expect(requests).toHaveLength(MAX_SUBAGENT_STEPS)
+    expect(calls).toHaveLength(MAX_SUBAGENT_STEPS - 1)
+    for (const request of requests.slice(0, -1)) {
+      expect(request.tools.map((tool) => tool.name)).toEqual(['read'])
+      expect(request.system).not.toContain('This is your last model call.')
+    }
+    const last = requests.at(-1)!
+    expect(last.tools).toEqual([])
+    expect(last.system).toContain('This is your last model call. Do not call tools.')
+    expect(last.system).toContain('clearly stating any unfinished work')
+    expect(last.messages.at(-1)?.content).toEqual([
+      {
+        type: 'tool_result',
+        toolUseId: `c${MAX_SUBAGENT_STEPS - 2}`,
+        content: 'export function foo() {}',
+        isError: undefined,
+      },
+    ])
+    expect(answer).toBe(summary)
+  })
+
   it('caps a runaway tool loop instead of calling the model forever', async () => {
     let id = 0
     const calls: string[] = []
@@ -246,6 +284,7 @@ describe('subagent runner', () => {
     })
 
     expect(requests.length).toBeLessThanOrEqual(MAX_SUBAGENT_STEPS + 1)
+    expect(calls).toHaveLength(MAX_SUBAGENT_STEPS - 1)
     expect(answer).toContain(`stopped after ${MAX_SUBAGENT_STEPS} model calls`)
   }, 5_000)
 

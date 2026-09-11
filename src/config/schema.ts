@@ -77,7 +77,7 @@ export const langSchema = z.enum(['en', 'ru'])
 
 export const budgetSchema = z.object({
   maxTokensPerTurn: z.number().int().min(0).max(10_000_000).default(10_000_000),
-  maxCostUsdPerTurn: z.number().positive().max(1_000).default(5),
+  maxCostUsdPerTurn: z.number().nonnegative().max(1_000).default(0),
   maxSubagentsPerTurn: z.number().int().min(0).max(16).default(3),
 })
 
@@ -96,7 +96,7 @@ export const configSchema = z.object({
   maxTokens: z.number().int().positive().max(200_000).default(64_000),
   budget: budgetSchema.default({
     maxTokensPerTurn: 10_000_000,
-    maxCostUsdPerTurn: 5,
+    maxCostUsdPerTurn: 0,
     maxSubagentsPerTurn: 3,
   }),
   diagnostics: diagnosticsSchema.default({ autoRun: true, commands: [] }),

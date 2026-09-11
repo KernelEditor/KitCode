@@ -1317,18 +1317,18 @@ export function App({
       return
     }
     if (!key.escape) return
+    if (busyRef.current && abort.current) {
+      if (!abort.current.signal.aborted) {
+        abort.current.abort()
+        notice('warn', strings.cancelled)
+      }
+      return
+    }
     if (input !== '' || attachmentsRef.current.length > 0) {
       setInput('')
       replaceAttachments([])
       if (automaticAttachmentTask.current) automaticAttachmentTask.current = null
       if (clipboardPasteTask.current) clipboardPasteTask.current = null
-      return
-    }
-    if (busy && abort.current) {
-      abort.current.abort()
-      queueRef.current = []
-      setPendingCount(0)
-      notice('warn', strings.cancelled)
       return
     }
     if (overlay.kind === 'permission') {

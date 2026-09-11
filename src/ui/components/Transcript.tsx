@@ -6,6 +6,7 @@ import stringWidth from 'string-width'
 import { diffLines, truncate } from '../diff'
 import { Markdown } from '../markdown'
 import { useTheme } from '../theme'
+import { sanitizeThinkingText } from '../sanitize'
 import type { Bubble, TranscriptProps } from '../types'
 import { DiffHunk } from './Diff'
 import { Logo } from './Logo'
@@ -122,7 +123,7 @@ const BubbleView = memo(function BubbleView({
   }
 
   if (bubble.kind === 'subagent') {
-    return <SubagentView bubble={bubble} />
+    return <SubagentView bubble={bubble} maxRows={maxRows} />
   }
 
   return <ToolView bubble={bubble} />
@@ -136,7 +137,9 @@ function AssistantView({ bubble, maxRows }: { bubble: AssistantBubble; maxRows?:
   if (answering && frozenThinking.current === undefined) {
     frozenThinking.current = bubble.thinking
   }
-  const visibleThinking = assistantThinkingForFrame(bubble, frozenThinking.current)
+  const visibleThinking = sanitizeThinkingText(
+    assistantThinkingForFrame(bubble, frozenThinking.current), bubble.streaming,
+  )
   const liveBudget = bubble.streaming && maxRows !== undefined ? Math.max(1, maxRows - 1) : undefined
   const thinkingBudget =
     liveBudget === undefined
@@ -264,25 +267,27 @@ function previewLines(content: string): string[] {
   return [...lines.slice(0, 6), `… ${lines.length - 6} more lines`]
 }
 
-function SubagentView({ bubble }: { bubble: Extract<Bubble, { kind: 'subagent' }> }) {
+function SubagentView({ bubble, maxRows }: { bubble: Extract<Bubble, { kind: 'subagent' }>; maxRows?: number }) {
   const theme = useTheme()
+  const { columns } = useWindowSize()
   const mark = bubble.state === 'running' ? '◌' : '●'
   const color = bubble.state === 'running' ? theme.warn : theme.ok
+  const latest = bubble.bubbles.at(-1)
+  const progress = latest?.kind === 'assistant'
+    ? sanitizeThinkingText(latest.text || latest.thinking, latest.streaming)
+    : latest?.kind === 'tool' ? latest.summary : ''
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text color={color} bold>
+    <Box flexDirection="column" marginTop={1} minWidth={0}>
+      <Text color={color} bold wrap="truncate-end">
         {mark} subagent: {bubble.description}
       </Text>
-      <Box marginLeft={2} flexDirection="column">
-        {bubble.bubbles.map((inner, index) => (
-          <BubbleView key={index} bubble={inner} />
-        ))}
-        {bubble.state === 'done' && bubble.result && (
-          <Box marginTop={1}>
-            <Text dimColor>── result ──</Text>
-          </Box>
-        )}
+      <Box marginLeft={2} flexDirection="column" minWidth={0}>
+        {bubble.state === 'running' ? (
+          <Text dimColor>{clipTextToRows(progress, Math.max(1, (maxRows ?? 6) - 2), Math.max(1, columns - 2))}</Text>
+        ) : bubble.result ? (
+          <Markdown>{sanitizeThinkingText(bubble.result)}</Markdown>
+        ) : null}
       </Box>
     </Box>
   )

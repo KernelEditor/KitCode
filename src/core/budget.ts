@@ -41,7 +41,7 @@ export function createTurnBudget(
           reason: `Turn stopped at the token budget (${limits.maxTokensPerTurn.toLocaleString()} tokens). This is a safety limit to prevent runaway costs. To disable it, run: /budget 0`,
         }
       }
-      if (current.costUsd !== null && current.costUsd >= limits.maxCostUsdPerTurn) {
+      if (limits.maxCostUsdPerTurn > 0 && current.costUsd !== null && current.costUsd >= limits.maxCostUsdPerTurn) {
         return {
           allowed: false,
           reason: `Turn stopped at the cost budget ($${limits.maxCostUsdPerTurn.toFixed(2)}). Send another message to continue.`,
@@ -64,7 +64,7 @@ export function createTurnBudget(
       }
 
       const pricing = resolvePricing(request.modelRef)
-      if (current.costUsd !== null) {
+      if (limits.maxCostUsdPerTurn > 0 && current.costUsd !== null) {
         const remainingUsd = limits.maxCostUsdPerTurn - current.costUsd
         // Use fallback pricing if model pricing is unknown to prevent unlimited spending
         const effectivePricing = pricing ?? UNKNOWN_MODEL_PRICING

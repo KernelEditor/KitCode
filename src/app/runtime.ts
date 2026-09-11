@@ -598,6 +598,8 @@ export async function boot(options: {
     async setMaxTokensPerTurn(tokens: number) {
       await persistConfig((draft) => {
         draft.budget.maxTokensPerTurn = tokens
+        // /budget selects the turn's token guard; do not retain a hidden legacy $5 cap.
+        draft.budget.maxCostUsdPerTurn = 0
       })
     },
 

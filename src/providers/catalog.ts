@@ -4,7 +4,7 @@ import { cacheDir, ensureDir } from '../config/paths'
 import type { ModelInfo, Provider } from './types'
 
 const MAX_AGE_MS = 24 * 60 * 60 * 1000
-const CACHE_VERSION = 2
+const CACHE_VERSION = 3
 
 interface ModelCache {
   version?: number

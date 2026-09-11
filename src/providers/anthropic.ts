@@ -8,6 +8,7 @@ import {
   REQUEST_TIMEOUT_MS,
   toProviderError,
 } from './errors'
+import { modelInfoFromRaw } from './model-info'
 import { pricingFor } from './pricing'
 import { parseRateLimits } from './rate-limits'
 import type {
@@ -110,6 +111,10 @@ async function* streamTurn(
       yield { type: 'done', stopReason: 'aborted', content: partialContent(thinking, text) }
       return
     }
+    // A failed stream can still contain billable usage. Preserve the latest
+    // cumulative snapshot before surfacing the error (never infer it from text).
+    const partial = stream.currentMessage
+    if (partial) yield { type: 'usage', usage: toUsage(partial.usage) }
     const limits = parseRateLimits(capture.headers())
     if (limits) yield { type: 'rate_limits', limits }
     if (events === 0 && capture.succeeded() && !isConnectionFailure(error)) {
@@ -150,7 +155,7 @@ async function listModels(
         name: model.display_name,
         contextWindow: model.max_input_tokens ?? undefined,
         maxOutput: model.max_tokens ?? undefined,
-        pricing: pricingFor(model.id),
+        pricing: modelInfoFromRaw(model)?.pricing ?? pricingFor(model.id),
       })
     }
     return models

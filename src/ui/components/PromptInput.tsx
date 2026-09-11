@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink'
+import { Box, Text, useWindowSize } from 'ink'
 import type { Key } from 'ink'
 import { memo, useEffect, useRef, useState } from 'react'
 import { looksLikeAttachmentPath } from '../../core/attachments'
@@ -25,6 +25,7 @@ export const PromptInput = memo(function PromptInput({
   attachments = [],
 }: PromptInputProps) {
   const theme = useTheme()
+  const { columns } = useWindowSize()
   const strings = useStrings()
   const safeValue = sanitizeTerminalText(value)
   const [selectionCursor, setSelectionCursor] = useState(0)
@@ -181,7 +182,7 @@ export const PromptInput = memo(function PromptInput({
   const visible = suggestions.slice(start, start + WINDOW)
 
   return (
-    <Box flexDirection="column" marginTop={1} flexShrink={0}>
+    <Box width={columns} maxWidth="100%" flexDirection="column" marginTop={1} flexShrink={0}>
       <Box
         width="100%"
         borderStyle="round"
@@ -190,8 +191,9 @@ export const PromptInput = memo(function PromptInput({
         paddingX={1}
       >
         <Text color={disabled ? 'gray' : theme.accent}>› </Text>
-        {}
-        <EditableText value={safeValue} cursor={inputCursor} placeholder={strings.placeholder} />
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <EditableText value={safeValue} cursor={inputCursor} placeholder={strings.placeholder} />
+        </Box>
         {pending && pending > 0 ? <Text dimColor> · {strings.queued(pending)}</Text> : null}
       </Box>
 

@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink'
+import { Box, Text, useWindowSize } from 'ink'
 import { useMemo, useState } from 'react'
 import { truncate } from '../diff'
 import { useStrings } from '../i18n'
@@ -11,6 +11,7 @@ const WINDOW = 10
 
 export function Picker({ title, items, onSelect, onCancel }: PickerProps) {
   const theme = useTheme()
+  const { columns } = useWindowSize()
   const strings = useStrings()
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)
@@ -47,7 +48,7 @@ export function Picker({ title, items, onSelect, onCancel }: PickerProps) {
   const visible = matches.slice(start, start + WINDOW)
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={theme.accent} paddingX={1}>
+    <Box width={columns} maxWidth="100%" flexShrink={0} flexDirection="column" borderStyle="round" borderColor={theme.accent} paddingX={1}>
       <Text bold color={theme.accent}>
         {sanitizeTerminalText(title)}
         {query !== '' && <Text dimColor> / {sanitizeTerminalText(query)}</Text>}
@@ -59,7 +60,7 @@ export function Picker({ title, items, onSelect, onCancel }: PickerProps) {
         visible.map((item, index) => {
           const selected = start + index === active
           return (
-            <Text key={item.key} color={selected ? theme.accent : undefined} inverse={selected}>
+            <Text key={item.key} wrap="truncate-end" color={selected ? theme.accent : undefined} inverse={selected}>
               {truncate(sanitizeTerminalText(item.label), 70)}
               {item.hint && (
                 <Text dimColor> {truncate(sanitizeTerminalText(item.hint), 34)}</Text>

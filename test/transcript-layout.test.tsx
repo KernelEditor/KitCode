@@ -11,9 +11,56 @@ import {
   clipTextToRows,
   firstMutableBubbleIndex,
 } from '../src/ui/components/Transcript'
+import { Picker } from '../src/ui/components/Picker'
+import { PromptInput } from '../src/ui/components/PromptInput'
+import { Markdown } from '../src/ui/markdown'
+import stringWidth from 'string-width'
+import { sanitizeThinkingText } from '../src/ui/sanitize'
 import type { Bubble } from '../src/ui/types'
 
 describe('transcript layout', () => {
+  it('hides thinking tags, including incomplete streamed tags, without eating text', () => {
+    expect(sanitizeThinkingText('<think>Reviewing loop-call disabling</think>')).toBe('Reviewing loop-call disabling')
+    expect(sanitizeThinkingText('</think>Reviewing loop-call disabling')).toBe('Reviewing loop-call disabling')
+    for (const suffix of ['<', '</', '</thi', '</think', '<think']) {
+      expect(sanitizeThinkingText(`Reviewing${suffix}`, true)).toBe('Reviewing')
+    }
+    expect(sanitizeThinkingText('a < b', true)).toBe('a < b')
+  })
+
+  it('shows bounded subagent progress and then its actual result', () => {
+    const sub: Extract<Bubble, { kind: 'subagent' }> = {
+      kind: 'subagent', id: 'sub', description: 'checking', state: 'running', seq: 1,
+      bubbles: [{ kind: 'assistant', id: 'a', text: '', thinking: '<think>' + 'old line\n'.repeat(100) + 'Reviewing</think>', streaming: true }],
+    }
+    const running = renderToString(<Transcript bubbles={[sub]} workspace="test" maxLiveRows={6} />, { columns: 80 })
+    expect(running).toContain('subagent: checking')
+    expect(running).toContain('Reviewing')
+    expect(running).not.toContain('think>')
+    const done = renderToString(<Transcript bubbles={[{ ...sub, state: 'done', result: 'Actual findings' }]} workspace="test" />, { columns: 80 })
+    expect(done).toContain('Actual findings')
+    expect(done).not.toContain('old line')
+    expect(done).not.toContain('── result ──')
+  })
+  it.each([32, 80])('closes model and prompt frames within %s columns', (columns) => {
+    const frames = [
+      renderToString(<Picker title="Models" items={[{ key: 'model', label: 'model'.repeat(40), hint: 'hint'.repeat(40) }]} onSelect={() => {}} onCancel={() => {}} />, { columns }),
+      renderToString(<PromptInput disabled={false} value={'message '.repeat(40)} onChange={() => {}} onSubmit={() => {}} history={[]} />, { columns }),
+    ]
+    for (const frame of frames) {
+      const lines = frame.split('\n').filter((line) => line.trim() !== '')
+      expect(lines.some((line) => line.endsWith('╮'))).toBe(true)
+      expect(lines.some((line) => line.endsWith('╯'))).toBe(true)
+      expect(lines.every((line) => stringWidth(line) <= columns)).toBe(true)
+    }
+  })
+
+  it('renders message separators as whitespace instead of copyable rules', () => {
+    const frame = renderToString(<Markdown>{'before\n\n---\n\nafter'}</Markdown>, { columns: 32 })
+    expect(frame).toContain('before')
+    expect(frame).toContain('after')
+    expect(frame).not.toContain('─')
+  })
   it('keeps the session header before completed messages', () => {
     const bubbles: Bubble[] = [
       { kind: 'user', id: 'user-1', text: 'first message' },

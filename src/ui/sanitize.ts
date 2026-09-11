@@ -37,6 +37,18 @@ export function sanitizeTerminalText(value: unknown): string {
   return output
 }
 
+export function sanitizeThinkingText(text: string, streaming = false): string {
+  const clean = sanitizeTerminalText(text).replace(/<\/?think(?:ing)?>/gi, '')
+  if (!streaming) return clean
+  // A tag may be split between deltas. Hide only a possible trailing tag prefix.
+  const start = clean.lastIndexOf('<')
+  if (start === -1) return clean
+  const suffix = clean.slice(start).toLowerCase()
+  return ['<think>', '</think>', '<thinking>', '</thinking>'].some((tag) => tag.startsWith(suffix))
+    ? clean.slice(0, start)
+    : clean
+}
+
 function skipCsi(text: string, from: number): number {
   for (let index = from; index < text.length; index += 1) {
     const code = text.charCodeAt(index)

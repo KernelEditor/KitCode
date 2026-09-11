@@ -47,12 +47,26 @@ export function createSubagentRunner(
     async run(request) {
       if (request.signal.aborted) return SUBAGENT_CANCELLED
 
+      let steps = 0
       const base = makeConfig(SUBAGENT_SYSTEM, tools)
       const cfg: AgentConfig = {
         ...base,
+        provider: {
+          id: base.provider.id,
+          kind: base.provider.kind,
+          listModels: () => base.provider.listModels(),
+          knownModels: () => base.provider.knownModels(),
+          stream: (chat) => base.provider.stream(steps === MAX_SUBAGENT_STEPS
+            ? {
+                ...chat,
+                tools: [],
+                system: `${chat.system}\n\nThis is your last model call. Do not call tools. Return your findings now, clearly stating any unfinished work.`,
+              }
+            : chat),
+        },
         tools: {
           get: (name) =>
-            name === TASK_TOOL_NAME ? undefined : base.tools.get(name),
+            name === TASK_TOOL_NAME || steps >= MAX_SUBAGENT_STEPS ? undefined : base.tools.get(name),
           schemas: () =>
             base.tools.schemas().filter((schema) => schema.name !== TASK_TOOL_NAME),
         },
@@ -61,7 +75,6 @@ export function createSubagentRunner(
 
       const limit = new AbortController()
       const signal = AbortSignal.any([request.signal, limit.signal])
-      let steps = 0
 
       const hooks: AgentHooks = {
         onEvent(event) {
@@ -88,6 +101,7 @@ export function createSubagentRunner(
       const text = finalText(await runTurn(cfg, history, hooks, signal))
 
       if (!limit.signal.aborted) return text
+      if (request.signal.aborted && text === SUBAGENT_NO_ANSWER) return SUBAGENT_CANCELLED
       return text === SUBAGENT_NO_ANSWER ? STEP_LIMIT_NOTE : `${text}\n\n${STEP_LIMIT_NOTE}`
     },
   }

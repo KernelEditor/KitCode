@@ -92,11 +92,7 @@ function BlockView({ block }: { block: MdNode }): ReactNode {
     case 'code':
       return <CodeBlock code={block.text ?? ''} />
     case 'hr':
-      return (
-        <Box marginTop={1} marginBottom={1}>
-          <Text dimColor wrap="truncate-end">{'─'.repeat(60)}</Text>
-        </Box>
-      )
+      return <Box height={1} />
   }
 }
 
