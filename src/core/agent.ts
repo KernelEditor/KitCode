@@ -231,7 +231,12 @@ async function* streamWithRetry(
       if (attempt >= MAX_RETRIES) break
       const waitMs = retryBackoffMs(error, attempt)
       if (waitMs > 0) {
-        await sleep(waitMs, signal)
+        try {
+          await sleep(waitMs, signal)
+        } catch (error) {
+          if (signal.aborted) return
+          throw error
+        }
         continue
       }
       break

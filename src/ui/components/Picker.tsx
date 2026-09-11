@@ -1,4 +1,5 @@
-import { Box, Text, useWindowSize } from 'ink'
+import { useTerminalSize } from '../terminal-size'
+import { Box, Text } from 'ink'
 import { useMemo, useState } from 'react'
 import { truncate } from '../diff'
 import { useStrings } from '../i18n'
@@ -11,7 +12,7 @@ const WINDOW = 10
 
 export function Picker({ title, items, onSelect, onCancel }: PickerProps) {
   const theme = useTheme()
-  const { columns } = useWindowSize()
+  const { columns } = useTerminalSize()
   const strings = useStrings()
   const [query, setQuery] = useState('')
   const [cursor, setCursor] = useState(0)

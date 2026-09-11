@@ -10,6 +10,7 @@ import {
   assistantThinkingForFrame,
   clipTextToRows,
   firstMutableBubbleIndex,
+  splitThinkingPrefix,
 } from '../src/ui/components/Transcript'
 import { Picker } from '../src/ui/components/Picker'
 import { PromptInput } from '../src/ui/components/PromptInput'
@@ -19,6 +20,22 @@ import { sanitizeThinkingText } from '../src/ui/sanitize'
 import type { Bubble } from '../src/ui/types'
 
 describe('transcript layout', () => {
+  it('separates tagged thinking from the answer and hides partial opening tags', () => {
+    expect(splitThinkingPrefix('<think>**Checking**</think>Answer', false)).toEqual({ thinking: '**Checking**', text: 'Answer' })
+    expect(splitThinkingPrefix('<thinking>Checking</thi', true)).toEqual({ thinking: 'Checking', text: '' })
+    expect(splitThinkingPrefix('<thi', true)).toEqual({ thinking: '', text: '' })
+    expect(splitThinkingPrefix('Example: `<think>`', false)).toEqual({ thinking: '', text: 'Example: `<think>`' })
+  })
+
+  it('renders thinking Markdown without exposing wrapper tags', () => {
+    const frame = renderToString(<Transcript workspace="test" bubbles={[{
+      kind: 'assistant', id: 'a', text: '<think>**Checking dimensions**</think>Answer', thinking: '', streaming: false,
+    }]} />, { columns: 80 })
+    expect(frame).toContain('Checking dimensions')
+    expect(frame).toContain('Answer')
+    expect(frame).not.toContain('**')
+    expect(frame).not.toContain('<think>')
+  })
   it('hides thinking tags, including incomplete streamed tags, without eating text', () => {
     expect(sanitizeThinkingText('<think>Reviewing loop-call disabling</think>')).toBe('Reviewing loop-call disabling')
     expect(sanitizeThinkingText('</think>Reviewing loop-call disabling')).toBe('Reviewing loop-call disabling')

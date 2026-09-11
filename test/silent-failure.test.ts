@@ -276,6 +276,20 @@ function recordingHooks(): { hooks: AgentHooks; events: AgentEvent[] } {
 }
 
 describe('runTurn refuses to fabricate a finished turn', () => {
+  it('treats cancellation during rate-limit backoff as a normal aborted turn', async () => {
+    const controller = new AbortController()
+    const { hooks, events } = recordingHooks()
+    let calls = 0
+    const provider = stubProvider([])
+    provider.stream = async function* () {
+      calls += 1
+      setTimeout(() => controller.abort(), 20)
+      throw new ProviderError('rate limited', 'gateway', 429)
+    }
+    await expect(runTurn(agentConfig(provider), chatRequest().messages, hooks, controller.signal)).resolves.toBeDefined()
+    expect(calls).toBe(1)
+    expect(events).toContainEqual({ type: 'turn_end', stopReason: 'aborted' })
+  })
   it('surfaces the body of a non-streaming 200 through a whole turn', async () => {
     const { hooks, events } = recordingHooks()
     const provider = openAi(await jsonServer(denialBody))

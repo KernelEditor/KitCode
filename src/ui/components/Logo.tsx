@@ -1,4 +1,5 @@
-import { Box, Text, useWindowSize } from 'ink'
+import { useTerminalSize } from '../terminal-size'
+import { Box, Text } from 'ink'
 import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
 import { formatWorkspacePath } from '../workspace'
@@ -9,7 +10,7 @@ const CAT = ['  ╱\\_╱\\ ', ' ( o.o )', '  > ^ <  ']
 export function Logo({ subtitle, workspace }: { subtitle?: string; workspace?: string }) {
   const theme = useTheme()
   const strings = useStrings()
-  const { columns } = useWindowSize()
+  const { columns } = useTerminalSize()
   const location = workspace
     ? formatWorkspacePath(workspace, Math.max(6, Math.min(72, columns - 15)))
     : ''

@@ -1,4 +1,5 @@
-import { Box, Text, useWindowSize } from 'ink'
+import { useTerminalSize } from '../terminal-size'
+import { Box, Text } from 'ink'
 import type { Key } from 'ink'
 import { memo, useEffect, useRef, useState } from 'react'
 import { looksLikeAttachmentPath } from '../../core/attachments'
@@ -25,7 +26,7 @@ export const PromptInput = memo(function PromptInput({
   attachments = [],
 }: PromptInputProps) {
   const theme = useTheme()
-  const { columns } = useWindowSize()
+  const { columns } = useTerminalSize()
   const strings = useStrings()
   const safeValue = sanitizeTerminalText(value)
   const [selectionCursor, setSelectionCursor] = useState(0)

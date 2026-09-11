@@ -1,4 +1,5 @@
-import { Box, useWindowSize } from 'ink'
+import { useTerminalSize } from '../terminal-size'
+import { Box } from 'ink'
 import type { ReactNode } from 'react'
 
 export function interactiveViewportRows(rows: number): number {
@@ -21,7 +22,7 @@ export function liveTranscriptRows(rows: number): number {
  * leaves incremental redraws at the wrong cursor position.
  */
 export function TerminalViewport({ children, rows }: { children: ReactNode; rows: number }) {
-  const { columns } = useWindowSize()
+  const { columns } = useTerminalSize()
   return (
     <Box
       width={columns} maxWidth="100%"

@@ -97,6 +97,27 @@ async function failure(promise: Promise<unknown>): Promise<unknown> {
 }
 
 describe('transient provider faults', () => {
+  it.each(['stream error', 'invalid tool JSON'])('preserves received usage on %s', async (failureMode) => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.write('data: ' + JSON.stringify({ choices: [], usage: { prompt_tokens: 42, completion_tokens: 7, total_tokens: 49 } }) + '\n\n')
+      if (failureMode === 'stream error') {
+        res.write('data: ' + JSON.stringify({ error: { message: 'stream failed', type: 'server_error' } }) + '\n\n')
+      } else {
+        res.write(sseChunk({ tool_calls: [{ index: 0, id: 'call', type: 'function', function: { name: 'read', arguments: '{' } }] }, 'tool_calls'))
+        res.write('data: [DONE]\n\n')
+      }
+      res.end()
+    })
+    const events: StreamEvent[] = []
+    const provider = createOpenAiProvider({ id: 'gateway', apiKey: 'test', baseUrl })
+    await expect((async () => {
+      for await (const event of provider.stream(chatRequest())) events.push(event)
+    })()).rejects.toThrow()
+    expect(events.filter((event) => event.type === 'usage')).toEqual([
+      { type: 'usage', usage: { input: 42, output: 7, cacheRead: 0, cacheWrite: 0 } },
+    ])
+  })
   it('forwards provider rate-limit headers with a successful streamed response', async () => {
     const baseUrl = await startServer((_req, res) => {
       res.writeHead(200, {

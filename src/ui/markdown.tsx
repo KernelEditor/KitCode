@@ -1,4 +1,5 @@
-import { Box, Text, useWindowSize } from 'ink'
+import { useTerminalSize } from './terminal-size'
+import { Box, Text } from 'ink'
 import { Fragment, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import stringWidth from 'string-width'
@@ -111,7 +112,7 @@ function CodeBlock({ code }: { code: string }) {
 }
 
 function TableView({ block }: { block: MdNode }) {
-  const { columns } = useWindowSize()
+  const { columns } = useTerminalSize()
   const headers = block.headers ?? []
   const rows = block.rows ?? []
 

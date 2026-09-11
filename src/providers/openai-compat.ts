@@ -118,6 +118,7 @@ async function* streamTurn(
     }
   } catch (error) {
     if (!isUserAbort(error, req.signal)) {
+      if (sawUsage) yield { type: 'usage', usage }
       const limits = parseRateLimits(capture.headers())
       if (limits) yield { type: 'rate_limits', limits }
       throw toProviderError(error, providerId, [apiKey])
@@ -138,13 +139,13 @@ async function* streamTurn(
 
   if (recognised === 0) throw await invalidStreamError(providerId, capture, undefined, [apiKey])
 
+  if (sawUsage) yield { type: 'usage', usage }
   const content = toContentBlocks(providerId, thinking, text, calls)
   for (const block of content) {
     if (block.type === 'tool_use') {
       yield { type: 'tool_call', id: block.id, name: block.name, input: block.input }
     }
   }
-  if (sawUsage) yield { type: 'usage', usage }
   const limits = parseRateLimits(capture.headers())
   if (limits) yield { type: 'rate_limits', limits }
   yield { type: 'done', stopReason: resolveStop(finishReason, calls.size > 0), content }

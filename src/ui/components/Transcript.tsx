@@ -1,4 +1,5 @@
-import { Box, Static, Text, useWindowSize } from 'ink'
+import { useTerminalSize } from '../terminal-size'
+import { Box, Static, Text } from 'ink'
 import { memo, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import Spinner from 'ink-spinner'
@@ -129,8 +130,23 @@ const BubbleView = memo(function BubbleView({
   return <ToolView bubble={bubble} />
 })
 
-function AssistantView({ bubble, maxRows }: { bubble: AssistantBubble; maxRows?: number }) {
-  const { columns } = useWindowSize()
+export function splitThinkingPrefix(text: string, streaming: boolean): { thinking: string; text: string } {
+  const opening = /^\s*<think(?:ing)?>/i.exec(text)
+  if (!opening) {
+    const prefix = text.trimStart().toLowerCase()
+    return { thinking: '', text: streaming && prefix !== '' && ['<think>', '<thinking>'].some((tag) => tag.startsWith(prefix)) ? '' : text }
+  }
+  const rest = text.slice(opening[0].length)
+  const closing = /<\/think(?:ing)?>/i.exec(rest)
+  return closing
+    ? { thinking: sanitizeThinkingText(rest.slice(0, closing.index)), text: rest.slice(closing.index + closing[0].length) }
+    : { thinking: sanitizeThinkingText(rest, streaming), text: '' }
+}
+
+function AssistantView({ bubble: source, maxRows }: { bubble: AssistantBubble; maxRows?: number }) {
+  const tagged = splitThinkingPrefix(source.text, source.streaming)
+  const bubble = { ...source, text: tagged.text, thinking: [source.thinking, tagged.thinking].filter(Boolean).join('\n') }
+  const { columns } = useTerminalSize()
   const frozenThinking = useRef<string | undefined>(undefined)
   const answering = bubble.streaming && bubble.text !== ''
   if (!answering) frozenThinking.current = undefined
@@ -160,9 +176,9 @@ function AssistantView({ bubble, maxRows }: { bubble: AssistantBubble; maxRows?:
   return (
     <Box flexDirection="column" marginTop={1}>
       {frameThinking !== '' && (
-        <Text dimColor italic>
-          {frameThinking}
-        </Text>
+        <Box flexDirection="column" maxHeight={thinkingBudget} overflowY="hidden">
+          <Markdown>{frameThinking}</Markdown>
+        </Box>
       )}
       {bubble.streaming ? <Text>{frameText}</Text> : <Markdown>{bubble.text}</Markdown>}
       {bubble.streaming && bubble.text === '' && (
@@ -269,7 +285,7 @@ function previewLines(content: string): string[] {
 
 function SubagentView({ bubble, maxRows }: { bubble: Extract<Bubble, { kind: 'subagent' }>; maxRows?: number }) {
   const theme = useTheme()
-  const { columns } = useWindowSize()
+  const { columns } = useTerminalSize()
   const mark = bubble.state === 'running' ? '◌' : '●'
   const color = bubble.state === 'running' ? theme.warn : theme.ok
   const latest = bubble.bubbles.at(-1)
@@ -284,7 +300,9 @@ function SubagentView({ bubble, maxRows }: { bubble: Extract<Bubble, { kind: 'su
       </Text>
       <Box marginLeft={2} flexDirection="column" minWidth={0}>
         {bubble.state === 'running' ? (
-          <Text dimColor>{clipTextToRows(progress, Math.max(1, (maxRows ?? 6) - 2), Math.max(1, columns - 2))}</Text>
+          <Box flexDirection="column" maxHeight={Math.max(1, (maxRows ?? 6) - 2)} overflowY="hidden">
+            <Markdown>{clipTextToRows(progress, Math.max(1, (maxRows ?? 6) - 2), Math.max(1, columns - 2))}</Markdown>
+          </Box>
         ) : bubble.result ? (
           <Markdown>{sanitizeThinkingText(bubble.result)}</Markdown>
         ) : null}

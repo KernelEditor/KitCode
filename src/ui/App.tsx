@@ -1,4 +1,5 @@
-import { Box, Text, useApp, useInput, useWindowSize } from 'ink'
+import { useTerminalSize } from './terminal-size'
+import { Box, Text, useApp, useInput } from 'ink'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from '../core/types'
 import { attachmentLabel, looksLikeAttachmentPath } from '../core/attachments'
@@ -65,7 +66,7 @@ export function App({
   warnings?: string[]
 }) {
   const { exit } = useApp()
-  const { rows } = useWindowSize()
+  const { rows } = useTerminalSize()
   const [transcript, setTranscript] = useState(() =>
     warnings.reduce((state, text) => pushNotice(state, 'warn', text), fromHistory(initialHistory)),
   )
@@ -83,6 +84,7 @@ export function App({
   const drainQueueRef = useRef<() => void>(() => undefined)
   const [attachments, setAttachments] = useState<ContentBlock[]>([])
   const attachmentsRef = useRef<ContentBlock[]>([])
+  const attachmentGeneration = useRef(0)
   const automaticAttachmentTask = useRef<Promise<boolean> | null>(null)
   const clipboardPasteTask = useRef<Promise<void> | null>(null)
   const [overlay, setOverlay] = useState<Overlay>({ kind: 'none' })
@@ -846,6 +848,9 @@ export function App({
 
         case 'attach': {
           if (rawRest.toLowerCase() === 'clear') {
+            attachmentGeneration.current += 1
+            automaticAttachmentTask.current = null
+            clipboardPasteTask.current = null
             replaceAttachments([])
             notice('info', strings.attachmentsCleared)
             return
@@ -859,6 +864,7 @@ export function App({
             const task = runtime
               .loadClipboardImage()
               .then((block) => {
+                if (clipboardPasteTask.current !== task) return
                 if (appendAttachment(block)) {
                   notice(
                     'info',
@@ -866,9 +872,11 @@ export function App({
                   )
                 }
               })
-              .catch((error) =>
-                notice('error', error instanceof Error ? error.message : String(error)),
-              )
+              .catch((error) => {
+                if (clipboardPasteTask.current === task) {
+                  notice('error', error instanceof Error ? error.message : String(error))
+                }
+              })
             clipboardPasteTask.current = task
             try {
               await task
@@ -1202,6 +1210,7 @@ export function App({
       const task = runtime
         .loadAutomaticAttachment(requestedPath)
         .then((block) => {
+          if (automaticAttachmentTask.current !== task) return true
           if (!block) return false
           if (!appendAttachment(block)) {
             notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
@@ -1211,6 +1220,7 @@ export function App({
           return true
         })
         .catch(() => {
+          if (automaticAttachmentTask.current !== task) return true
           // Not a real file (ENOENT, ENAMETOOLONG, etc.) — let the text through
           // as a normal message rather than swallowing it.
           return false
@@ -1233,13 +1243,18 @@ export function App({
     const task = runtime
       .loadClipboardImage()
       .then((block) => {
+        if (clipboardPasteTask.current !== task) return
         if (!appendAttachment(block)) {
           notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
           return
         }
         notice('info', strings.attachmentAdded(attachmentLabel(block) ?? 'clipboard image'))
       })
-      .catch((error) => notice('error', error instanceof Error ? error.message : String(error)))
+      .catch((error) => {
+        if (clipboardPasteTask.current === task) {
+          notice('error', error instanceof Error ? error.message : String(error))
+        }
+      })
     clipboardPasteTask.current = task
     void task.finally(() => {
       if (clipboardPasteTask.current === task) clipboardPasteTask.current = null
@@ -1248,6 +1263,7 @@ export function App({
 
   const submit = useCallback(
     async (raw: string) => {
+      const generation = attachmentGeneration.current
       const pendingAttachments = [automaticAttachmentTask.current, clipboardPasteTask.current].filter(
         (task): task is Promise<boolean> | Promise<void> => task !== null,
       )
@@ -1257,6 +1273,7 @@ export function App({
         
         setInput('')
         await Promise.all(pendingAttachments)
+        if (generation !== attachmentGeneration.current) return
       }
       const text = raw.trim()
       const submitSlash = () => {
@@ -1277,6 +1294,7 @@ export function App({
       }
       if (text && looksLikeAttachmentPath(text)) {
         const attached = await tryQueueAutomaticAttachment(text)
+        if (generation !== attachmentGeneration.current) return
         if (attached) {
           if (!detachedInput) setInput('')
           return
@@ -1324,7 +1342,8 @@ export function App({
       }
       return
     }
-    if (input !== '' || attachmentsRef.current.length > 0) {
+    if (input !== '' || attachmentsRef.current.length > 0 || automaticAttachmentTask.current || clipboardPasteTask.current) {
+      attachmentGeneration.current += 1
       setInput('')
       replaceAttachments([])
       if (automaticAttachmentTask.current) automaticAttachmentTask.current = null
