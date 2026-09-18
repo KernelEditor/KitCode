@@ -4,6 +4,7 @@ import type { Key } from 'ink'
 import { memo, useEffect, useRef, useState } from 'react'
 import { looksLikeAttachmentPath } from '../../core/attachments'
 import { matchCommands } from '../commands'
+import { completeMention, mentionSpan } from '../mentions'
 import { moveInputHistory } from '../history'
 import { useStrings } from '../i18n'
 import { useTerminalInput, useTerminalPaste } from '../input'
@@ -24,6 +25,7 @@ export const PromptInput = memo(function PromptInput({
   hint,
   history,
   attachments = [],
+  onListFiles,
 }: PromptInputProps) {
   const theme = useTheme()
   const { columns } = useTerminalSize()
@@ -39,9 +41,30 @@ export const PromptInput = memo(function PromptInput({
   valueRef.current = safeValue
   cursorRef.current = inputCursor
 
-  const suggestions = matchCommands(safeValue)
-  const open = suggestions.length > 0
-  const active = Math.min(selectionCursor, Math.max(0, suggestions.length - 1))
+  const commandSuggestions = matchCommands(safeValue)
+  const mention = onListFiles ? mentionSpan(safeValue, inputCursor) : null
+  const [files, setFiles] = useState<string[]>([])
+  const mentionQuery = mention?.query ?? null
+
+  useEffect(() => {
+    if (mentionQuery === null || !onListFiles) {
+      setFiles([])
+      return
+    }
+    let live = true
+    void onListFiles(mentionQuery).then((found) => {
+      if (live) setFiles(found)
+    })
+    return () => {
+      live = false
+    }
+  }, [mentionQuery, onListFiles])
+
+  const showFiles = mention !== null && files.length > 0
+  const suggestions = showFiles ? [] : commandSuggestions
+  const open = suggestions.length > 0 || showFiles
+  const optionCount = showFiles ? files.length : suggestions.length
+  const active = Math.min(selectionCursor, Math.max(0, optionCount - 1))
 
   useEffect(() => {
     setSelectionCursor(0)
@@ -111,7 +134,15 @@ export const PromptInput = memo(function PromptInput({
       return
     }
     if (open && key.downArrow) {
-      setSelectionCursor(Math.min(suggestions.length - 1, active + 1))
+      setSelectionCursor(Math.min(optionCount - 1, active + 1))
+      return
+    }
+    if (showFiles && (key.tab || key.return) && !key.shift) {
+      const chosen = files[active]
+      if (chosen && mention) {
+        const completed = completeMention(safeValue, mention, chosen)
+        change(completed.value, completed.cursor)
+      }
       return
     }
     if (open && key.tab && !key.shift) {
@@ -181,6 +212,7 @@ export const PromptInput = memo(function PromptInput({
 
   const start = Math.max(0, Math.min(active - WINDOW + 2, suggestions.length - WINDOW))
   const visible = suggestions.slice(start, start + WINDOW)
+  const fileStart = Math.max(0, Math.min(active - WINDOW + 2, files.length - WINDOW))
 
   return (
     <Box width={columns} maxWidth="100%" flexDirection="column" marginTop={1} flexShrink={0}>
@@ -205,6 +237,21 @@ export const PromptInput = memo(function PromptInput({
       )}
 
       {disabled && hint && <Text dimColor>  {sanitizeTerminalText(hint)}</Text>}
+
+      {showFiles && (
+        <Box flexDirection="column" marginLeft={2}>
+          {files.slice(fileStart, fileStart + WINDOW).map((file, index) => {
+            const selected = fileStart + index === active
+            return (
+              <Text key={file} color={selected ? theme.accent : undefined} dimColor={!selected}>
+                {selected ? '❯ ' : '  '}@{sanitizeTerminalText(file)}
+              </Text>
+            )
+          })}
+          {files.length > WINDOW && <Text dimColor>{strings.more(files.length - WINDOW)}</Text>}
+          <Text dimColor>{strings.suggestHelp}</Text>
+        </Box>
+      )}
 
       {open && (
         <Box flexDirection="column" marginLeft={2}>

@@ -427,20 +427,20 @@ describe('detection honours the advertised protocol', () => {
 
   it('classifies a Bearer-authenticated list advertising anthropic as anthropic', async () => {
     const url = await jsonServer(JSON.stringify(anthropicShaped))
-    const detected = await detectProvider(`${url}/v1`, 'sk-test')
-    expect(detected.config.type).toBe('anthropic')
-    expect(detected.models.map((model) => model.id)).toEqual(['claude-opus-5'])
+    const [detected] = await detectProvider(`${url}/v1`, 'sk-test')
+    expect(detected!.config.type).toBe('anthropic')
+    expect(detected!.models.map((model) => model.id)).toEqual(['claude-opus-5'])
   })
 
   it('leaves a plain model list as openai', async () => {
     const body = JSON.stringify({ data: [{ id: 'gpt-5', object: 'model', owned_by: 'openai' }] })
-    const detected = await detectProvider(`${await jsonServer(body)}/v1`, 'sk-test')
-    expect(detected.config.type).toBe('openai')
+    const [detected] = await detectProvider(`${await jsonServer(body)}/v1`, 'sk-test')
+    expect(detected!.config.type).toBe('openai')
   })
 
   it('strips the trailing /v1 so the anthropic client does not double it', async () => {
     const url = await jsonServer(JSON.stringify(anthropicShaped))
-    expect((await detectProvider(`${url}/v1`, 'sk-test')).config.baseUrl).toBe(url)
+    expect((await detectProvider(`${url}/v1`, 'sk-test'))[0]!.config.baseUrl).toBe(url)
   })
 
   it('leaves an aggregator serving anthropic-owned namespaced ids as openai', async () => {
@@ -451,9 +451,9 @@ describe('detection honours the advertised protocol', () => {
       ],
     })
     const url = await jsonServer(body)
-    const detected = await detectProvider(`${url}/v1`, 'sk-test')
-    expect(detected.config.type).toBe('openai')
-    expect(detected.config.baseUrl).toBe(`${url}/v1`)
+    const [detected] = await detectProvider(`${url}/v1`, 'sk-test')
+    expect(detected!.config.type).toBe('openai')
+    expect(detected!.config.baseUrl).toBe(`${url}/v1`)
   })
 
   it('leaves a mixed advertisement as openai', async () => {
@@ -463,7 +463,24 @@ describe('detection honours the advertised protocol', () => {
         { id: 'gpt-5', supported_endpoint_types: ['openai'] },
       ],
     })
-    const detected = await detectProvider(`${await jsonServer(body)}/v1`, 'sk-test')
-    expect(detected.config.type).toBe('openai')
+    const [detected] = await detectProvider(`${await jsonServer(body)}/v1`, 'sk-test')
+    expect(detected!.config.type).toBe('openai')
+  })
+
+  it('keeps a gateway as anthropic when some models also accept openai calls', async () => {
+    const body = JSON.stringify({
+      data: [
+        { id: 'claude-opus-4-7', owned_by: 'vertex-ai', supported_endpoint_types: ['anthropic'] },
+        {
+          id: 'claude-opus-5',
+          owned_by: 'custom',
+          supported_endpoint_types: ['anthropic', 'openai'],
+        },
+      ],
+    })
+    const url = await jsonServer(body)
+    const detected = await detectProvider(`${url}/v1`, 'sk-test')
+    expect(detected).toHaveLength(1)
+    expect(detected[0]!.config).toEqual({ type: 'anthropic', baseUrl: url })
   })
 })

@@ -57,40 +57,44 @@ describe('parseModelList', () => {
 describe('detectProvider', () => {
   it('detects an OpenAI-compatible endpoint via Bearer', async () => {
     const seen: string[] = []
-    const result = await detectProvider('https://openrouter.ai/api/v1', 'sk-test', {
+    const [result] = await detectProvider('https://openrouter.ai/api/v1', 'sk-test', {
       fetchImpl: async (_input, init) => {
         const headers = (init?.headers ?? {}) as Record<string, string>
         seen.push(headers['Authorization'] ? 'bearer' : 'other')
         return jsonResponse(modelBody)
       },
     })
-    expect(result.config.type).toBe('openai')
-    expect(result.id).toBe('openrouter')
-    expect(result.models).toHaveLength(3)
+    expect(result!.config.type).toBe('openai')
+    expect(result!.id).toBe('openrouter')
+    expect(result!.models).toHaveLength(3)
     expect(seen[0]).toBe('bearer')
   })
 
   it('falls back to x-api-key when Bearer is rejected', async () => {
-    const result = await detectProvider('https://proxy.example.com/v1', 'sk-test', {
+    const [result] = await detectProvider('https://proxy.example.com/v1', 'sk-test', {
       fetchImpl: async (_input, init) => {
         const headers = ((init as RequestInit)?.headers ?? {}) as Record<string, string>
         return headers['x-api-key'] ? jsonResponse(modelBody) : jsonResponse({ error: 'no' }, 401)
       },
     })
-    expect(result.config.type).toBe('anthropic')
+    expect(result!.config.type).toBe('anthropic')
   })
 
   it('appends /v1 when the bare path 404s', async () => {
     const tried: string[] = []
-    const result = await detectProvider('https://api.example.com', 'sk-test', {
+    const [result] = await detectProvider('https://api.example.com', 'sk-test', {
       fetchImpl: async (input) => {
         const url = String(input)
         tried.push(url)
         return url.includes('/v1/models') ? jsonResponse(modelBody) : jsonResponse({}, 404)
       },
     })
-    expect(result.config.baseUrl).toBe('https://api.example.com/v1')
-    expect(tried).toEqual(['https://api.example.com/models', 'https://api.example.com/v1/models'])
+    expect(result!.config.baseUrl).toBe('https://api.example.com/v1')
+    expect(tried).toEqual([
+      'https://api.example.com/models',
+      'https://api.example.com/v1/models',
+      'https://api.example.com/v1/models',
+    ])
   })
 
   it('reports the status and body when nothing matches', async () => {
@@ -125,5 +129,31 @@ describe('detectProvider', () => {
       }),
     ).rejects.toThrow(/Invalid provider name/)
     expect(called).toBe(false)
+  })
+
+  it('adds both providers when one endpoint serves each protocol', async () => {
+    const detected = await detectProvider('https://gw.example.com/v1', 'sk-test', {
+      fetchImpl: async (_input, init) => {
+        const headers = ((init as RequestInit)?.headers ?? {}) as Record<string, string>
+        return jsonResponse(
+          headers['x-api-key']
+            ? { data: [{ id: 'claude-opus-5', supported_endpoint_types: ['anthropic'] }] }
+            : { data: [{ id: 'gpt-5', owned_by: 'openai' }] },
+        )
+      },
+    })
+    expect(detected.map((provider) => [provider.id, provider.config.type])).toEqual([
+      ['gw', 'openai'],
+      ['gw-anthropic', 'anthropic'],
+    ])
+    expect(detected[1]!.config.baseUrl).toBe('https://gw.example.com')
+  })
+
+  it('keeps one provider when both credential styles return the same catalogue', async () => {
+    const detected = await detectProvider('https://gw.example.com/v1', 'sk-test', {
+      fetchImpl: async () => jsonResponse({ data: [{ id: 'gpt-5', owned_by: 'openai' }] }),
+    })
+    expect(detected).toHaveLength(1)
+    expect(detected[0]!.config.type).toBe('openai')
   })
 })

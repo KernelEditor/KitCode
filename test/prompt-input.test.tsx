@@ -56,6 +56,25 @@ describe('slash command keyboard navigation', () => {
     }
   })
 
+  it('opens file suggestions after @ and completes one with tab', async () => {
+    const changes: string[] = []
+    const listFiles = vi.fn(async () => ['src/index.ts', 'src/config/detect.ts'])
+    const terminal = renderPrompt(
+      vi.fn(),
+      (value) => changes.push(value),
+      { onListFiles: listFiles },
+    )
+    try {
+      await terminal.input('@')
+      await terminal.wait()
+      expect(listFiles).toHaveBeenCalledWith('')
+      await terminal.input('\t')
+      expect(changes.at(-1)).toBe('@src/index.ts ')
+    } finally {
+      terminal.cleanup()
+    }
+  })
+
   it('turns a bracketed pasted path into an attachment request', async () => {
     const pastedPath = vi.fn(async () => true)
     const changes: string[] = []
@@ -95,7 +114,7 @@ describe('slash command keyboard navigation', () => {
 function renderPrompt(
   onSubmit: (value: string) => void,
   observeChange: (value: string) => void = () => undefined,
-  extra: Pick<PromptInputProps, 'onPastePath' | 'onPasteImage'> = {},
+  extra: Pick<PromptInputProps, 'onPastePath' | 'onPasteImage' | 'onListFiles'> = {},
 ) {
   const stdin = new PassThrough() as PassThrough & NodeJS.ReadStream
   const stdout = new PassThrough() as PassThrough & NodeJS.WriteStream
@@ -140,6 +159,10 @@ function renderPrompt(
     async input(value: string) {
       await ready
       stdin.write(value)
+      await tick()
+    },
+    async wait() {
+      await ready
       await tick()
     },
     cleanup() {

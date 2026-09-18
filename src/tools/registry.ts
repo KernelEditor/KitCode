@@ -1,5 +1,6 @@
 import type { ToolSchema } from '../providers/types'
 import { bashTool } from './bash'
+import { bashOutputTool } from './bash-output'
 import { editTool } from './edit'
 import { globTool } from './glob'
 import { grepTool } from './grep'
@@ -17,7 +18,7 @@ export interface ToolRegistry {
 }
 
 export function builtinTools(): Tool[] {
-  return [readTool, writeTool, editTool, bashTool, globTool, grepTool]
+  return [readTool, writeTool, editTool, bashTool, bashOutputTool, globTool, grepTool]
 }
 
 export function createToolRegistry(tools: Tool[]): ToolRegistry {

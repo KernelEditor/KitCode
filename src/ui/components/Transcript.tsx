@@ -177,7 +177,7 @@ function AssistantView({ bubble: source, maxRows }: { bubble: AssistantBubble; m
     <Box flexDirection="column" marginTop={1}>
       {frameThinking !== '' && (
         <Box flexDirection="column" maxHeight={thinkingBudget} overflowY="hidden">
-          <Markdown>{frameThinking}</Markdown>
+          <Markdown dim>{frameThinking}</Markdown>
         </Box>
       )}
       {bubble.streaming ? <Text>{frameText}</Text> : <Markdown>{bubble.text}</Markdown>}

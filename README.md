@@ -109,6 +109,7 @@ Press `/` to open the command list.
 | `/provider` | Switch providers. |
 | `/login` · `/logout [provider]` | Add a provider or choose exactly which provider to remove. |
 | `/key [provider]` | Change API key for a provider. |
+| `/refresh [provider]` | Reload a provider's model list, bypassing the 24h cache. |
 | `/effort [auto|low|medium|high|xhigh|max]` · `/thinking` | Select reasoning effort and configure reasoning output. |
 | `/memory show` · `/memory set <text>` · `/memory clear` | View, replace, or clear this project's persistent notes. |
 | `/resume` · `/clear` | Resume a session or start a new one. |
@@ -118,7 +119,7 @@ Press `/` to open the command list.
 | `/sessions delete <id>` | Delete a saved session. |
 | `/sessions delete all` | Delete every saved chat after two separate confirmations. |
 | `/sessions export <id> [path]` | Export a session to a private Markdown file (default: `.kitcode-exports/`). |
-| `/attach <path>` · `/attach clipboard` · `/attach clear` | Manage attachments for the next message. |
+| `/attach <path>` · `/attach clipboard` · `/attach clear` | Manage attachments for the next message; type `@` in the prompt to find and attach a workspace file. |
 | `/compact` | Replace older conversation context with a concise model-generated summary. |
 | `/update` | Check npm for a newer KitCode version. |
 | `/subagents` | Show the current number of active sub-agents. |
@@ -145,7 +146,7 @@ Press `/` to open the command list.
 | --- | --- |
 | `Enter` | Send a message or choose an item. |
 | `↑` / `↓` | Browse input history or menu items. |
-| `Tab` | Complete a slash command. |
+| `Tab` | Complete a slash command or selected `@` file. |
 | `Shift+Tab` | Cycle `normal → accept → plan`. |
 | `Ctrl+V` / `Cmd+V` | Attach an image from the system clipboard; `/attach clipboard` is the explicit fallback. |
 | `Esc` | Cancel the current request or close an overlay. |

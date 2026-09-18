@@ -14,6 +14,41 @@ import { App } from '../src/ui/App'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 50))
 
 describe('attachment cancellation', () => {
+  it('persists a submitted user message even when the provider fails', async () => {
+    const persist = vi.fn(async () => undefined)
+    const run = vi.fn(async () => {
+      throw new Error('balance exhausted')
+    })
+    const runtime = {
+      cwd: process.cwd(), getAccent: () => 'purple', getLang: () => 'en', needsSetup: () => false,
+      modelContext: () => null, subscribeContext: () => () => {},
+      startupUpdateCheck: async () => ({ status: 'current' }),
+      getModelRef: () => 'test/model', getEffort: () => 'medium', getThinking: () => false,
+      usageParts: () => ({}), mcpSummary: () => ({}), getMode: () => 'normal',
+      isBypassEnabled: () => false, activeAgentsCount: () => 0, persist, run,
+    } as unknown as Runtime
+    const stdin = new PassThrough() as PassThrough & NodeJS.ReadStream
+    const stdout = new PassThrough() as PassThrough & NodeJS.WriteStream
+    const stderr = new PassThrough() as PassThrough & NodeJS.WriteStream
+    Object.assign(stdin, { isTTY: true, setRawMode: vi.fn(), ref: () => stdin, unref: () => stdin })
+    Object.assign(stdout, { isTTY: true, columns: 80, rows: 24 })
+    const instance = render(<App runtime={runtime} initialHistory={[]} />, { stdin, stdout, stderr, interactive: false, patchConsole: false, exitOnCtrlC: false })
+    try {
+      await tick()
+      captured.prompt!.onSubmit('keep this after failure')
+      await tick()
+      expect(run).toHaveBeenCalledOnce()
+      expect(persist).toHaveBeenCalledWith([
+        { role: 'user', content: [{ type: 'text', text: 'keep this after failure' }] },
+      ])
+    } finally {
+      instance.cleanup()
+      stdin.destroy()
+      stdout.destroy()
+      stderr.destroy()
+    }
+  })
+
   it.each(['path', 'clipboard'] as const)('does not restore a cancelled %s attachment or send a waiting message', async (kind) => {
     let finish!: (block: ContentBlock) => void
     const pending = new Promise<ContentBlock>((resolve) => { finish = resolve })

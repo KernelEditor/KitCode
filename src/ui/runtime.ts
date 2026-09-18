@@ -73,6 +73,8 @@ export interface Runtime {
   providerBalance(): Promise<ProviderBalance[] | null>
   usageParts(): UsageSummary
   listModelItems(): Promise<PickerItem[]>
+  listWorkspaceFiles(query: string): Promise<string[]>
+  refreshProviderModels(providerId: string): Promise<number>
   listPromptItems(): Promise<PickerItem[]>
   readPrompt(slug: string): Promise<string>
   savePrompt(name: string, body: string): Promise<void>

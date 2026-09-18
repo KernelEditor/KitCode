@@ -71,6 +71,7 @@ export interface PromptInputProps {
   hint?: string
   history: string[]
   attachments?: string[]
+  onListFiles?(query: string): Promise<string[]>
 }
 
 export interface PermissionPromptProps {

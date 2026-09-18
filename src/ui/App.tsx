@@ -8,6 +8,7 @@ import type { McpAddError } from '../mcp/add'
 import type { McpServerState } from '../mcp/client'
 import type { ContentBlock, Effort, Message } from '../providers/types'
 import { COMMANDS, closestCommand } from './commands'
+import { extractMentions } from './mentions'
 import TextInput from 'ink-text-input'
 import { useTheme } from './theme'
 import { Confirm } from './components/Confirm'
@@ -249,6 +250,14 @@ export function App({
         }),
     }
     try {
+      // Persist the submitted user turn before contacting the provider. If the
+      // request fails (for example, an exhausted balance), /resume must still
+      // restore what the user sent instead of losing the whole turn.
+      try {
+        await runtime.persist(history.current)
+      } catch (error) {
+        notice('error', error instanceof Error ? error.message : String(error))
+      }
       history.current = await runtime.run(history.current, hooks, controller.signal)
       void runtime
         .persist(history.current)
@@ -606,6 +615,33 @@ export function App({
           try {
             await runtime.changeProviderKey(providerId, newKey.trim())
             notice('info', strings.keyChanged(providerId))
+          } catch (error) {
+            notice('error', error instanceof Error ? error.message : String(error))
+          }
+          return
+        }
+
+        case 'refresh': {
+          const providers = runtime.listProviderItems()
+          if (providers.length === 0) {
+            notice('warn', strings.logoutNothing)
+            return
+          }
+          let providerId: string | undefined = rest[0]
+          if (!providerId) {
+            providerId =
+              providers.length === 1
+                ? providers[0]?.key
+                : ((await pick(strings.titleModelRefresh, providers)) ?? undefined)
+          }
+          if (!providerId) return
+          if (!providers.some((provider) => provider.key === providerId)) {
+            notice('warn', `Provider "${providerId}" is not configured.`)
+            return
+          }
+          try {
+            const count = await runtime.refreshProviderModels(providerId)
+            notice('info', strings.modelsRefreshed(providerId, count))
           } catch (error) {
             notice('error', error instanceof Error ? error.message : String(error))
           }
@@ -1260,6 +1296,11 @@ export function App({
     [appendAttachment, notice, runtime, strings],
   )
 
+  const listWorkspaceFiles = useCallback(
+    (query: string) => runtime.listWorkspaceFiles(query).catch(() => []),
+    [runtime],
+  )
+
   const pasteClipboardImage = useCallback(() => {
     if (clipboardPasteTask.current) return
     if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
@@ -1333,11 +1374,26 @@ export function App({
       }
       const queuedAttachments = attachmentsRef.current
       if (!text && queuedAttachments.length === 0) return
+
+      // "@path" mentions ride along as attachments while staying in the prompt,
+      // so the model sees both the sentence and the file it points at.
+      const mentioned: ContentBlock[] = []
+      for (const path of extractMentions(text)) {
+        if (queuedAttachments.length + mentioned.length >= MAX_ATTACHMENTS) break
+        try {
+          mentioned.push(await runtime.loadAttachment(path))
+        } catch {
+          // Not a readable file — leave the word alone and send it as text.
+        }
+      }
+      if (generation !== attachmentGeneration.current) return
+
       if (text) setPromptHistory((state) => appendInputHistory(state, text))
       if (!detachedInput) setInput('')
       const content: ContentBlock[] = [
         ...(text ? ([{ type: 'text', text }] as ContentBlock[]) : []),
         ...queuedAttachments,
+        ...mentioned,
       ]
       replaceAttachments([])
       const item: QueuedItem = { kind: 'message', text, content }
@@ -1492,6 +1548,7 @@ export function App({
           onSubmit={submit}
           onPastePath={tryQueueAutomaticAttachment}
           onPasteImage={pasteClipboardImage}
+          onListFiles={listWorkspaceFiles}
           disabled={busy}
           pending={pendingCount}
           hint={busy ? strings.escCancel : undefined}

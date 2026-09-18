@@ -26,7 +26,7 @@ export async function detectProvider(
   rawUrl: string,
   apiKey: string,
   opts: DetectOptions = {},
-): Promise<DetectedProvider> {
+): Promise<DetectedProvider[]> {
   const fetchImpl = withTimeout(opts.fetchImpl ?? fetch, opts.timeoutMs ?? DETECT_TIMEOUT_MS)
   const baseUrl = normaliseBaseUrl(rawUrl)
   if (!isAllowedEndpointUrl(baseUrl)) {
@@ -45,44 +45,75 @@ export async function detectProvider(
       `${anthropicBaseUrl}/v1/models?limit=1000`,
       anthropicHeaders(apiKey),
     )
-    return {
-      id,
-      config: { type: 'anthropic', baseUrl: anthropicBaseUrl },
-      models: probed.ok ? parseModelList(probed.body) : [],
-    }
+    return [
+      {
+        id,
+        config: { type: 'anthropic', baseUrl: anthropicBaseUrl },
+        models: probed.ok ? parseModelList(probed.body) : [],
+      },
+    ]
   }
 
+  const found: Found[] = []
   let last: Probe | undefined
   for (const candidate of candidateBaseUrls(baseUrl)) {
+    if (found.length === schemes.length) break
     const url = `${candidate}/models`
-    let attempt = await probe(fetchImpl, url, { Authorization: `Bearer ${apiKey}` })
-    last = attempt
-    if (attempt.ok && isModelListBody(attempt.body)) {
-      const anthropic = advertisesAnthropicProtocol(attempt.body)
-      return {
-        id,
-        config: anthropic
-          ? { type: 'anthropic', baseUrl: anthropicRoot(candidate) }
-          : { type: 'openai', baseUrl: candidate },
-        models: parseModelList(attempt.body),
-      }
-    }
-
-    if (attempt.status === 401 || attempt.status === 403) {
-      attempt = await probe(fetchImpl, url, anthropicHeaders(apiKey))
+    for (const scheme of schemes) {
+      const attempt = await probe(fetchImpl, url, schemeHeaders(scheme, apiKey))
       last = attempt
-      if (attempt.ok) {
-        return {
-          id,
-          config: { type: 'anthropic', baseUrl: anthropicRoot(candidate) },
-          models: parseModelList(attempt.body),
-        }
-      }
+      // A 404 means this path is not an API root at all, and status 0 means the
+      // host never answered; the other credential style will not conjure one up.
+      if (attempt.status === 404 || attempt.status === 0) break
+      if (attempt.ok && isModelListBody(attempt.body)) record(found, candidate, scheme, attempt.body)
+      if (found.length === schemes.length) break
     }
-    if (!attempt.ok && attempt.status !== 404 && attempt.status !== 0) break
+    if (found.length === 0 && !last!.ok && last!.status !== 404 && last!.status !== 0) break
   }
 
-  throw new Error(describeFailure(last!, apiKey))
+  if (found.length === 0) throw new Error(describeFailure(last!, apiKey))
+  return found.map((entry, index) => ({
+    id: index === 0 ? id : `${id.slice(0, MAX_ID_STEM)}-${entry.type}`,
+    config: { type: entry.type, baseUrl: entry.baseUrl },
+    models: entry.models,
+  }))
+}
+
+type Scheme = 'bearer' | 'anthropic'
+
+const schemes: Scheme[] = ['bearer', 'anthropic']
+
+interface Found {
+  type: ProviderConfig['type']
+  baseUrl: string
+  models: ModelInfo[]
+  fingerprint: string
+}
+
+const MAX_ID_STEM = 120
+
+function schemeHeaders(scheme: Scheme, apiKey: string): Record<string, string> {
+  return scheme === 'bearer' ? { Authorization: `Bearer ${apiKey}` } : anthropicHeaders(apiKey)
+}
+
+// One provider per protocol, first match wins. Endpoints that answer both
+// credential styles with the same catalogue are one backend, not two.
+function record(found: Found[], candidate: string, scheme: Scheme, body: unknown): void {
+  const type: ProviderConfig['type'] =
+    scheme === 'anthropic' || advertisesAnthropicProtocol(body) ? 'anthropic' : 'openai'
+  if (found.some((entry) => entry.type === type)) return
+  const models = parseModelList(body)
+  const fingerprint = models
+    .map((model) => model.id)
+    .sort()
+    .join('\n')
+  if (found.some((entry) => entry.fingerprint === fingerprint)) return
+  found.push({
+    type,
+    baseUrl: type === 'anthropic' ? anthropicRoot(candidate) : candidate,
+    models,
+    fingerprint,
+  })
 }
 
 export function normaliseBaseUrl(rawUrl: string): string {
@@ -224,11 +255,12 @@ function advertisesAnthropicProtocol(body: unknown): boolean {
   const entries = modelEntries(body)
   if (entries.length === 0) return false
 
-  const endpointTypes = new Set(
-    entries.flatMap((entry) => stringList(entry['supported_endpoint_types'])),
-  )
-  if (endpointTypes.size > 0) {
-    return endpointTypes.has('anthropic') && !endpointTypes.has('openai')
+  // Judge each model on its own advertisement rather than a union across the
+  // catalogue: a gateway whose every model speaks anthropic is an anthropic
+  // endpoint even when some of them also accept openai calls.
+  const advertised = entries.map((entry) => stringList(entry['supported_endpoint_types']))
+  if (advertised.some((types) => types.length > 0)) {
+    return advertised.every((types) => types.includes('anthropic'))
   }
 
   if (entries.some(isVendorNamespaced)) return false

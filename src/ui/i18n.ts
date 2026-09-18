@@ -38,6 +38,7 @@ export interface Strings {
   titleProvider: string
   titleLogout: string
   titleKeyChange: string
+  titleModelRefresh: string
   titleSessions: string
   titleSessionAction: string
   resumed: (id: string, count: number) => string
@@ -111,6 +112,7 @@ export interface Strings {
   budgetUnlimited: string
   budgetInvalid: string
   modelSet: (value: string) => string
+  modelsRefreshed: (provider: string, count: number) => string
   noModels: string
   bypassOff: string
   bypassAsk1: string
@@ -188,6 +190,7 @@ const en: Strings = {
   titleProvider: 'Provider',
   titleLogout: 'Sign out of a provider',
   titleKeyChange: 'Change API key for a provider',
+  titleModelRefresh: 'Reload models for a provider',
   titleSessions: 'Resume a session',
   titleSessionAction: 'Session action',
   resumed: (id, count) => `Resumed ${id} — ${count} messages restored`,
@@ -274,6 +277,7 @@ const en: Strings = {
   budgetUnlimited: 'Token budget: unlimited (0). Set /budget <tokens> to restore a limit.',
   budgetInvalid: 'Invalid budget: must be between 1,000 and 10,000,000',
   modelSet: (value) => `Model: ${value}`,
+  modelsRefreshed: (provider, count) => `${provider}: ${count} models reloaded from the endpoint.`,
   noModels: 'No models available. Use /login to add a provider.',
   bypassOff: 'Approval prompts are back on.',
   bypassAsk1: 'Disable approval prompts for this session?',
@@ -325,6 +329,7 @@ const en: Strings = {
     provider: 'switch between configured providers',
     logout: 'choose a provider to sign out from',
     key: 'change API key for a provider',
+    refresh: 'reload the model list for a provider',
     effort: 'set reasoning depth',
     thinking: 'toggle reasoning',
     budget: 'set token budget per turn',
@@ -394,6 +399,7 @@ const ru: Strings = {
   titleProvider: 'Провайдер',
   titleLogout: 'Выбрать API для выхода',
   titleKeyChange: 'Сменить ключ провайдера',
+  titleModelRefresh: 'Обновить модели провайдера',
   titleSessions: 'Восстановить сессию',
   titleSessionAction: 'Действие с сессией',
   resumed: (id, count) => `Сессия ${id} восстановлена — сообщений: ${count}`,
@@ -480,6 +486,7 @@ const ru: Strings = {
   budgetUnlimited: 'Лимит токенов: безлимитный (0). Введи /budget <число> чтобы вернуть лимит.',
   budgetInvalid: 'Неверный лимит: от 1 000 до 10 000 000',
   modelSet: (value) => `Модель: ${value}`,
+  modelsRefreshed: (provider, count) => `${provider}: с эндпоинта получено моделей — ${count}.`,
   noModels: 'Моделей нет. Добавь провайдера через /login.',
   bypassOff: 'Подтверждения снова включены.',
   bypassAsk1: 'Отключить подтверждения на эту сессию?',
@@ -531,6 +538,7 @@ const ru: Strings = {
     provider: 'переключиться между провайдерами',
     logout: 'выбрать провайдера и удалить его ключ',
     key: 'сменить ключ провайдера',
+    refresh: 'обновить список моделей провайдера',
     effort: 'глубина размышлений',
     thinking: 'включить/выключить размышления',
     budget: 'лимит токенов за ход (0 = безлимит)',

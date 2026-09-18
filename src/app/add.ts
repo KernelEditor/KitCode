@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 import { formatModelRef, parseModelRef } from '../config/schema'
 import { detectProvider } from '../config/detect'
+import type { DetectedProvider } from '../config/detect'
 import { authPath, projectConfigPath } from '../config/paths'
 import {
   configLocation,
@@ -47,13 +48,16 @@ export async function addProvider(
   const configBefore = structuredClone(config)
   const authBefore = { ...auth }
 
-  config.providers[detected.id] = detected.config
-  auth[detected.id] = key
+  for (const provider of detected) {
+    config.providers[provider.id] = provider.config
+    auth[provider.id] = key
+  }
 
-  const models = detected.models
+  const primary = detected[0]!
+  const models = detected.flatMap((provider) => provider.models)
   if (!config.model) {
-    const chosen = pickDefault(models)
-    if (chosen) config.model = formatModelRef(detected.id, chosen)
+    const chosen = pickDefaultRef(detected)
+    if (chosen) config.model = chosen
   }
 
   try {
@@ -68,15 +72,16 @@ export async function addProvider(
   }
   const location = await configLocation()
 
-  const protocol = detected.config.type === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible'
-  const rows: [string, string][] = [
-    ['provider', `${detected.id} — this endpoint speaks the ${protocol} protocol`],
+  const rows: [string, string][] = detected.map((provider) => [
+    'provider',
+    `${provider.id} — this endpoint speaks the ${protocolLabel(provider)} protocol`,
+  ])
+  rows.push(
     ['models', models.length === 0 ? 'none listed by this endpoint' : `${models.length} available`],
-    ['default', describeDefault(config.model, detected.id, models)],
-  ]
+    ['default', describeDefault(config.model, detected)],
+  )
 
-  alternatives(models, config.model, detected.id).forEach((model, index) => {
-    const ref = formatModelRef(detected.id, model.id)
+  alternatives(detected, config.model).forEach(([ref, model], index) => {
     rows.push([index === 0 ? 'also try' : '', `${ref}  ${price(model)}`])
   })
 
@@ -87,11 +92,16 @@ export async function addProvider(
   for (const [label, value] of rows) console.log(label.padEnd(LABEL_WIDTH) + value)
 }
 
-function describeDefault(ref: string | undefined, providerId: string, models: ModelInfo[]): string {
+function protocolLabel(provider: DetectedProvider): string {
+  return provider.config.type === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible'
+}
+
+function describeDefault(ref: string | undefined, detected: DetectedProvider[]): string {
   if (!ref) return 'not set — start kitcode and pick one with /model'
   const parsed = parseModelRef(ref)
-  if (parsed?.provider !== providerId) return `${ref} — already in your config, left alone`
-  return `${ref}  ${price(models.find((model) => model.id === parsed.model))}`
+  const owner = detected.find((provider) => provider.id === parsed?.provider)
+  if (!owner) return `${ref} — already in your config, left alone`
+  return `${ref}  ${price(owner.models.find((model) => model.id === parsed!.model))}`
 }
 
 function price(model: ModelInfo | undefined): string {
@@ -104,28 +114,38 @@ function money(value: number): string {
   return `$${value >= 1 ? value.toFixed(2) : Number(value.toFixed(4))}`
 }
 
-function pickDefault(models: ModelInfo[]): string | undefined {
+function pickDefaultRef(detected: DetectedProvider[]): string | undefined {
+  const refs = modelRefs(detected)
   for (const preferred of PREFERRED) {
-    const match = models.find((model) => model.id.endsWith(preferred))
-    if (match) return match.id
+    const match = refs.find(([, model]) => model.id.endsWith(preferred))
+    if (match) return match[0]
   }
-  return models[0]?.id
+  return refs[0]?.[0]
 }
 
 function alternatives(
-  models: ModelInfo[],
+  detected: DetectedProvider[],
   defaultRef: string | undefined,
-  providerId: string,
-): ModelInfo[] {
+): [string, ModelInfo][] {
+  const refs = modelRefs(detected)
   const ranked = [
-    ...PREFERRED.flatMap((preferred) => models.filter((model) => model.id.endsWith(preferred))),
-    ...models.filter((model) => model.pricing),
-    ...models,
+    ...PREFERRED.flatMap((preferred) => refs.filter(([, model]) => model.id.endsWith(preferred))),
+    ...refs.filter(([, model]) => model.pricing),
+    ...refs,
   ]
   const picked = new Map<string, ModelInfo>()
-  for (const model of ranked) {
+  for (const [ref, model] of ranked) {
     if (picked.size === ALTERNATIVES) break
-    if (formatModelRef(providerId, model.id) !== defaultRef) picked.set(model.id, model)
+    if (ref !== defaultRef) picked.set(ref, model)
   }
-  return [...picked.values()]
+  return [...picked.entries()]
+}
+
+function modelRefs(detected: DetectedProvider[]): [string, ModelInfo][] {
+  return detected.flatMap((provider) =>
+    provider.models.map((model): [string, ModelInfo] => [
+      formatModelRef(provider.id, model.id),
+      model,
+    ]),
+  )
 }

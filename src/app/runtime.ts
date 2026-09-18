@@ -1,7 +1,10 @@
 import { createMemoryTool } from '../tools/memory'
+import { searchWorkspaceFiles } from '../ui/workspace-files'
+import { killAllJobs } from '../tools/jobs'
 import { readProjectMemory, saveProjectMemory, clearProjectMemory } from '../core/memory'
 import { openAiEffort, resolveEffort } from '../providers/effort'
 import { detectProvider } from '../config/detect'
+import type { DetectedProvider } from '../config/detect'
 import { formatModelRef, parseModelRef } from '../config/schema'
 import type { Config } from '../config/schema'
 import path from 'node:path'
@@ -59,7 +62,7 @@ import {
 } from '../core/usage'
 import { createMcpManager } from '../mcp/client'
 import { fetchProviderBalance } from '../providers/balance'
-import { loadModels } from '../providers/catalog'
+import { loadModels, refreshModels } from '../providers/catalog'
 import { pricingFor } from '../providers/pricing'
 import { createRegistry } from '../providers/registry'
 import { formatRateLimits } from '../providers/rate-limits'
@@ -350,14 +353,16 @@ export async function boot(options: {
 
     async addProvider(url, key) {
       const detected = await detectProvider(url, key)
-      rememberModels(detected.id, detected.models)
+      for (const provider of detected) rememberModels(provider.id, provider.models)
       const configBefore = structuredClone(config)
       const authBefore = { ...auth }
-      config.providers[detected.id] = detected.config
-      auth[detected.id] = key
+      for (const provider of detected) {
+        config.providers[provider.id] = provider.config
+        auth[provider.id] = key
+      }
 
-      const chosen = preferredModel(detected.models)
-      if (chosen) config.model = formatModelRef(detected.id, chosen)
+      const chosen = preferredDetectedModel(detected)
+      if (chosen) config.model = formatModelRef(chosen.providerId, chosen.model.id)
 
       try {
         await saveConfig(config)
@@ -372,12 +377,15 @@ export async function boot(options: {
 
       registry = createRegistry(config, auth)
       const nextRef = config.model ?? ''
-      const discovered = detected.models.find((model) => model.id === chosen)?.contextWindow
-      activateModel(nextRef, undefined, discovered)
+      activateModel(nextRef, undefined, chosen?.model.contextWindow)
       void refreshModelContextWindow()
 
-      const kind = detected.config.type === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible'
-      return `${detected.id} · ${kind} · ${detected.models.length} models`
+      return detected
+        .map((provider) => {
+          const kind = provider.config.type === 'anthropic' ? 'Anthropic' : 'OpenAI-compatible'
+          return `${provider.id} · ${kind} · ${provider.models.length} models`
+        })
+        .join('\n')
     },
 
     currentProviderId: () => parseModelRef(modelRef)?.provider,
@@ -787,6 +795,16 @@ export async function boot(options: {
       return items
     },
 
+    async refreshProviderModels(providerId) {      const models = await refreshModels(registry.get(providerId))
+      rememberModels(providerId, models)
+      if (parseModelRef(modelRef)?.provider === providerId) void refreshModelContextWindow()
+      return models.length
+    },
+
+    async listWorkspaceFiles(query) {
+      return searchWorkspaceFiles(options.cwd, query)
+    },
+
     async listPromptItems() {
       const prompts = await listPrompts()
       return prompts.map((prompt) => ({
@@ -997,6 +1015,7 @@ export async function boot(options: {
       try {
         await Promise.all([persistQueue, configQueue])
       } finally {
+        killAllJobs()
         await mcp.close()
       }
     },
@@ -1009,4 +1028,17 @@ function preferredModel(models: ModelInfo[]): string | undefined {
     if (match) return match.id
   }
   return models[0]?.id
+}
+
+function preferredDetectedModel(
+  detected: DetectedProvider[],
+): { providerId: string; model: ModelInfo } | undefined {
+  const candidates = detected.flatMap((provider) =>
+    provider.models.map((model) => ({ providerId: provider.id, model })),
+  )
+  for (const preferred of PREFERRED) {
+    const match = candidates.find((candidate) => candidate.model.id.endsWith(preferred))
+    if (match) return match
+  }
+  return candidates[0]
 }

@@ -1,8 +1,18 @@
 import { useTerminalSize } from './terminal-size'
-import { Box, Text } from 'ink'
-import { Fragment, useMemo } from 'react'
-import type { ReactNode } from 'react'
+import { Box, Text as InkText } from 'ink'
+import { createContext, Fragment, useContext, useMemo } from 'react'
+import type { ComponentProps, ReactNode } from 'react'
 import stringWidth from 'string-width'
+
+const DimContext = createContext(false)
+
+// Every Text in this file goes through the shadow so one `dim` prop on
+// <Markdown> can grey out a whole rendered block: Ink forbids a Box inside a
+// Text, so the styling cannot simply be wrapped around the output.
+function Text({ dimColor, ...props }: ComponentProps<typeof InkText>): ReactNode {
+  const dim = useContext(DimContext)
+  return <InkText {...props} dimColor={dimColor ?? dim} />
+}
 
 interface MdNode {
   type: 'heading' | 'paragraph' | 'blockquote' | 'ul' | 'ol' | 'table' | 'code' | 'hr'
@@ -17,14 +27,16 @@ interface MdNode {
   children?: MdNode[]
 }
 
-export function Markdown({ children }: { children: string }): ReactNode {
+export function Markdown({ children, dim = false }: { children: string; dim?: boolean }): ReactNode {
   const blocks = useMemo(() => extractBlocks(children), [children])
   return (
-    <Box flexDirection="column">
-      {blocks.map((block, i) => (
-        <BlockView key={i} block={block} />
-      ))}
-    </Box>
+    <DimContext.Provider value={dim}>
+      <Box flexDirection="column">
+        {blocks.map((block, i) => (
+          <BlockView key={i} block={block} />
+        ))}
+      </Box>
+    </DimContext.Provider>
   )
 }
 

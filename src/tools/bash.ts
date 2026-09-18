@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { startJob } from './jobs'
 import { brief } from './summary'
 import type { Tool, ToolResult } from './types'
 
@@ -10,12 +11,13 @@ const MAX_COMMAND_CHARS = 20_000
 interface BashInput {
   command: string
   timeoutMs?: number
+  background?: boolean
 }
 
 export const bashTool: Tool = {
   name: 'bash',
   description:
-    'Run a shell command in the workspace root. stdout and stderr are merged. Avoid commands that wait for interactive input.',
+    'Run a shell command in the workspace root. stdout and stderr are merged. Avoid commands that wait for interactive input. Set background: true to keep a long command (dev server, test watcher, build) running while you carry on with other work, then collect its output with bash_output.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -26,8 +28,13 @@ export const bashTool: Tool = {
       },
       timeoutMs: {
         type: 'integer',
-        description: `Timeout in milliseconds (default ${DEFAULT_TIMEOUT}, maximum ${MAX_TIMEOUT})`,
+        description: `Timeout in milliseconds (default ${DEFAULT_TIMEOUT}, maximum ${MAX_TIMEOUT}); ignored for background commands`,
         minimum: 1,
+      },
+      background: {
+        type: 'boolean',
+        description:
+          'Start the command and return at once instead of waiting for it. Read its output later with bash_output. Background commands have no timeout and are killed when the session ends.',
       },
     },
     required: ['command'],
@@ -35,13 +42,14 @@ export const bashTool: Tool = {
   },
   defaultPermission: 'ask',
   summarize(input) {
-    return `bash(${brief((input as BashInput).command)})`
+    const { command, background } = input as BashInput
+    return background ? `bash(${brief(command)}, background)` : `bash(${brief(command)})`
   },
   async preview(input) {
     return { kind: 'text', text: (input as BashInput).command }
   },
   execute(input, ctx) {
-    const { command, timeoutMs } = input as BashInput
+    const { command, timeoutMs, background } = input as BashInput
     if (command.length > MAX_COMMAND_CHARS) {
       return Promise.resolve<ToolResult>({
         content: `Command exceeds the ${MAX_COMMAND_CHARS} character limit.`,
@@ -52,6 +60,16 @@ export const bashTool: Tool = {
     const timeout = Math.min(requested, MAX_TIMEOUT)
     if (ctx.signal.aborted) {
       return Promise.resolve<ToolResult>({ content: '[cancelled before the command started]', isError: true })
+    }
+
+    if (background) {
+      const started = startJob(command, ctx.cwd)
+      if ('error' in started) {
+        return Promise.resolve<ToolResult>({ content: started.error, isError: true })
+      }
+      return Promise.resolve<ToolResult>({
+        content: `[started in the background as ${started.id}] Read its output with bash_output({ id: "${started.id}" }).`,
+      })
     }
 
     return new Promise<ToolResult>((settle) => {
