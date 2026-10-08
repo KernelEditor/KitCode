@@ -59,17 +59,16 @@ describe('transcript layout', () => {
     expect(done).not.toContain('old line')
     expect(done).not.toContain('── result ──')
   })
-  it.each([32, 80])('closes model and prompt frames within %s columns', (columns) => {
+  it.each([32, 80])('fits model and copy-friendly prompt frames within %s columns', (columns) => {
     const frames = [
       renderToString(<Picker title="Models" items={[{ key: 'model', label: 'model'.repeat(40), hint: 'hint'.repeat(40) }]} onSelect={() => {}} onCancel={() => {}} />, { columns }),
       renderToString(<PromptInput disabled={false} value={'message '.repeat(40)} onChange={() => {}} onSubmit={() => {}} history={[]} />, { columns }),
     ]
     for (const frame of frames) {
       const lines = frame.split('\n').filter((line) => line.trim() !== '')
-      expect(lines.some((line) => line.endsWith('╮'))).toBe(true)
-      expect(lines.some((line) => line.endsWith('╯'))).toBe(true)
       expect(lines.every((line) => stringWidth(line) <= columns)).toBe(true)
     }
+    expect(frames[1]).not.toContain('│')
   })
 
   it('renders message separators as whitespace instead of copyable rules', () => {

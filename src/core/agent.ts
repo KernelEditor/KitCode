@@ -28,7 +28,6 @@ const MAX_RETRIES = 3
 const INITIAL_BACKOFF_MS = 1000
 
 export const MAX_TURN_STEPS = 64
-export const MAX_TOOL_CALLS_PER_STEP = 32
 
 export interface ToolLookup {
   get(name: string): Tool | undefined
@@ -45,6 +44,21 @@ export interface UsageSink {
   record(modelRef: string, usage: Usage): void
 }
 
+export interface ExecutionLane {
+  run<T>(operation: () => Promise<T>): Promise<T>
+}
+
+export function createExecutionLane(): ExecutionLane {
+  let tail: Promise<void> = Promise.resolve()
+  return {
+    run<T>(operation: () => Promise<T>) {
+      const result = tail.then(operation)
+      tail = result.then(() => undefined, () => undefined)
+      return result
+    },
+  }
+}
+
 export interface AgentConfig {
   provider: Provider
   modelId: string
@@ -59,6 +73,9 @@ export interface AgentConfig {
   thinking: boolean
   budget?: TurnBudget
   checkpoint?: FileCheckpointSink
+  permissionLane?: ExecutionLane
+  executionLane?: ExecutionLane
+  modelRequestLane?: ExecutionLane
 }
 
 interface StreamOutcome {
@@ -73,6 +90,13 @@ export async function runTurn(
   hooks: AgentHooks,
   signal: AbortSignal,
 ): Promise<Message[]> {
+  const permissionLane = cfg.permissionLane ?? createExecutionLane()
+  const originalHooks = hooks
+  hooks = {
+    ...hooks,
+    requestPermission: (request) => permissionLane.run(async () =>
+      signal.aborted ? 'deny' : originalHooks.requestPermission(request)),
+  }
   let messages = [...history]
   let pauses = 0
   let steps = 0
@@ -92,25 +116,30 @@ export async function runTurn(
       return messages
     }
 
-    const budgetDecision = cfg.budget?.beforeRequest({
-      modelRef: cfg.modelRef,
-      maxOutputTokens: cfg.maxTokens,
-      estimatedInputTokens: estimateRequestTokens(cfg, messages),
-    })
-    if (budgetDecision && !budgetDecision.allowed) {
-      hooks.onEvent({ type: 'notice', level: 'warn', text: budgetDecision.reason })
-      hooks.onEvent({ type: 'turn_end', stopReason: 'max_tokens' })
-      return messages
-    }
+    const request = async (): Promise<StreamOutcome | null> => {
+      if (signal.aborted) return { content: [], stopReason: 'aborted' }
+      const budgetDecision = cfg.budget?.beforeRequest({
+        modelRef: cfg.modelRef,
+        maxOutputTokens: cfg.maxTokens,
+        estimatedInputTokens: estimateRequestTokens(cfg, messages),
+      })
+      if (budgetDecision && !budgetDecision.allowed) {
+        hooks.onEvent({ type: 'notice', level: 'warn', text: budgetDecision.reason })
+        hooks.onEvent({ type: 'turn_end', stopReason: 'max_tokens' })
+        return null
+      }
 
-    hooks.onEvent({ type: 'turn_start' })
-    const outcome = await consumeStream(
-      cfg,
-      messages,
-      hooks,
-      signal,
-      budgetDecision?.maxOutputTokens ?? cfg.maxTokens,
-    )
+      hooks.onEvent({ type: 'turn_start' })
+      return consumeStream(
+        cfg,
+        messages,
+        hooks,
+        signal,
+        budgetDecision?.maxOutputTokens ?? cfg.maxTokens,
+      )
+    }
+    const outcome = await (cfg.modelRequestLane?.run(request) ?? request())
+    if (!outcome) return messages
     messages.push({ role: 'assistant', content: outcome.content })
 
     if (outcome.stopReason === 'aborted') {
@@ -119,16 +148,6 @@ export async function runTurn(
     }
 
     if (outcome.stopReason === 'tool_use') {
-      const callCount = outcome.content.filter((block) => block.type === 'tool_use').length
-      if (callCount > MAX_TOOL_CALLS_PER_STEP) {
-        hooks.onEvent({
-          type: 'notice',
-          level: 'warn',
-          text: `The model returned ${callCount} tool calls at once; the limit is ${MAX_TOOL_CALLS_PER_STEP}. None were run. Ask it to split the work into smaller batches.`,
-        })
-        hooks.onEvent({ type: 'turn_end', stopReason: 'max_tokens' })
-        return sanitizeHistory(messages)
-      }
       const results = await runToolCalls(cfg, outcome.content, hooks, signal)
       if (results.length > 0) messages.push({ role: 'user', content: results })
       if (signal.aborted) {
@@ -350,10 +369,32 @@ async function runToolCalls(
   signal: AbortSignal,
 ): Promise<ToolResultBlock[]> {
   const calls = content.filter((block): block is ToolUseBlock => block.type === 'tool_use')
-  // Calls may share the permission overlay, checkpoint, filesystem, or process
-  // state. Preserve call order so one prompt cannot overwrite another and hang.
   const results: ToolResultBlock[] = []
-  for (const call of calls) results.push(await runOneCall(cfg, call, hooks, signal))
+  const run = (call: ToolUseBlock) => {
+    const operation = () => runOneCall(cfg, call, hooks, signal)
+    return call.name !== 'task' && cfg.executionLane
+      ? cfg.executionLane.run(operation)
+      : operation()
+  }
+  for (let index = 0; index < calls.length;) {
+    const call = calls[index]!
+    if (call.name !== 'task') {
+      results.push(await run(call))
+      index += 1
+      continue
+    }
+    const batch: Promise<ToolResultBlock>[] = []
+    while (calls[index]?.name === 'task') {
+      batch.push(run(calls[index]!))
+      index += 1
+    }
+    // Drain siblings even if a permission hook fails, before committing the turn.
+    const settled = await Promise.allSettled(batch)
+    for (const result of settled) {
+      if (result.status === 'rejected') throw result.reason
+      results.push(result.value)
+    }
+  }
   return results
 }
 
@@ -363,6 +404,7 @@ async function runOneCall(
   hooks: AgentHooks,
   signal: AbortSignal,
 ): Promise<ToolResultBlock> {
+  if (signal.aborted) return toolError(call.id, 'Interrupted by the user before this tool ran.')
   const tool = cfg.tools.get(call.name)
   if (!tool) {
     return toolError(call.id, `Unknown tool "${call.name}". Use only the tools provided.`)
@@ -384,28 +426,32 @@ async function runOneCall(
   }
 
   const requestedPermission = requestedPermissionFor(tool, call.input, ctx)
-  const gate = cfg.permissions.decide(tool, requestedPermission)
-  if (gate === 'deny') {
-    return toolError(
-      call.id,
-      cfg.permissions.denyReason?.(tool, requestedPermission) ??
-        `Tool "${tool.name}" is disabled by the user's configuration. Do not retry it; find another way or ask.`,
-    )
-  }
-
-  if (gate === 'ask') {
-    const decision = await hooks.requestPermission({
-      toolName: tool.name,
-      summary,
-      input: call.input,
-      display: await previewCall(tool, call.input, ctx),
-      allowAlways: canAlwaysApprove(tool),
-    })
-    if (decision === 'deny') {
-      return toolError(call.id, 'The user declined this call. Do not retry it; ask how to proceed.')
+  const permission = async (): Promise<ToolResultBlock | undefined> => {
+    const gate = cfg.permissions.decide(tool, requestedPermission)
+    if (gate === 'deny') {
+      return toolError(
+        call.id,
+        cfg.permissions.denyReason?.(tool, requestedPermission) ??
+          `Tool "${tool.name}" is disabled by the user's configuration. Do not retry it; find another way or ask.`,
+      )
     }
-    if (decision === 'always') cfg.permissions.grantForSession(tool.name)
+    if (gate === 'ask') {
+      const decision = await hooks.requestPermission({
+        toolName: tool.name,
+        summary,
+        input: call.input,
+        display: await previewCall(tool, call.input, ctx),
+        allowAlways: canAlwaysApprove(tool),
+      })
+      if (decision === 'deny') {
+        return toolError(call.id, 'The user declined this call. Do not retry it; ask how to proceed.')
+      }
+      if (decision === 'always') cfg.permissions.grantForSession(tool.name)
+    }
+    return undefined
   }
+  const permissionResult = await permission()
+  if (permissionResult) return permissionResult
 
   if (signal.aborted) {
     return toolError(call.id, 'Interrupted by the user before this tool ran.')

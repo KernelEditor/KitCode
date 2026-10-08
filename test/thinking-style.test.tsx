@@ -28,4 +28,23 @@ describe('thinking styling', () => {
     expect(lines.find((line) => line.includes('Reviewing the plan'))).toContain(DIM)
     expect(lines.find((line) => line.includes('Final answer'))).not.toContain(DIM)
   })
+
+  it('does not override dim reasoning with Markdown accent colors', () => {
+    const frame = renderToString(
+      <Transcript
+        workspace="test"
+        bubbles={[{
+          kind: 'assistant',
+          id: 'a',
+          text: '',
+          thinking: '```\nconst value = 1\n```',
+          streaming: false,
+        }]}
+      />,
+      { columns: 80 },
+    )
+    const line = frame.split('\n').find((value) => value.includes('const value'))
+    expect(line).toContain(DIM)
+    expect(line).not.toContain('\u001b[36m')
+  })
 })

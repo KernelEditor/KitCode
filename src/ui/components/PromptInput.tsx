@@ -218,9 +218,6 @@ export const PromptInput = memo(function PromptInput({
     <Box width={columns} maxWidth="100%" flexDirection="column" marginTop={1} flexShrink={0}>
       <Box
         width="100%"
-        borderStyle="round"
-        borderColor={disabled ? theme.warn : theme.accent}
-        borderDimColor={disabled}
         paddingX={1}
       >
         <Text color={disabled ? 'gray' : theme.accent}>› </Text>

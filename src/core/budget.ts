@@ -11,6 +11,7 @@ export interface BudgetLimits {
 }
 
 export interface TurnBudget {
+  readonly hasLimits?: boolean
   beforeRequest(request: {
     modelRef: string
     maxOutputTokens: number
@@ -33,6 +34,7 @@ export function createTurnBudget(
   })
 
   return {
+    hasLimits: limits.maxTokensPerTurn > 0 || limits.maxCostUsdPerTurn > 0,
     beforeRequest(request) {
       const current = snapshot()
       if (limits.maxTokensPerTurn > 0 && current.tokens >= limits.maxTokensPerTurn) {

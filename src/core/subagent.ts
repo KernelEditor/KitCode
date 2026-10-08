@@ -1,7 +1,7 @@
 import type { Message } from '../providers/types'
 import { brief } from '../tools/summary'
 import type { AgentConfig, ToolLookup } from './agent'
-import { runTurn } from './agent'
+import { createExecutionLane, runTurn } from './agent'
 import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from './types'
 
 export const TASK_TOOL_NAME = 'task'
@@ -43,6 +43,9 @@ export function createSubagentRunner(
   makeConfig: (system: string, tools: ToolLookup) => AgentConfig,
   tools: ToolLookup,
 ): SubagentRunner {
+  const permissionLane = createExecutionLane()
+  const executionLane = createExecutionLane()
+  const modelRequestLane = createExecutionLane()
   return {
     async run(request) {
       if (request.signal.aborted) return SUBAGENT_CANCELLED
@@ -51,6 +54,9 @@ export function createSubagentRunner(
       const base = makeConfig(SUBAGENT_SYSTEM, tools)
       const cfg: AgentConfig = {
         ...base,
+        permissionLane,
+        executionLane,
+        modelRequestLane: base.budget?.hasLimits ? modelRequestLane : undefined,
         provider: {
           id: base.provider.id,
           kind: base.provider.kind,

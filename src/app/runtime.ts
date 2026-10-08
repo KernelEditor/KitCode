@@ -288,7 +288,7 @@ export async function boot(options: {
   }
 
   tools.register([
-    createTaskTool(wrappedRunner, config.budget.maxSubagentsPerTurn),
+    createTaskTool(wrappedRunner),
   ])
 
   let persistQueue: Promise<void> = Promise.resolve()

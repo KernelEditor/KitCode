@@ -290,8 +290,6 @@ export function App({
       const command = (firstSpace === -1 ? body : body.slice(0, firstSpace)).toLowerCase()
       const rawRest = firstSpace === -1 ? '' : body.slice(firstSpace).trim()
       const rest = rawRest ? rawRest.split(/\s+/) : []
-      setInput('')
-
       switch (command) {
         case 'help':
           notice(
@@ -1347,7 +1345,9 @@ export function App({
         
         
         if (!detachedInput) setInput('')
-        if (busyRef.current || slashPendingRef.current > 0) {
+        const command = text.slice(1).trim().split(/\s+/)[0]?.toLowerCase()
+        const liveCommand = ['help', 'usage', 'subagents', 'config', 'exit', 'quit'].includes(command ?? '')
+        if ((busyRef.current && !liveCommand) || slashPendingRef.current > 0) {
           queueRef.current = [...queueRef.current, { kind: 'command', line: text }]
           setPendingCount(queueRef.current.length)
           return

@@ -6,6 +6,20 @@ import { PromptInput } from '../src/ui/components/PromptInput'
 import type { PromptInputProps } from '../src/ui/types'
 
 describe('slash command keyboard navigation', () => {
+  it('renders long pasted prompts without vertical frame characters', async () => {
+    const submitted: string[] = []
+    const terminal = renderPrompt((value) => submitted.push(value))
+    const prompt = 'long prompt text '.repeat(30)
+    try {
+      await terminal.input(`\u001b[200~${prompt}\u001b[201~`)
+      expect(terminal.output()).not.toContain('│')
+      await terminal.input('\r')
+      expect(submitted).toEqual([prompt])
+    } finally {
+      terminal.cleanup()
+    }
+  })
+
   it('moves with arrows and activates the selected command with enter', async () => {
     const submitted: string[] = []
     const terminal = renderPrompt((value) => submitted.push(value))
@@ -145,6 +159,8 @@ function renderPrompt(
     )
   }
 
+  let output = ''
+  stdout.on('data', (chunk: Buffer) => { output += chunk.toString() })
   const instance = render(<Harness />, {
     stdin,
     stdout,
@@ -156,6 +172,7 @@ function renderPrompt(
   const ready = tick()
 
   return {
+    output: () => output,
     async input(value: string) {
       await ready
       stdin.write(value)

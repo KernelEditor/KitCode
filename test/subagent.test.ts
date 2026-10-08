@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { runTurn } from '../src/core/agent'
 import type { AgentConfig, ToolLookup } from '../src/core/agent'
 import {
   createSubagentRunner,
@@ -7,9 +8,54 @@ import {
   SUBAGENT_NO_ANSWER,
 } from '../src/core/subagent'
 import type { ChatRequest, Provider, StreamEvent } from '../src/providers/types'
-import { createTaskTool, MAX_SUBAGENTS_PER_TURN } from '../src/tools/task'
+import { createTaskTool } from '../src/tools/task'
 import { toToolSchema } from '../src/tools/types'
 import type { Tool, ToolContext } from '../src/tools/types'
+
+it('starts sibling tasks together, serializes approvals and preserves result order', async () => {
+  const started: string[] = []
+  const releases = new Map<string, (value: string) => void>()
+  let resolveBothStarted!: () => void
+  const bothStarted = new Promise<void>((resolve) => { resolveBothStarted = resolve })
+  const task = createTaskTool({
+    run: async (request) => {
+      started.push(request.prompt)
+      const result = new Promise<string>((resolve) => releases.set(request.prompt, resolve))
+      if (started.length === 2) resolveBothStarted()
+      return result
+    },
+  })
+  const { provider } = scripted([
+    [{ type: 'done', stopReason: 'tool_use', content: [
+      { type: 'tool_use', id: 'first', name: 'task', input: { prompt: 'first', description: 'first task' } },
+      { type: 'tool_use', id: 'second', name: 'task', input: { prompt: 'second', description: 'second task' } },
+    ] }],
+    answerTurn('done'),
+  ])
+  const tools = lookupOf([task])
+  const config = makeConfigWith(provider)('', tools)
+  config.permissions = { decide: () => 'ask', grantForSession: () => {} }
+  let activePrompts = 0
+  const pending = runTurn(config, [], {
+    onEvent: () => {},
+    requestPermission: async () => {
+      activePrompts += 1
+      expect(activePrompts).toBe(1)
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      activePrompts -= 1
+      return 'once'
+    },
+  }, new AbortController().signal)
+  await bothStarted
+  expect(started).toEqual(['first', 'second'])
+  releases.get('second')?.('second result')
+  releases.get('first')?.('first result')
+  const history = await pending
+  expect(history[1]?.content).toMatchObject([
+    { toolUseId: 'first', content: expect.stringContaining('first result') },
+    { toolUseId: 'second', content: expect.stringContaining('second result') },
+  ])
+})
 
 function scripted(turns: StreamEvent[][]): { provider: Provider; requests: ChatRequest[] } {
   const requests: ChatRequest[] = []
@@ -343,25 +389,18 @@ describe('task tool', () => {
     expect(requests).toHaveLength(0)
   })
 
-  it('caps how many subagents one parent turn can spawn', async () => {
+  it('allows more than the old per-turn subagent limit', async () => {
     const { provider } = looping(() => answerTurn('done'))
     const task = createTaskTool(createSubagentRunner(makeConfigWith(provider), lookupOf([])))
     const turn = new AbortController()
 
     const results = []
-    for (let i = 0; i <= MAX_SUBAGENTS_PER_TURN; i++) {
+    for (let index = 0; index < 50; index += 1) {
       results.push(await task.execute({ description: 'work', prompt: 'do it' }, context(turn.signal)))
     }
 
-    expect(results.slice(0, MAX_SUBAGENTS_PER_TURN).every((r) => !r.isError)).toBe(true)
-    expect(results[MAX_SUBAGENTS_PER_TURN].isError).toBe(true)
-    expect(results[MAX_SUBAGENTS_PER_TURN].content).toContain('limit')
-
-    const fresh = await task.execute(
-      { description: 'work', prompt: 'do it' },
-      context(new AbortController().signal),
-    )
-    expect(fresh.isError).toBeFalsy()
+    expect(results).toHaveLength(50)
+    expect(results.every((result) => !result.isError)).toBe(true)
   })
 
   it('summarizes with the description', () => {

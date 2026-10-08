@@ -6,19 +6,16 @@ import type { Tool, ToolResult } from './types'
 
 const MAX_PROGRESS_LINES = 10
 
-export const MAX_SUBAGENTS_PER_TURN = 3
-
 const DESCRIPTION = [
   'Hand one self-contained sub-task to a subagent that works in its own fresh context and reports back a single summary.',
   'Use it when the task is genuinely independent and its intermediate output would be long or noisy: a wide search across the repository, reading many files to answer one question, tracing where something is used.',
   'Do not use it for work that is a couple of tool calls, and do not use it when you already have what you need — call the tools yourself instead.',
   'The subagent shares this filesystem and working directory but has NO memory of this conversation and cannot ask you anything, so "prompt" must stand alone: the goal, the constraints, and exactly what to report back.',
+  'For multiple independent tasks, issue consecutive task calls in the same response so they can run concurrently. Do not delegate overlapping file edits.',
   'It runs to completion and you receive only its final message.',
 ].join(' ')
 
-export function createTaskTool(runner: SubagentRunner, maxSubagents = MAX_SUBAGENTS_PER_TURN): Tool {
-  const spawnsPerTurn = new WeakMap<AbortSignal, number>()
-
+export function createTaskTool(runner: SubagentRunner): Tool {
   return {
     name: TASK_TOOL_NAME,
     description: DESCRIPTION,
@@ -39,15 +36,6 @@ export function createTaskTool(runner: SubagentRunner, maxSubagents = MAX_SUBAGE
       const instruction = field(input, 'prompt').trim()
       if (instruction === '') {
         return { content: 'task needs a prompt: the full instruction for the subagent.', isError: true }
-      }
-
-      const spawned = (spawnsPerTurn.get(ctx.signal) ?? 0) + 1
-      spawnsPerTurn.set(ctx.signal, spawned)
-      if (spawned > maxSubagents) {
-        return {
-          content: `Already delegated ${maxSubagents} subagents while answering this message, which is the limit. Do the remaining work yourself with the tools you have.`,
-          isError: true,
-        }
       }
 
       const progress: string[] = []
