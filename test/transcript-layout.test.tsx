@@ -69,6 +69,21 @@ describe('transcript layout', () => {
       expect(lines.every((line) => stringWidth(line) <= columns)).toBe(true)
     }
     expect(frames[1]).not.toContain('│')
+    expect(frames[1]).toContain('╮')
+    expect(frames[1]).toContain('╯')
+    expect(frames[1]).not.toContain('…')
+  })
+
+  it('summarizes many running subagents without rendering every task', () => {
+    const agents: Bubble[] = Array.from({ length: 50 }, (_, index) => ({
+      kind: 'subagent', id: `agent-${index}`, description: `Task ${index}`,
+      state: 'running', seq: 0, bubbles: [],
+    }))
+    const frame = renderToString(<Transcript workspace="test" bubbles={agents} maxLiveRows={12} />, { columns: 80 })
+    expect(frame).toContain('50 running')
+    expect(frame).toContain('Task 0')
+    expect(frame).not.toContain('Task 49')
+    expect(frame).toContain('/subagents')
   })
 
   it('renders message separators as whitespace instead of copyable rules', () => {

@@ -55,6 +55,8 @@ export const Transcript = memo(function Transcript({
   }
   const live = liveAt === -1 ? [] : bubbles.slice(liveAt)
   const staticItems: StaticTranscriptItem[] = [HEADER, ...stableRef.current]
+  const agents = live.filter((bubble) => bubble.kind === 'subagent')
+  const groupedAgents = agents.length > 1
 
   return (
     <Box
@@ -82,9 +84,10 @@ export const Transcript = memo(function Transcript({
         overflowY="hidden"
         justifyContent="flex-end"
       >
-        {live.map((bubble) => (
+        {live.filter((bubble) => !groupedAgents || (bubble.kind !== 'subagent' && !(bubble.kind === 'tool' && bubble.name === 'task'))).map((bubble) => (
           <BubbleView key={bubble.id} bubble={bubble} maxRows={maxLiveRows} />
         ))}
+        {groupedAgents && <SubagentSummary agents={agents} />}
       </Box>
     </Box>
   )
@@ -281,6 +284,32 @@ function previewLines(content: string): string[] {
   const lines = content.split('\n').filter((line) => line.trim() !== '')
   if (lines.length <= 6) return lines
   return [...lines.slice(0, 6), `… ${lines.length - 6} more lines`]
+}
+
+const VISIBLE_SUBAGENTS = 3
+
+function SubagentSummary({ agents }: { agents: Extract<Bubble, { kind: 'subagent' }>[] }) {
+  const theme = useTheme()
+  const running = agents.filter((agent) => agent.state === 'running')
+  return (
+    <Box flexDirection="column" marginTop={1} minWidth={0}>
+      <Text color={theme.accent} wrap="truncate-end">
+        Subagents: {running.length} running · {agents.length - running.length} done
+      </Text>
+      {running.slice(0, VISIBLE_SUBAGENTS).map((agent) => {
+        const latest = agent.bubbles.at(-1)
+        const progress = latest?.kind === 'tool' ? latest.summary
+          : latest?.kind === 'assistant' ? sanitizeThinkingText(latest.text || latest.thinking, latest.streaming)
+          : 'waiting'
+        return (
+          <Text key={agent.id} dimColor wrap="truncate-end">
+            {agent.description} · {progress.replace(/\s+/g, ' ').trim() || 'waiting'}
+          </Text>
+        )
+      })}
+      <Text dimColor>/subagents · all active tasks</Text>
+    </Box>
+  )
 }
 
 function SubagentView({ bubble, maxRows }: { bubble: Extract<Bubble, { kind: 'subagent' }>; maxRows?: number }) {

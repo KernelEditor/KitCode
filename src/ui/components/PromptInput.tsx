@@ -13,6 +13,18 @@ import { sanitizeTerminalText } from '../sanitize'
 import type { PromptInputProps } from '../types'
 
 const WINDOW = 6
+const CAT_FRAME_MS = 500
+const CAT_FRAMES = [
+  '/ᐠ｡ꞈ｡ᐟ\\ ~',
+  '/ᐠ｡ꞈ｡ᐟ\\ ∿',
+  '/ᐠ｡ꞈ｡ᐟ\\ ~',
+  '/ᐠ｡ꞈ｡ᐟ\\ ∾',
+  '/ᐠ｡ꞈ｡ᐟ\\ ~',
+  '/ᐠ｡ꞈ｡ᐟ\\ ∿',
+  '/ᐠ-ꞈ-ᐟ\\ ~',
+  '/ᐠ｡ꞈ｡ᐟ\\ ∾',
+]
+const MAX_INPUT_ROWS = 6
 
 export const PromptInput = memo(function PromptInput({
   value,
@@ -28,8 +40,19 @@ export const PromptInput = memo(function PromptInput({
   onListFiles,
 }: PromptInputProps) {
   const theme = useTheme()
-  const { columns } = useTerminalSize()
+  const { columns, rows } = useTerminalSize()
+  const panelWidth = Math.max(2, columns - 1)
+  const inputRows = Math.max(1, Math.min(MAX_INPUT_ROWS, rows - 16))
   const strings = useStrings()
+  const [catFrame, setCatFrame] = useState(0)
+  useEffect(() => {
+    if (!disabled) return
+    const timer = setInterval(() => setCatFrame((frame) => (frame + 1) % CAT_FRAMES.length), CAT_FRAME_MS)
+    return () => clearInterval(timer)
+  }, [disabled])
+  const panelColor = disabled ? theme.warn : theme.accent
+  const fullTitle = disabled ? `KitCode ${CAT_FRAMES[catFrame]}` : 'KitCode'
+  const panelTitle = fullTitle.slice(0, Math.max(0, panelWidth - 5))
   const safeValue = sanitizeTerminalText(value)
   const [selectionCursor, setSelectionCursor] = useState(0)
   const [inputCursor, setInputCursor] = useState(() => characters(safeValue).length)
@@ -215,12 +238,20 @@ export const PromptInput = memo(function PromptInput({
   const fileStart = Math.max(0, Math.min(active - WINDOW + 2, files.length - WINDOW))
 
   return (
-    <Box width={columns} maxWidth="100%" flexDirection="column" marginTop={1} flexShrink={0}>
-      <Box
-        width="100%"
-        paddingX={1}
-      >
-        <Text color={disabled ? 'gray' : theme.accent}>› </Text>
+    <Box width={panelWidth} maxWidth="100%" flexDirection="column" marginTop={1} flexShrink={0}>
+      <Box width="100%" flexShrink={0}>
+        <Box flexShrink={0}><Text color={panelColor}>╭</Text></Box>
+        <Box flexShrink={1} minWidth={0}>
+          <Text color={panelColor} wrap="truncate-end">─ {panelTitle} </Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1} minWidth={0} height={1}
+          borderStyle="single" borderColor={panelColor}
+          borderTop={false} borderBottom borderLeft={false} borderRight={false}
+        />
+        <Box flexShrink={0}><Text color={panelColor}>╮</Text></Box>
+      </Box>
+      <Box width="100%" paddingX={1} maxHeight={inputRows} overflowY="hidden">
+        <Text color={panelColor}>› </Text>
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <EditableText value={safeValue} cursor={inputCursor} placeholder={strings.placeholder} />
         </Box>
@@ -233,7 +264,15 @@ export const PromptInput = memo(function PromptInput({
         </Text>
       )}
 
-      {disabled && hint && <Text dimColor>  {sanitizeTerminalText(hint)}</Text>}
+      <Box width="100%" flexShrink={0}>
+        <Box flexShrink={0}><Text color={panelColor}>╰</Text></Box>
+        <Box flexGrow={1} flexShrink={1} minWidth={0} height={1}
+          borderStyle="single" borderColor={panelColor}
+          borderTop={false} borderBottom borderLeft={false} borderRight={false}
+        />
+        <Box flexShrink={0}><Text color={panelColor}>╯</Text></Box>
+      </Box>
+      {disabled && hint && <Text color={theme.accent}>  {sanitizeTerminalText(hint)}</Text>}
 
       {showFiles && (
         <Box flexDirection="column" marginLeft={2}>
