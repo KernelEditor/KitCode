@@ -68,8 +68,7 @@ describe('provider logout', () => {
       await second.shutdown()
     }
   })
-  it('starts a new session without overwriting the saved conversation', async () => {
-    await seed()
+  it('starts a new session without overwriting the saved conversation', async () => {    await seed()
     const app = await boot({ cwd: home })
     try {
       const oldId = app.runtime.sessionId()
@@ -81,6 +80,30 @@ describe('provider logout', () => {
       expect((await loadSession(oldId)).messages).toEqual(messages)
     } finally {
       await app.shutdown()
+    }
+  })
+
+  it('applies a manual context window and keeps it after a restart', async () => {
+    await seed()
+    const first = await boot({ cwd: home })
+    try {
+      await first.runtime.setContextWindowOverride(1_000_000)
+      expect(first.runtime.modelContext().window).toBe(1_000_000)
+      expect(first.runtime.getContextWindowOverride()).toBe(1_000_000)
+    } finally {
+      await first.shutdown()
+    }
+
+    const second = await boot({ cwd: home })
+    try {
+      expect(second.runtime.getContextWindowOverride()).toBe(1_000_000)
+      expect(second.runtime.modelContext().window).toBe(1_000_000)
+      // The endpoint reports no window, so clearing the override falls back to unknown.
+      await second.runtime.setContextWindowOverride(undefined)
+      expect(second.runtime.getContextWindowOverride()).toBeUndefined()
+      expect(second.runtime.modelContext().window).toBeNull()
+    } finally {
+      await second.shutdown()
     }
   })
 

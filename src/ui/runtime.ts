@@ -45,6 +45,8 @@ export interface Runtime {
   setEffort(effort: Effort): Promise<void>
   getThinking(): boolean
   setThinking(enabled: boolean): Promise<void>
+  getContextWindowOverride(): number | undefined
+  setContextWindowOverride(tokens: number | undefined): Promise<void>
   getMaxTokensPerTurn(): number
   setMaxTokensPerTurn(tokens: number): Promise<void>
   getLang(): Lang | undefined

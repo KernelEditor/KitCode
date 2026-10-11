@@ -183,6 +183,11 @@ export async function boot(options: {
     for (const listener of contextListeners) listener()
   }
 
+  // A window the user set with /context outranks whatever the provider reports:
+  // someone who knows their endpoint serves 1M tokens should not be told 256k.
+  const resolveContextWindow = (ref: string, discovered?: number): number | null =>
+    config.contextWindow ?? discovered ?? knownContextWindow(ref)
+
   const knownContextWindow = (ref: string): number | null => {
     const parsed = parseModelRef(ref)
     if (!parsed) return null
@@ -204,35 +209,31 @@ export async function boot(options: {
     modelRef = ref
     if (latestRateLimits?.model !== ref) latestRateLimits = undefined
     contextUsage = restoredContext?.model === ref ? restoredContext : undefined
-    modelContextWindow = discoveredWindow ?? knownContextWindow(ref)
+    modelContextWindow = resolveContextWindow(ref, discoveredWindow)
     notifyContext()
   }
 
-  modelContextWindow = knownContextWindow(modelRef)
+  modelContextWindow = resolveContextWindow(modelRef)
 
-  
   async function refreshModelContextWindow(): Promise<void> {
     const targetRef = modelRef
     const parsed = parseModelRef(targetRef)
     if (!parsed) {
       if (modelRef === targetRef) {
-        modelContextWindow = null
+        modelContextWindow = config.contextWindow ?? null
         notifyContext()
       }
       return
     }
-    
-    
-    
-    let next = modelContextWindow ?? knownContextWindow(targetRef)
+
+    let next = resolveContextWindow(targetRef)
     try {
       const provider = registry.get(parsed.provider)
       const models = await loadModels(provider)
       rememberModels(parsed.provider, models)
       const found = models.find((m) => m.id === parsed.model)
-      next = found?.contextWindow ?? next
+      next = resolveContextWindow(targetRef, found?.contextWindow)
     } catch {
-      
     }
     if (modelRef === targetRef) {
       modelContextWindow = next
@@ -625,6 +626,19 @@ export async function boot(options: {
       await persistConfig((draft) => {
         draft.thinking = enabled
       })
+    },
+
+    getContextWindowOverride: () => config.contextWindow,
+    async setContextWindowOverride(tokens) {
+      await persistConfig((draft) => {
+        if (tokens === undefined) delete draft.contextWindow
+        else draft.contextWindow = tokens
+      })
+      // Clearing the override must not leave the old number on screen while the
+      // provider refresh is in flight, so fall back to what the catalogue knows.
+      modelContextWindow = config.contextWindow ?? resolveContextWindow(modelRef)
+      notifyContext()
+      void refreshModelContextWindow()
     },
 
     getMaxTokensPerTurn: () => config.budget.maxTokensPerTurn,

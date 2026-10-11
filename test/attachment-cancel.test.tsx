@@ -19,6 +19,7 @@ describe('attachment cancellation', () => {
     const completion = new Promise<Message[]>((resolve) => { complete = resolve })
     const activeAgentsList = vi.fn(() => [])
     const newSession = vi.fn(async () => undefined)
+    const setContextWindowOverride = vi.fn(async () => undefined)
     const runtime = {
       cwd: process.cwd(), getAccent: () => 'purple', getLang: () => 'en', needsSetup: () => false,
       modelContext: () => null, subscribeContext: () => () => {},
@@ -27,6 +28,7 @@ describe('attachment cancellation', () => {
       usageParts: () => ({}), mcpSummary: () => ({}), getMode: () => 'normal',
       isBypassEnabled: () => false, activeAgentsCount: () => 0,
       persist: async () => undefined, run: () => completion, activeAgentsList, newSession,
+      getContextWindowOverride: () => undefined, setContextWindowOverride,
     } as unknown as Runtime
     const stdin = new PassThrough() as PassThrough & NodeJS.ReadStream
     const stdout = new PassThrough() as PassThrough & NodeJS.WriteStream
@@ -41,6 +43,9 @@ describe('attachment cancellation', () => {
       captured.prompt!.onSubmit('/subagents')
       await tick()
       expect(activeAgentsList).toHaveBeenCalledOnce()
+      captured.prompt!.onSubmit('/context 256k')
+      await tick()
+      expect(setContextWindowOverride).toHaveBeenCalledWith(256_000)
       captured.prompt!.onSubmit('/clear')
       await tick()
       expect(newSession).not.toHaveBeenCalled()

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { COMMANDS, closestCommand, matchCommands } from '../src/ui/commands'
+import { COMMANDS, closestCommand, commandRunsWhileBusy, matchCommands } from '../src/ui/commands'
+import { shouldAutoCompact } from '../src/core/compact'
 import { LANGS, stringsFor } from '../src/ui/i18n'
 import { PRESETS, makeTheme, resolveAccent } from '../src/ui/theme'
 import { formatDuration } from '../src/ui/time'
@@ -45,6 +46,25 @@ describe('matchCommands', () => {
 
   it('ignores plain text', () => {
     expect(matchCommands('hello')).toEqual([])
+  })
+})
+
+describe('commands that may run during a turn', () => {
+  it('lets read-only and settings commands run while the agent is busy', () => {
+    for (const name of ['help', 'usage', 'context', 'model', 'effort', 'theme', 'lang', 'budget', 'subagents', 'config', 'checker', 'quit']) {
+      expect(commandRunsWhileBusy(name), `/${name} should run while busy`).toBe(true)
+    }
+  })
+
+  it('keeps commands that touch the running turn or the session on the queue', () => {
+    for (const name of ['clear', 'compact', 'resume', 'undo', 'login', 'provider', 'logout', 'key', 'refresh', 'mcp', 'sessions']) {
+      expect(commandRunsWhileBusy(name), `/${name} should wait for the turn`).toBe(false)
+    }
+  })
+
+  it('does not invent a command that is not registered', () => {
+    expect(commandRunsWhileBusy('nonsense')).toBe(false)
+    expect(commandRunsWhileBusy(undefined)).toBe(false)
   })
 })
 

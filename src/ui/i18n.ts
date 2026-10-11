@@ -144,6 +144,14 @@ export interface Strings {
   undoConflicts: (paths: string[]) => string
   undoFailed: (failures: string[]) => string
 
+  titleContext: string
+  contextCurrent: (tokens: number) => string
+  contextSet: (tokens: number) => string
+  contextAuto: (tokens: number | null) => string
+  contextUnknown: string
+  contextInvalid: string
+  contextCurrentLabel: string
+
   titleAccent: string
   titleEffort: string
   titleModel: string
@@ -311,6 +319,18 @@ const en: Strings = {
     `Kept newer changes in: ${paths.join(', ')}`,
   undoFailed: (failures) => `Could not restore: ${failures.join('; ')}`,
 
+  titleContext: 'Context window',
+  contextCurrent: (tokens) => `Context window: ${tokens.toLocaleString()} tokens`,
+  contextSet: (tokens) =>
+    `Context window set to ${tokens.toLocaleString()} tokens. Auto-compact triggers at 80%.`,
+  contextAuto: (tokens) =>
+    tokens === null
+      ? 'Context window: unknown — using whatever the provider reports.'
+      : `Context window: auto (${tokens.toLocaleString()} tokens from the provider).`,
+  contextUnknown: 'Context window: unknown. Set it with /context 256k, /context 512k or /context 1m.',
+  contextInvalid: 'Usage: /context 256k | 512k | 1m | <tokens> | auto',
+  contextCurrentLabel: 'current',
+
   titleAccent: 'Accent colour',
   titleEffort: 'Reasoning depth',
   titleModel: 'Model',
@@ -332,6 +352,7 @@ const en: Strings = {
     refresh: 'reload the model list for a provider',
     effort: 'set reasoning depth',
     thinking: 'toggle reasoning',
+    context: 'set or show the model context window',
     budget: 'set token budget per turn',
     theme: 'change the accent colour',
     lang: 'change the interface language',
@@ -520,6 +541,18 @@ const ru: Strings = {
     `Более свежие изменения сохранены в: ${paths.join(', ')}`,
   undoFailed: (failures) => `Не удалось восстановить: ${failures.join('; ')}`,
 
+  titleContext: 'Окно контекста',
+  contextCurrent: (tokens) => `Окно контекста: ${tokens.toLocaleString()} токенов`,
+  contextSet: (tokens) =>
+    `Окно контекста: ${tokens.toLocaleString()} токенов. Автосжатие сработает на 80%.`,
+  contextAuto: (tokens) =>
+    tokens === null
+      ? 'Окно контекста: неизвестно — берём то, что сообщает провайдер.'
+      : `Окно контекста: авто (${tokens.toLocaleString()} токенов от провайдера).`,
+  contextUnknown: 'Окно контекста неизвестно. Задай его: /context 256k, /context 512k или /context 1m.',
+  contextInvalid: 'Использование: /context 256k | 512k | 1m | <токены> | auto',
+  contextCurrentLabel: 'текущее',
+
   titleAccent: 'Цвет акцента',
   titleEffort: 'Глубина размышлений',
   titleModel: 'Модель',
@@ -541,6 +574,7 @@ const ru: Strings = {
     refresh: 'обновить список моделей провайдера',
     effort: 'глубина размышлений',
     thinking: 'включить/выключить размышления',
+    context: 'задать или показать окно контекста модели',
     budget: 'лимит токенов за ход (0 = безлимит)',
     theme: 'сменить цвет акцента',
     lang: 'сменить язык интерфейса',

@@ -40,9 +40,9 @@ export const PromptInput = memo(function PromptInput({
   onListFiles,
 }: PromptInputProps) {
   const theme = useTheme()
-  const { columns, rows } = useTerminalSize()
+  const { columns } = useTerminalSize()
   const panelWidth = Math.max(2, columns - 1)
-  const inputRows = Math.max(1, Math.min(MAX_INPUT_ROWS, rows - 16))
+  const inputRows = MAX_INPUT_ROWS
   const strings = useStrings()
   const [catFrame, setCatFrame] = useState(0)
   useEffect(() => {

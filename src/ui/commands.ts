@@ -1,38 +1,44 @@
 export interface SlashCommand {
   name: string
   args?: string
+  // Left out for commands that must wait for the running turn to finish: a queued
+  // message would otherwise be interleaved with work already in flight.
+  runsWhileBusy?: true
 }
 
+const BUSY_SAFE = { runsWhileBusy: true } as const
+
 export const COMMANDS: SlashCommand[] = [
-  { name: 'model' },
+  { name: 'model', ...BUSY_SAFE },
   { name: 'login' },
   { name: 'provider' },
   { name: 'logout', args: '[provider]' },
   { name: 'key', args: '[provider]' },
   { name: 'refresh', args: '[provider]' },
-  { name: 'effort' },
-  { name: 'thinking' },
-  { name: 'budget', args: '[tokens]' },
-  { name: 'theme', args: '[color]' },
-  { name: 'lang' },
+  { name: 'effort', ...BUSY_SAFE },
+  { name: 'thinking', ...BUSY_SAFE },
+  { name: 'context', args: '[tokens|auto]', ...BUSY_SAFE },
+  { name: 'budget', args: '[tokens]', ...BUSY_SAFE },
+  { name: 'theme', args: '[color]', ...BUSY_SAFE },
+  { name: 'lang', ...BUSY_SAFE },
   { name: 'prompt', args: '[save <name>|delete <name>]' },
   { name: 'skills', args: '[install <source>]' },
   { name: 'bypass' },
-  { name: 'usage' },
+  { name: 'usage', ...BUSY_SAFE },
   { name: 'mcp', args: '[add|list|delete|enable|disable]' },
   { name: 'attach', args: '<path|clipboard|clear>' },
   { name: 'memory', args: '[show|set <text>|clear]' },
   { name: 'compact' },
   { name: 'update' },
-  { name: 'checker' },
+  { name: 'checker', ...BUSY_SAFE },
   { name: 'sessions', args: '[list|rename|delete [all]|export]' },
-  { name: 'config' },
+  { name: 'config', ...BUSY_SAFE },
   { name: 'resume' },
   { name: 'undo' },
   { name: 'clear' },
-  { name: 'help' },
-  { name: 'exit' },
-  { name: 'subagents' },
+  { name: 'help', ...BUSY_SAFE },
+  { name: 'exit', ...BUSY_SAFE },
+  { name: 'subagents', ...BUSY_SAFE },
 ]
 
 const SUBCOMMANDS: SlashCommand[] = [
@@ -47,6 +53,11 @@ const SUBCOMMANDS: SlashCommand[] = [
   { name: 'sessions delete all' },
   { name: 'sessions export', args: '[id] [path]' },
 ]
+
+export function commandRunsWhileBusy(name: string | undefined): boolean {
+  if (name === 'quit') return true
+  return COMMANDS.some((command) => command.name === name && command.runsWhileBusy === true)
+}
 
 export function matchCommands(line: string): SlashCommand[] {
   if (!line.startsWith('/')) return []

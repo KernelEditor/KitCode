@@ -187,16 +187,29 @@ describe('terminal viewport', () => {
     expect(liveTranscriptRows(24)).toBe(8)
   })
 
+  it('keeps the live row budget inside a fixed band as rows change', () => {
+    // A frame rendered for the old terminal size and the next frame rendered
+    // for the new one must claim the same live height, or Ink's incremental
+    // diff erases the wrong number of lines during a resize and the stream
+    // duplicates. The band keeps every plausible transient frame identical.
+    for (const rows of [8, 10, 12, 14, 16, 20, 24, 30, 40, 50, 60, 100]) {
+      const budget = liveTranscriptRows(rows)
+      expect(budget).toBeGreaterThanOrEqual(4)
+      expect(budget).toBeLessThanOrEqual(12)
+      expect(budget).toBeLessThanOrEqual(interactiveViewportRows(rows))
+    }
+  })
+
   it('clips changing output before it becomes a fullscreen frame', () => {
     const frame = renderToString(
-      <TerminalViewport rows={8}>
+      <TerminalViewport rows={30}>
         <Box
           flexDirection="column"
           flexShrink={1}
           overflowY="hidden"
           justifyContent="flex-end"
         >
-          {Array.from({ length: 20 }, (_, index) => (
+          {Array.from({ length: 24 }, (_, index) => (
             <Text key={index}>line {index}</Text>
           ))}
         </Box>
@@ -204,14 +217,16 @@ describe('terminal viewport', () => {
       { columns: 80 },
     )
 
-    expect(frame.split('\n')).toHaveLength(6)
+    // rows=30 → live budget 8 + chrome 14 = 22 rows of changing output; the
+    // Static header is written to scrollback outside Yoga's live box.
+    expect(frame.split('\n')).toHaveLength(22)
     expect(frame).not.toContain('line 0')
-    expect(frame).toContain('line 19')
+    expect(frame).toContain('line 23')
   })
 
   it('keeps the footer visible when a long transcript reaches the viewport limit', () => {
     const frame = renderToString(
-      <TerminalViewport rows={8}>
+      <TerminalViewport rows={30}>
         <Box
           flexDirection="column"
           flexGrow={1}
@@ -220,7 +235,7 @@ describe('terminal viewport', () => {
           overflowY="hidden"
           justifyContent="flex-end"
         >
-          {Array.from({ length: 20 }, (_, index) => (
+          {Array.from({ length: 22 }, (_, index) => (
             <Text key={index}>stream {index}</Text>
           ))}
         </Box>
@@ -233,16 +248,16 @@ describe('terminal viewport', () => {
     )
     const lines = frame.split('\n')
 
-    expect(lines).toHaveLength(6)
+    expect(lines).toHaveLength(22)
     expect(frame).not.toContain('stream 0')
-    expect(frame).toContain('stream 19')
+    expect(frame).toContain('stream 21')
     expect(lines.at(-2)).toContain('prompt')
     expect(lines.at(-1)).toContain('status bottom')
   })
 
   it('keeps the footer visible under one multiline streamed answer', () => {
     const frame = renderToString(
-      <TerminalViewport rows={12}>
+      <TerminalViewport rows={30}>
         <Transcript
           workspace="/workspace/KitCode"
           maxLiveRows={4}
@@ -280,7 +295,7 @@ describe('terminal viewport', () => {
 
   it('collapses an idle frame instead of leaving an empty screen above the footer', () => {
     const frame = renderToString(
-      <TerminalViewport rows={8}>
+      <TerminalViewport rows={30}>
         <Box flexGrow={1} flexShrink={1} minHeight={0} overflowY="hidden">
           <Text>finished answer</Text>
         </Box>

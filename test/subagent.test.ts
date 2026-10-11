@@ -130,6 +130,65 @@ function lookupOf(tools: Tool[]): ToolLookup {
   }
 }
 
+// Each subagent turn looks at its own history: a fresh prompt asks for the read
+// tool, and a turn whose last message is a tool result answers instead.
+function readThenAnswerProvider(toolName = 'read'): { provider: Provider; requests: ChatRequest[] } {
+  const requests: ChatRequest[] = []
+  return {
+    requests,
+    provider: {
+      id: 'stub',
+      kind: 'openai',
+      stream: async function* (req) {
+        requests.push(req)
+        const last = req.messages.at(-1)
+        const answered = last?.content.some((block) => block.type === 'tool_result') === true
+        if (answered) {
+          yield { type: 'text_delta', text: 'done' }
+          yield { type: 'done', stopReason: 'end_turn', content: [{ type: 'text', text: 'done' }] }
+          return
+        }
+        yield {
+          type: 'done',
+          stopReason: 'tool_use',
+          content: [{ type: 'tool_use', id: `call-${requests.length}`, name: toolName, input: { path: 'src/a.ts' } }],
+        }
+      },
+      listModels: async () => [],
+      knownModels: () => [],
+    },
+  }
+}
+
+// A read that only completes once two calls are in flight at the same time, so
+// a serialized runner leaves the first call waiting until the gate expires.
+function gatedRead(): { tool: Tool; peak: () => number } {
+  let active = 0
+  let peak = 0
+  let total = 0
+  let openGate!: () => void
+  const gate = new Promise<void>((resolve) => { openGate = resolve })
+  return {
+    peak: () => peak,
+    tool: {
+      name: 'read',
+      description: 'read a file',
+      inputSchema: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+      defaultPermission: 'ask',
+      summarize: (input) => `read(${(input as { path: string }).path})`,
+      execute: async () => {
+        active += 1
+        total += 1
+        peak = Math.max(peak, active)
+        if (total === 2) openGate()
+        await Promise.race([gate, new Promise((resolve) => setTimeout(resolve, 500))])
+        active -= 1
+        return { content: 'export function foo() {}' }
+      },
+    },
+  }
+}
+
 function makeConfigWith(provider: Provider, override?: ToolLookup) {
   return (system: string, tools: ToolLookup): AgentConfig => ({
     provider,
@@ -352,6 +411,44 @@ describe('subagent runner', () => {
     expect(progress).toEqual(['read(src/a.ts)'])
     expect(progress.join('\n')).not.toContain('scan the repository')
     expect(progress.join('\n')).not.toContain(answer)
+  })
+
+  it('lets concurrent subagents run tools at the same time', async () => {
+    const { provider } = readThenAnswerProvider()
+    const { tool, peak } = gatedRead()
+    const runner = createSubagentRunner(makeConfigWith(provider), lookupOf([tool]))
+    const signal = new AbortController().signal
+
+    await Promise.all([
+      runner.run({ prompt: 'first', signal, onProgress: () => {} }),
+      runner.run({ prompt: 'second', signal, onProgress: () => {} }),
+    ])
+
+    // The gate only opens when both reads are in flight, so a serialized runner
+    // would leave the first read waiting until the gate times out.
+    expect(peak()).toBe(2)
+  }, 2_000)
+
+  it('serializes approvals even while sibling subagents keep working', async () => {
+    const { provider } = readThenAnswerProvider()
+    const calls: string[] = []
+    const runner = createSubagentRunner(makeConfigWith(provider), lookupOf([fakeRead(calls)]))
+    const signal = new AbortController().signal
+    let active = 0
+    const requestPermission = async () => {
+      active += 1
+      expect(active).toBe(1)
+      await new Promise((resolve) => setImmediate(resolve))
+      active -= 1
+      return 'once' as const
+    }
+
+    await Promise.all([
+      runner.run({ prompt: 'first', signal, onProgress: () => {}, requestPermission }),
+      runner.run({ prompt: 'second', signal, onProgress: () => {}, requestPermission }),
+    ])
+
+    expect(calls).toEqual(['src/a.ts', 'src/a.ts'])
   })
 })
 

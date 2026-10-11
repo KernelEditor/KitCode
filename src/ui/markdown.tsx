@@ -9,9 +9,18 @@ const DimContext = createContext(false)
 // Every Text in this file goes through the shadow so one `dim` prop on
 // <Markdown> can grey out a whole rendered block: Ink forbids a Box inside a
 // Text, so the styling cannot simply be wrapped around the output.
-function Text({ dimColor, color, ...props }: ComponentProps<typeof InkText>): ReactNode {
+// `bold` has to be dropped alongside `color`: SGR 1 overrides SGR 2 in most
+// terminals, so a bold span inside dimmed reasoning reads as full brightness.
+function Text({ dimColor, color, bold, ...props }: ComponentProps<typeof InkText>): ReactNode {
   const dim = useContext(DimContext)
-  return <InkText {...props} color={dim ? undefined : color} dimColor={dimColor ?? dim} />
+  return (
+    <InkText
+      {...props}
+      color={dim ? undefined : color}
+      bold={dim ? undefined : bold}
+      dimColor={dimColor ?? dim}
+    />
+  )
 }
 
 interface MdNode {

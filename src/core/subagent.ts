@@ -43,14 +43,17 @@ export function createSubagentRunner(
   makeConfig: (system: string, tools: ToolLookup) => AgentConfig,
   tools: ToolLookup,
 ): SubagentRunner {
+  // Approvals share one lane: the UI shows a single prompt at a time. Model
+  // requests and tool calls get their own lane per run so concurrent subagents
+  // overlap instead of queueing behind each other.
   const permissionLane = createExecutionLane()
-  const executionLane = createExecutionLane()
-  const modelRequestLane = createExecutionLane()
   return {
     async run(request) {
       if (request.signal.aborted) return SUBAGENT_CANCELLED
 
       let steps = 0
+      const executionLane = createExecutionLane()
+      const modelRequestLane = createExecutionLane()
       const base = makeConfig(SUBAGENT_SYSTEM, tools)
       const cfg: AgentConfig = {
         ...base,

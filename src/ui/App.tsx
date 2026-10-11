@@ -7,7 +7,7 @@ import { parseMcpAddArgs } from '../mcp/add'
 import type { McpAddError } from '../mcp/add'
 import type { McpServerState } from '../mcp/client'
 import type { ContentBlock, Effort, Message } from '../providers/types'
-import { COMMANDS, closestCommand } from './commands'
+import { COMMANDS, closestCommand, commandRunsWhileBusy } from './commands'
 import { extractMentions } from './mentions'
 import TextInput from 'ink-text-input'
 import { useTheme } from './theme'
@@ -33,6 +33,23 @@ import type { PickerItem } from './types'
 const EFFORTS: Effort[] = ['auto', 'low', 'medium', 'high', 'xhigh', 'max']
 const STREAM_FRAME_MS = 50
 const MAX_ATTACHMENTS = 8
+
+// The windows every current frontier model is sold under. Anything else is still
+// reachable by typing the number: /context 400000
+const CONTEXT_PRESETS = [256_000, 512_000, 1_000_000] as const
+
+function formatContextTokens(tokens: number): string {
+  if (tokens >= 1_000_000) return `${tokens / 1_000_000}M`
+  return `${Math.round(tokens / 1_000)}k`
+}
+
+function parseContextTokens(input: string): number | null {
+  const match = /^(\d+(?:\.\d+)?)\s*([km])?$/i.exec(input.trim())
+  if (!match) return null
+  const scale = match[2]?.toLowerCase() === 'm' ? 1_000_000 : match[2]?.toLowerCase() === 'k' ? 1_000 : 1
+  const tokens = Math.round(Number(match[1]) * scale)
+  return tokens >= 1_000 && tokens <= 10_000_000 ? tokens : null
+}
 
 type QueuedItem =
   | { kind: 'command'; line: string }
@@ -1076,6 +1093,58 @@ export function App({
           return
         }
 
+        case 'context': {
+          const override = runtime.getContextWindowOverride()
+          const current = runtime.modelContext()
+          const requested = rest[0]?.toLowerCase()
+          if (requested !== undefined && requested !== '') {
+            if (requested === 'auto') {
+              await runtime.setContextWindowOverride(undefined)
+              notice('info', strings.contextAuto(runtime.modelContext().window))
+              forceRender((n) => n + 1)
+              return
+            }
+            const tokens = parseContextTokens(requested)
+            if (tokens === null) {
+              notice('warn', strings.contextInvalid)
+              return
+            }
+            await runtime.setContextWindowOverride(tokens)
+            notice('info', strings.contextSet(tokens))
+            forceRender((n) => n + 1)
+            return
+          }
+          const effective = override ?? current.window
+          notice('info', effective === null ? strings.contextUnknown : strings.contextCurrent(effective))
+          const choice = await pick(
+            strings.titleContext,
+            CONTEXT_PRESETS.map((preset) => ({
+              key: String(preset),
+              label: formatContextTokens(preset),
+              hint: current.window === preset ? strings.contextCurrentLabel : undefined,
+            })).concat([
+              {
+                key: 'auto',
+                label: 'auto',
+                hint: override === undefined ? strings.contextCurrentLabel : undefined,
+              },
+            ]),
+          )
+          if (!choice) return
+          const chosen = CONTEXT_PRESETS.find((preset) => String(preset) === choice)
+          if (choice === 'auto') {
+            await runtime.setContextWindowOverride(undefined)
+            notice('info', strings.contextAuto(runtime.modelContext().window))
+          } else if (chosen !== undefined) {
+            await runtime.setContextWindowOverride(chosen)
+            notice('info', strings.contextSet(chosen))
+          } else {
+            return
+          }
+          forceRender((n) => n + 1)
+          return
+        }
+
         case 'model': {
           const items = await runtime.listModelItems()
           if (items.length === 0) {
@@ -1346,8 +1415,7 @@ export function App({
         
         if (!detachedInput) setInput('')
         const command = text.slice(1).trim().split(/\s+/)[0]?.toLowerCase()
-        const liveCommand = ['help', 'usage', 'subagents', 'config', 'exit', 'quit'].includes(command ?? '')
-        if ((busyRef.current && !liveCommand) || slashPendingRef.current > 0) {
+        if ((busyRef.current && !commandRunsWhileBusy(command)) || slashPendingRef.current > 0) {
           queueRef.current = [...queueRef.current, { kind: 'command', line: text }]
           setPendingCount(queueRef.current.length)
           return

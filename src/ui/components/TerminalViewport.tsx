@@ -11,9 +11,15 @@ export function interactiveViewportRows(rows: number): number {
 }
 
 const INTERACTIVE_CHROME_ROWS = 14
+const MAX_LIVE_ROWS = 8
+const MIN_LIVE_ROWS = 4
 
 export function liveTranscriptRows(rows: number): number {
-  return Math.max(1, interactiveViewportRows(rows) - INTERACTIVE_CHROME_ROWS)
+  if (!Number.isFinite(rows)) return MAX_LIVE_ROWS
+  // Fixed band, and always at least two rows below the terminal: a frame at or
+  // above the terminal height flips Ink into full-clear reprint mode on
+  // Windows, which replays the whole chat history on every streamed frame.
+  return Math.max(MIN_LIVE_ROWS, Math.min(MAX_LIVE_ROWS, Math.floor(rows) - INTERACTIVE_CHROME_ROWS - 2))
 }
 
 /**
@@ -27,7 +33,7 @@ export function TerminalViewport({ children, rows }: { children: ReactNode; rows
     <Box
       width={columns} maxWidth="100%"
       flexDirection="column"
-      maxHeight={interactiveViewportRows(rows)}
+      maxHeight={liveTranscriptRows(rows) + INTERACTIVE_CHROME_ROWS}
       overflowY="hidden"
     >
       {children}

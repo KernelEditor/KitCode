@@ -24,14 +24,14 @@ OpenAI-compatible providers, including OpenRouter and local model servers.
 - persistent and resumable sessions with native terminal scrollback;
 - searchable session management with rename, delete, and Markdown export;
 - input history with the `↑` and `↓` keys;
-- queued messages while the agent is working;
+- queued messages while the agent is working, with status and settings commands running immediately;
 - image and UTF-8 text attachments;
-- manual and automatic context compaction;
+- manual and automatic context compaction with a selectable context window;
 - token, estimated cost, exact context-window, and provider rate-limit indicators;
 - automatic file checkpoints with `/undo`;
 - detected project checks after file edits;
 - model and provider switching from the TUI;
-- live MCP add, enable, disable, and delete operations, plus skills and subagents;
+- live MCP add, enable, disable, and delete operations, plus skills and subagents running concurrently;
 - a local `/checker` report for the runtime, provider, session, context, and MCP setup;
 - English and Russian interfaces with configurable accents.
 
@@ -111,6 +111,7 @@ Press `/` to open the command list.
 | `/key [provider]` | Change API key for a provider. |
 | `/refresh [provider]` | Reload a provider's model list, bypassing the 24h cache. |
 | `/effort [auto|low|medium|high|xhigh|max]` · `/thinking` | Select reasoning effort and configure reasoning output. |
+| `/context [tokens]` | Show or set the model context window used by the meter and automatic compaction. |
 | `/memory show` · `/memory set <text>` · `/memory clear` | View, replace, or clear this project's persistent notes. |
 | `/resume` · `/clear` | Resume a session or start a new one. |
 | `/sessions` | Search sessions, then resume, rename, delete, or export one. |
@@ -151,7 +152,11 @@ Press `/` to open the command list.
 | `Ctrl+V` / `Cmd+V` | Attach an image from the system clipboard; `/attach clipboard` is the explicit fallback. |
 | `Esc` | Cancel the current request or close an overlay. |
 
-Messages entered while the agent is running are queued and processed in order.
+Messages entered while the agent is running are queued and processed in order. Status and settings
+commands — `/help`, `/usage`, `/context`, `/model`, `/effort`, `/thinking`, `/budget`, `/theme`,
+`/lang`, `/subagents`, `/config`, `/checker`, `/exit` — run immediately instead. Commands that
+change the running turn or the session (`/clear`, `/compact`, `/resume`, `/undo`, `/login`,
+`/provider`, `/logout`, `/key`, `/refresh`, `/mcp`, `/sessions`) wait for the turn to finish.
 
 ## Modes
 
@@ -166,7 +171,26 @@ Completed output is committed to
 normal terminal scrollback, so it remains smooth to scroll while a response is streaming.
 
 When exact usage reaches 80% of a known context window, KitCode automatically summarizes older
-turns while keeping the latest two user turns. `/compact` runs the same operation manually.
+turns while keeping the latest two user turns. `/compact` runs the same operation manually, and
+`/context` sets the window when the provider does not report one.
+
+## Context window
+
+`/context` shows the window currently in use and opens a picker with the common sizes — `256k`,
+`512k`, `1M` — plus `auto`. The argument form accepts the same values and any explicit token count:
+
+```text
+/context 256k
+/context 1m
+/context 400000
+/context auto
+```
+
+The value is stored in the config as `contextWindow` and survives restarts. A manual value outranks
+whatever the provider catalogue reports, so a gateway that understates its window does not distort
+the meter. It feeds both the status-bar capsule and the 80% threshold for automatic compaction.
+`auto` returns to the provider's number; when the provider reports none, the meter shows `ctx ?` and
+automatic compaction stays off, because it needs a known window to decide anything.
 
 Before the built-in `write` and `edit` tools change a file, KitCode creates a private checkpoint.
 `/undo` restores the latest checkpoint and leaves files with newer manual changes untouched.
@@ -211,6 +235,19 @@ in the conversation. Secret-pattern redaction is best effort; do not put credent
 Context compaction separately asks the model to preserve requirements, evidence, verification
 commands and outcomes, assumptions, and remaining work. Generated summaries can still omit details.
 
+## Subagents
+
+The `task` tool hands one self-contained sub-task to a subagent that works in its own fresh context
+and reports back a single summary. Subagents share the filesystem and working directory but have no
+memory of the conversation and cannot ask questions, so the prompt has to stand alone.
+
+Consecutive `task` calls in one model response run concurrently, and there is no fixed cap on how
+many: five or ten start together. Each subagent gets its own execution lane, so their tool calls and
+model requests overlap instead of queueing. Two things stay deliberately serialized: approval prompts,
+because the interface shows one at a time, and the per-message budget, which the whole turn shares.
+The live box lists up to three running subagents and collapses the rest into a count; `/subagents`
+prints every active task with its latest progress.
+
 ## Configuration
 
 KitCode uses these main paths:
@@ -242,9 +279,10 @@ Minimal manual provider configuration:
 }
 ```
 
-The main settings are `model`, `effort`, `thinking`, `maxTokens`, `budget`, and `diagnostics`,
-`theme`, `permissions`, `providers`, and `mcp`. `budget` controls local per-message safety limits for model
-requests, tokens, estimated cost (when model pricing is available), and subagents. These values are
+The main settings are `model`, `effort`, `thinking`, `contextWindow`, `maxTokens`, `budget`,
+`diagnostics`, `theme`, `permissions`, `providers`, and `mcp`. `budget` controls local per-message
+safety limits for model requests, tokens, estimated cost (when model pricing is available), and
+subagents. These values are
 not the provider's account balance or rate limits. `diagnostics.autoRun`
 enables checks after file edits; `diagnostics.commands` can replace automatic detection with up to
 eight explicit commands. KitCode checks npm for a newer version on every app start and prints the

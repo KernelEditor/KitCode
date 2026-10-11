@@ -92,6 +92,9 @@ export const configSchema = z.object({
   theme: themeSchema.default({ accent: '#a78bfa' }),
   effort: effortSchema.default('xhigh'),
   thinking: z.boolean().default(true),
+  // Manual override for the model's context window. Unset means the window
+  // comes from the provider catalogue or the endpoint's model list.
+  contextWindow: z.number().int().min(1_000).max(10_000_000).optional(),
   maxTokens: z.number().int().positive().max(200_000).default(64_000),
   budget: budgetSchema.default({
     maxTokensPerTurn: 10_000_000,
