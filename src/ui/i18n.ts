@@ -55,6 +55,7 @@ export interface Strings {
   mcpFailed: (count: number) => string
 
   escCancel: string
+  escClear: string
   escHelp: string
   cancelled: string
   queued: (count: number) => string
@@ -229,6 +230,7 @@ const en: Strings = {
   mcpFailed: (count) => `mcp:${count} failed`,
 
   escCancel: 'esc to cancel',
+  escClear: 'esc clears the input · esc again cancels the answer',
   escHelp: 'esc — cancel the running turn',
   cancelled: 'Cancelled.',
   queued: (count) => `queued: ${count}`,
@@ -470,6 +472,7 @@ const ru: Strings = {
   mcpFailed: (count) => `mcp: ${count} с ошибкой`,
 
   escCancel: 'esc — отменить',
+  escClear: 'esc — очистить поле · ещё раз esc — отменить ответ',
   escHelp: 'esc — отменить текущий ход',
   cancelled: 'Отменено.',
   queued: (count) => `в очереди: ${count}`,

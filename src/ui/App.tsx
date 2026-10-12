@@ -2,7 +2,7 @@ import { Box, Text, useApp, useInput, useStdout } from 'ink'
 import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from '../core/types'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTerminalSize } from './terminal-size'
-import { attachmentLabel, looksLikeAttachmentPath } from '../core/attachments'
+import { attachmentLabel, looksLikeAttachmentPath, splitAttachmentPaths } from '../core/attachments'
 import { parseMcpAddArgs } from '../mcp/add'
 import type { McpAddError } from '../mcp/add'
 import type { McpServerState } from '../mcp/client'
@@ -1461,24 +1461,35 @@ export function App({
         return Promise.resolve(true)
       }
 
-      const task = runtime
-        .loadAutomaticAttachment(requestedPath)
-        .then((block) => {
-          if (automaticAttachmentTask.current !== task) return true
-          if (!block) return false
-          if (!appendAttachment(block)) {
-            notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
-            return true
+      // Several files dropped at once arrive as one line of paths.
+      const paths = splitAttachmentPaths(requestedPath) ?? [requestedPath]
+      let task!: Promise<boolean>
+      task = (async () => {
+        let added = 0
+        for (const candidate of paths) {
+          try {
+            const block = await runtime.loadAutomaticAttachment(candidate)
+            if (automaticAttachmentTask.current !== task) return true
+            if (!block) continue
+            if (!appendAttachment(block)) {
+              notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+              return true
+            }
+            added += 1
+            notice('info', strings.attachmentAdded(attachmentLabel(block) ?? 'attachment'))
+          } catch (error) {
+            if (automaticAttachmentTask.current !== task) return true
+            // System errors (ENOENT, ENAMETOOLONG…) mean it was not a file
+            // after all; our own errors are about a real file that cannot be
+            // sent (too big, binary, sensitive) and deserve a word.
+            if (error instanceof Error && !(error as NodeJS.ErrnoException).code) {
+              notice('warn', error.message)
+            }
           }
-          notice('info', strings.attachmentAdded(attachmentLabel(block) ?? 'attachment'))
-          return true
-        })
-        .catch(() => {
-          if (automaticAttachmentTask.current !== task) return true
-          // Not a real file (ENOENT, ENAMETOOLONG, etc.) — let the text through
-          // as a normal message rather than swallowing it.
-          return false
-        })
+        }
+        // Nothing attached: let the text through as a normal message.
+        return added > 0
+      })()
       automaticAttachmentTask.current = task
       void task.finally(() => {
         if (automaticAttachmentTask.current === task) automaticAttachmentTask.current = null
@@ -1624,14 +1635,18 @@ export function App({
       // The answer already finished: nothing would drain a put-back item.
       checkedOut.current = null
     }
-    if (busyRef.current && abort.current) {
+    const hasDraft =
+      input !== '' || attachmentsRef.current.length > 0 || automaticAttachmentTask.current !== null || clipboardPasteTask.current !== null
+    // With something typed, the first Esc only clears it; the running answer
+    // is cancelled by the next Esc on an empty input.
+    if (busyRef.current && abort.current && !(hasDraft && overlay.kind === 'none')) {
       if (!abort.current.signal.aborted) {
         abort.current.abort()
         notice('warn', strings.cancelled)
       }
       return
     }
-    if (input !== '' || attachmentsRef.current.length > 0 || automaticAttachmentTask.current || clipboardPasteTask.current) {
+    if (hasDraft) {
       attachmentGeneration.current += 1
       setInput('')
       replaceAttachments([])
@@ -1771,7 +1786,7 @@ export function App({
           pending={pendingCount}
           queued={queueRef.current.map((item) => item.kind === 'command' ? item.line : item.text || attachmentSummary(item.attachments))}
           onNavigateQueue={navigateQueue}
-          hint={busy ? strings.escCancel : undefined}
+          hint={busy ? (input !== '' || attachments.length > 0 ? strings.escClear : strings.escCancel) : undefined}
           mode={runtime.getMode()}
           bypass={runtime.isBypassEnabled()}
           history={promptHistory}

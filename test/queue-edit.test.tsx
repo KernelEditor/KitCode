@@ -13,6 +13,51 @@ import { App } from '../src/ui/App'
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 50))
 
+describe('esc while an answer is running', () => {
+  it('clears a typed draft first and cancels the answer only on the next esc', async () => {
+    let complete!: (history: Message[]) => void
+    const completion = new Promise<Message[]>((resolve) => { complete = resolve })
+    const run = vi.fn(() => completion)
+    const runtime = {
+      cwd: process.cwd(), getAccent: () => 'purple', getLang: () => 'en', needsSetup: () => false,
+      modelContext: () => null, subscribeContext: () => () => {},
+      startupUpdateCheck: async () => ({ status: 'current' }),
+      getModelRef: () => 'test/model', getEffort: () => 'medium', getEffectiveEffort: () => 'medium', getThinking: () => false,
+      usageParts: () => ({}), mcpSummary: () => ({}), getMode: () => 'normal', getBell: () => false,
+      isBypassEnabled: () => false, activeAgentsCount: () => 0, activeAgentsList: () => [],
+      persist: async () => undefined, run,
+    } as unknown as Runtime
+    const stdin = new PassThrough() as PassThrough & NodeJS.ReadStream
+    const stdout = new PassThrough() as PassThrough & NodeJS.WriteStream
+    const stderr = new PassThrough() as PassThrough & NodeJS.WriteStream
+    Object.assign(stdin, { isTTY: true, setRawMode: vi.fn(), ref: () => stdin, unref: () => stdin })
+    Object.assign(stdout, { isTTY: true, columns: 80, rows: 24 })
+    const instance = render(<App runtime={runtime} initialHistory={[]} />, { stdin, stdout, stderr, interactive: false, patchConsole: false, exitOnCtrlC: false })
+    try {
+      await tick()
+      captured.prompt!.onSubmit('work')
+      await tick()
+      const [, , signal] = run.mock.calls[0] as unknown as [Message[], unknown, AbortSignal]
+      captured.prompt!.onChange('half-typed follow-up')
+      await tick()
+      expect(captured.prompt!.hint).toContain('clears the input')
+      stdin.write('\u001b')
+      await tick()
+      expect(captured.prompt!.value).toBe('')
+      expect(signal.aborted).toBe(false)
+      stdin.write('\u001b')
+      await tick()
+      expect(signal.aborted).toBe(true)
+    } finally {
+      complete([])
+      instance.cleanup()
+      stdin.destroy()
+      stdout.destroy()
+      stderr.destroy()
+    }
+  })
+})
+
 describe('editing queued messages', () => {
   it('takes out one queued message at a time and puts edits back in place', async () => {
     let complete!: (history: Message[]) => void
