@@ -88,7 +88,7 @@ http://localhost:11434/v1
 | `kitcode -r <id>` | Resume a session by id. |
 | `kitcode --cwd <path>` | Use another working directory. |
 | `kitcode --model <provider/model>` | Start with a selected model. |
-| `kitcode --mode <normal|accept|plan>` | Select the initial agent mode. |
+| `kitcode --mode <normal\|accept\|plan>` | Select the initial agent mode. |
 | `kitcode sessions` | List saved sessions. |
 | `kitcode ask "question"` | Run one request without the TUI. |
 | `kitcode add <url>` | Add a provider; the key is entered in a hidden prompt. |
@@ -110,8 +110,8 @@ Press `/` to open the command list.
 | `/login` · `/logout [provider]` | Add a provider or choose exactly which provider to remove. |
 | `/key [provider]` | Change API key for a provider. |
 | `/refresh [provider]` | Reload a provider's model list, bypassing the 24h cache. |
-| `/effort [auto|low|medium|high|xhigh|max]` · `/thinking` | Select reasoning effort and configure reasoning output. |
-| `/bell [on|off]` | Toggle the beep when a long answer finishes or a permission prompt appears. |
+| `/effort [auto\|low\|medium\|high\|xhigh\|max]` · `/thinking` | Select reasoning effort and configure reasoning output. |
+| `/bell [on\|off]` | Toggle the beep when a long answer finishes or a permission prompt appears. |
 | `/context [tokens]` | Show or set the model context window used by the meter and automatic compaction. |
 | `/memory show` · `/memory set <text>` · `/memory clear` | View, replace, or clear this project's persistent notes. |
 | `/resume` · `/clear` | Resume a session or start a new one. |
