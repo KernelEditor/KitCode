@@ -23,6 +23,24 @@ afterEach(async () => {
 })
 
 describe('automatic file checkpoints', () => {
+  it('undoes the last change in this folder after a restart started a new session', async () => {
+    const file = path.join(cwd, 'src.txt')
+    await writeFile(file, 'before\n')
+    const checkpoint = beginCheckpoint({ cwd, sessionId: 'earlier-session', storageDir })
+    await checkpoint.capture(file)
+    await writeFile(file, 'after\n')
+    checkpoint.markChanged(file)
+    await checkpoint.commit()
+
+    const other = path.join(root, 'other')
+    await mkdir(other)
+    expect((await undoLatestCheckpoint({ cwd: other, sessionId: 'new-session', storageDir })).found).toBe(false)
+
+    const result = await undoLatestCheckpoint({ cwd, sessionId: 'new-session', storageDir })
+    expect(result).toMatchObject({ found: true, restored: ['src.txt'] })
+    expect(await readFile(file, 'utf8')).toBe('before\n')
+  })
+
   it('restores original bytes and file mode', async () => {
     const file = path.join(cwd, 'src.txt')
     await writeFile(file, 'before\n')

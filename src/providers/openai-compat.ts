@@ -1,4 +1,4 @@
-import { openAiEffort, resolveEffort } from './effort'
+import { effectiveEffort, markEffortRejected } from './effort'
 import OpenAI from 'openai'
 import {
   captureResponseHead,
@@ -13,6 +13,7 @@ import { pricingFor } from './pricing'
 import { parseRateLimits } from './rate-limits'
 import { emptyUsage, ProviderError } from './types'
 import type {
+  Effort,
   ChatRequest,
   ContentBlock,
   Message,
@@ -72,6 +73,83 @@ async function* streamTurn(
   apiKey: string,
   req: ChatRequest,
 ): AsyncGenerator<StreamEvent> {
+  let effort = effectiveEffort('openai', req.model, req.effort, req.messages, providerId)
+  const thinkingKey = `${providerId}/${req.model}`
+  let thinkingOff = req.thinking === false && !thinkingOffRejected.has(thinkingKey)
+    ? thinkingOffParams(req.model)
+    : undefined
+  let tokenField: TokenField = completionTokenModels.has(thinkingKey) || usesCompletionTokens(req.model)
+    ? 'max_completion_tokens'
+    : 'max_tokens'
+  // At most one retry per optional field the endpoint turns out to reject.
+  for (;;) {
+    let streamed = false
+    try {
+      for await (const event of streamOnce(client, providerId, apiKey, req, effort, thinkingOff, tokenField)) {
+        if (event.type !== 'rate_limits' && event.type !== 'usage') streamed = true
+        yield event
+      }
+      return
+    } catch (error) {
+      if (streamed) throw error
+      if (tokenField === 'max_tokens' && rejectsField(error, /max_completion_tokens/)) {
+        completionTokenModels.add(thinkingKey)
+        tokenField = 'max_completion_tokens'
+        continue
+      }
+      if (effort && rejectsField(error, /reasoning|effort/i)) {
+        // Stop sending reasoning_effort for this model (the status bar then
+        // shows effort as unsupported) and retry.
+        markEffortRejected(providerId, req.model)
+        effort = undefined
+        continue
+      }
+      if (thinkingOff && rejectsField(error, /thinking/i)) {
+        thinkingOffRejected.add(thinkingKey)
+        thinkingOff = undefined
+        continue
+      }
+      throw error
+    }
+  }
+}
+
+// provider/model pairs whose endpoint rejected the thinking switch.
+const thinkingOffRejected = new Set<string>()
+
+type TokenField = 'max_tokens' | 'max_completion_tokens'
+// provider/model pairs that asked for max_completion_tokens instead.
+const completionTokenModels = new Set<string>()
+
+/** OpenAI's reasoning models reject max_tokens and require max_completion_tokens. */
+function usesCompletionTokens(model: string): boolean {
+  const id = (model.split('/').at(-1) ?? model).toLowerCase()
+  return /^(?:o[1-9](?:-|$)|gpt-5(?:[.-]|$))/.test(id)
+}
+
+/** Request fields that turn reasoning off for model families known to accept them. */
+function thinkingOffParams(model: string): Record<string, unknown> | undefined {
+  const id = (model.split('/').at(-1) ?? model).toLowerCase()
+  if (/^(?:glm-4\.[5-9]|glm-[5-9]|kimi-k(?:2\.[5-9]|[3-9]))/.test(id)) return { thinking: { type: 'disabled' } }
+  if (/^(?:qwen3|qwq)/.test(id)) return { enable_thinking: false }
+  return undefined
+}
+
+function rejectsField(error: unknown, field: RegExp): boolean {
+  if (!(error instanceof ProviderError) || (error.status !== 400 && error.status !== 422)) return false
+  const cause = error.cause instanceof Error ? error.cause.message : ''
+  return field.test(`${error.message} ${cause}`)
+}
+
+async function* streamOnce(
+  client: OpenAI,
+  providerId: string,
+  apiKey: string,
+  req: ChatRequest,
+  effort: Exclude<Effort, 'auto'> | undefined,
+  thinkingOff: Record<string, unknown> | undefined,
+  tokenField: TokenField,
+): AsyncGenerator<StreamEvent> {
   let text = ''
   let thinking = ''
   let finishReason: string | null = null
@@ -82,13 +160,13 @@ async function* streamTurn(
   const calls = new Map<number, PartialCall>()
   const capture = captureResponseHead()
 
-  const effort = openAiEffort(req.model, resolveEffort(req.effort, req.messages))
   try {
     const stream = await client.withOptions({ fetch: capture.fetch }).chat.completions.create(
       {
         model: req.model,
-        max_tokens: req.maxTokens,
+        [tokenField]: req.maxTokens,
         ...(effort ? { reasoning_effort: effort } : {}),
+        ...thinkingOff,
         messages: toChatMessages(req.system, req.messages),
         ...(req.tools.length > 0 ? { tools: toChatTools(req.tools) } : {}),
         stream: true,
@@ -312,16 +390,30 @@ function toUsage(usage: NonNullable<OpenAI.Chat.ChatCompletionChunk['usage']>): 
 export function normalizeOpenAiUsage(usage: {
   prompt_tokens?: number | null
   completion_tokens?: number | null
-  prompt_tokens_details?: { cached_tokens?: number | null } | null
+  prompt_tokens_details?: { cached_tokens?: number | null; cache_write_tokens?: number | null } | null
+  // DeepSeek reports cache hits outside prompt_tokens_details.
+  prompt_cache_hit_tokens?: number | null
+  // Moonshot/Kimi put cached_tokens at the top level.
+  cached_tokens?: number | null
 }): Usage {
-  
-  
-  
-  const cacheRead = usage.prompt_tokens_details?.cached_tokens ?? 0
+  // prompt_tokens includes cached and cache-written tokens; split them out so
+  // input is billed at the uncached rate only once.
+  const prompt = count(usage.prompt_tokens)
+  const cacheRead = Math.min(
+    prompt,
+    count(usage.prompt_tokens_details?.cached_tokens) ||
+      count(usage.prompt_cache_hit_tokens) ||
+      count(usage.cached_tokens),
+  )
+  const cacheWrite = Math.min(prompt - cacheRead, count(usage.prompt_tokens_details?.cache_write_tokens))
   return {
-    input: Math.max(0, (usage.prompt_tokens ?? 0) - cacheRead),
-    output: usage.completion_tokens ?? 0,
-    cacheWrite: 0,
+    input: prompt - cacheRead - cacheWrite,
+    output: count(usage.completion_tokens),
+    cacheWrite,
     cacheRead,
   }
+}
+
+function count(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
 }

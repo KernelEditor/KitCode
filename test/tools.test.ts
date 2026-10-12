@@ -369,6 +369,25 @@ describe('agent modes', () => {
     expect(engine.mode.cycle()).toBe('normal')
   })
 
+  it('lets shift+tab leave bypass and come back to it once /bypass unlocked it', () => {
+    const engine = createPermissionEngine({})
+    engine.mode.set('plan')
+    engine.bypass.enable()
+    expect(engine.mode.get()).toBe('normal')
+    expect(engine.decide(bash)).toBe('allow')
+    expect(engine.mode.cycle()).toBe('normal')
+    expect(engine.bypass.isEnabled()).toBe(false)
+    expect(engine.decide(bash)).toBe('ask')
+    expect(engine.mode.cycle()).toBe('accept')
+    expect(engine.mode.cycle()).toBe('plan')
+    expect(engine.mode.cycle()).toBe('bypass')
+    expect(engine.bypass.isEnabled()).toBe(true)
+    engine.bypass.disable()
+    expect(engine.mode.cycle()).toBe('accept')
+    expect(engine.mode.cycle()).toBe('plan')
+    expect(engine.mode.cycle()).toBe('normal')
+  })
+
   it('auto-accepts file edits but still asks for shell', () => {
     const engine = createPermissionEngine({})
     engine.mode.set('accept')

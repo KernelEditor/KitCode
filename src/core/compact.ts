@@ -23,10 +23,20 @@ const MAX_TOOL_RESULT_CHARS = 1_200
 const MAX_TOOL_ERROR_CHARS = 2_000
 const MAX_TOOL_INPUT_CHARS = 800
 
-// Output token limits — tight, because a good summary is concise
-const SINGLE_MAX_TOKENS = 768
-const CHUNK_MAX_TOKENS = 512
-const MERGE_MAX_TOKENS = 1_024
+// Output token limits. A long coding session needs room for files, commands,
+// decisions and open work; under ~1k tokens the summary dropped most of it.
+const SINGLE_MAX_TOKENS = 3_000
+const CHUNK_MAX_TOKENS = 1_200
+const MERGE_MAX_TOKENS = 4_000
+
+// An earlier summary is carried forward nearly whole, not truncated like a
+// normal message, so repeated compactions do not erode it.
+const MAX_PREVIOUS_SUMMARY_CHARS = 40_000
+const SUMMARY_MARKER = '[Earlier conversation summary]'
+
+// Tool output cleared from older calls: the most recent ones stay readable.
+export const KEEP_RECENT_TOOL_RESULTS = 6
+const CLEARABLE_TOOL_RESULT_CHARS = 300
 
 // Concurrency for parallel chunk summarization
 const CHUNK_CONCURRENCY = 3
@@ -42,7 +52,9 @@ const SYSTEM_SUMMARIZE =
   'Decisions and assumptions; Remaining work. ' +
   'Keep plans and assumptions separate from verified facts. Never turn an intended command into a completed check. ' +
   'When checks conflict, retain the latest result and mark earlier results as superseded. ' +
-  'Preserve explicit user corrections and project constraints. Do not retain credentials or secret values. Return only the summary.'
+  'Preserve explicit user corrections and project constraints. Do not retain credentials or secret values. ' +
+  `If the input starts with "${SUMMARY_MARKER}", that is the summary of even older work: carry over everything ` +
+  'in it that is still relevant and fold the newer events into the same sections. Return only the summary.'
 
 const SYSTEM_MERGE =
   'Merge these partial summaries of a coding conversation into one coherent summary. ' +
@@ -56,6 +68,11 @@ export interface CompactResult {
   history: Message[]
   compacted: boolean
   removedMessages: number
+  /** Older tool outputs replaced with a short note (no model call needed). */
+  clearedToolResults?: number
+  /** Rough size of the history before and after, for the notice. */
+  tokensBefore?: number
+  tokensAfter?: number
   usage?: Usage
   rateLimits?: RateLimits
 }
@@ -149,20 +166,97 @@ export async function compactHistory(options: {
   const prefix: Message[] = [
     {
       role: 'user',
-      content: [{ type: 'text', text: `[Earlier conversation summary]\n${summary}` }],
+      content: [{ type: 'text', text: `${SUMMARY_MARKER}\n${summary}` }],
     },
     {
       role: 'assistant',
       content: [{ type: 'text', text: 'Earlier context loaded. I will continue from this summary.' }],
     },
   ]
+  // The kept turns can be the bulk of the context (one long agentic turn);
+  // clear their older tool output too.
+  const kept = clearOldToolResults(options.history.slice(cut))
   return {
-    history: [...prefix, ...options.history.slice(cut)],
+    history: [...prefix, ...withoutThinkingReplay(kept.history)],
     compacted: true,
     removedMessages: cut,
+    clearedToolResults: kept.cleared,
     usage,
     rateLimits,
   }
+}
+
+/**
+ * Replaces the output of all but the most recent tool calls with a short
+ * note. No model call, so it works even when there is nothing older to
+ * summarise — the common case of one long agentic turn filling the window.
+ */
+export function clearOldToolResults(
+  history: Message[],
+  keepRecent = KEEP_RECENT_TOOL_RESULTS,
+): { history: Message[]; cleared: number } {
+  let seen = 0
+  let cleared = 0
+  const out = [...history]
+  for (let index = out.length - 1; index >= 0; index -= 1) {
+    const message = out[index]!
+    if (!message.content.some((block) => block.type === 'tool_result')) continue
+    let changed = false
+    const content = [...message.content]
+    for (let at = content.length - 1; at >= 0; at -= 1) {
+      const block = content[at]!
+      if (block.type !== 'tool_result') continue
+      seen += 1
+      if (seen <= keepRecent || block.content.length <= CLEARABLE_TOOL_RESULT_CHARS) continue
+      if (block.content.startsWith(CLEARED_NOTE_PREFIX)) continue
+      content[at] = {
+        ...block,
+        content: `${CLEARED_NOTE_PREFIX} ${block.content.length} characters). Run the tool again if you need it.]`,
+      }
+      cleared += 1
+      changed = true
+    }
+    if (changed) out[index] = { ...message, content }
+  }
+  return { history: cleared > 0 ? out : history, cleared }
+}
+
+const CLEARED_NOTE_PREFIX = '[Older tool output cleared to free context ('
+
+/**
+ * After history is rewritten, replayed thinking blocks no longer match the
+ * conversation that produced them; newer Claude models reject that. Keep the
+ * text for display but stop replaying the signed blocks.
+ */
+export function withoutThinkingReplay(history: Message[]): Message[] {
+  let changed = false
+  const out = history.map((message) => {
+    if (message.role !== 'assistant' || !message.content.some((block) => block.type === 'thinking' && block.raw)) {
+      return message
+    }
+    changed = true
+    return {
+      ...message,
+      content: message.content.map((block) =>
+        block.type === 'thinking' && block.raw ? { type: 'thinking' as const, text: block.text } : block),
+    }
+  })
+  return changed ? out : history
+}
+
+/** Rough token count of a history (≈4 characters per token), for notices. */
+export function estimateHistoryTokens(history: Message[]): number {
+  let chars = 0
+  for (const message of history) {
+    for (const block of message.content) {
+      if (block.type === 'text' || block.type === 'thinking') chars += block.text.length
+      else if (block.type === 'tool_result') chars += block.content.length
+      else if (block.type === 'file') chars += block.text.length
+      else if (block.type === 'tool_use') chars += safeJson(block.input).length
+      else if (block.type === 'image') chars += 6_000
+    }
+  }
+  return Math.round(chars / 4)
 }
 
 export function shouldAutoCompact(used: number, window: number | null): boolean {
@@ -225,7 +319,7 @@ function isConversationUser(message: Message): boolean {
     (block) =>
       block.type === 'image' ||
       block.type === 'file' ||
-      (block.type === 'text' && !block.text.startsWith('[Earlier conversation summary]')),
+      (block.type === 'text' && !block.text.startsWith(SUMMARY_MARKER)),
   )
 }
 
@@ -493,6 +587,9 @@ function renderMessages(history: Message[]): string[] {
 function renderBlock(block: ContentBlock, role: Message['role']): string {
   switch (block.type) {
     case 'text':
+      if (role === 'user' && block.text.startsWith(SUMMARY_MARKER)) {
+        return truncate(block.text, MAX_PREVIOUS_SUMMARY_CHARS)
+      }
       return truncate(
         block.text,
         role === 'user' ? MAX_USER_TEXT_CHARS : MAX_ASSISTANT_TEXT_CHARS,

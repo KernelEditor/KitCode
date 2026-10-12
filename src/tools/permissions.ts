@@ -17,7 +17,8 @@ export interface PermissionEngine {
   mode: {
     get(): AgentMode
     set(mode: AgentMode): void
-    cycle(): AgentMode
+    /** Next mode for shift+tab; bypass joins the cycle once /bypass unlocked it. */
+    cycle(): AgentMode | 'bypass'
   }
 }
 
@@ -29,6 +30,9 @@ export function createPermissionEngine(
 ): PermissionEngine {
   const sessionGrants = new Set<string>()
   let bypassEnabled = false
+  // Set by an explicit, confirmed /bypass (or --bypass): only then may
+  // shift+tab bring bypass back after leaving it.
+  let bypassUnlocked = false
   let current: AgentMode = 'normal'
 
   const resolve = (tool: Tool, requested?: PermissionMode): PermissionMode =>
@@ -58,9 +62,13 @@ export function createPermissionEngine(
     bypass: {
       enable() {
         bypassEnabled = true
+        bypassUnlocked = true
+        // Bypass is a mode of its own: plan would otherwise still block writes.
+        current = 'normal'
       },
       disable() {
         bypassEnabled = false
+        bypassUnlocked = false
       },
       isEnabled() {
         return bypassEnabled
@@ -72,7 +80,18 @@ export function createPermissionEngine(
         current = mode
       },
       cycle() {
-        current = MODES[(MODES.indexOf(current) + 1) % MODES.length] ?? 'normal'
+        if (bypassEnabled) {
+          bypassEnabled = false
+          current = 'normal'
+          return current
+        }
+        const next = MODES[(MODES.indexOf(current) + 1) % MODES.length] ?? 'normal'
+        if (next === 'normal' && bypassUnlocked) {
+          bypassEnabled = true
+          current = 'normal'
+          return 'bypass'
+        }
+        current = next
         return current
       },
     },

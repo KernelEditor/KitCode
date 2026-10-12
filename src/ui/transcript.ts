@@ -60,9 +60,20 @@ export function applyEvent(state: TranscriptState, event: AgentEvent): Transcrip
             summary: sanitizeTerminalText(event.summary),
             state: 'running',
             content: '',
+            startedAt: Date.now(),
           },
         ],
         seq: state.seq + 1,
+      }
+
+    case 'tool_progress':
+      return {
+        ...state,
+        bubbles: state.bubbles.map((bubble) =>
+          bubble.kind === 'tool' && bubble.id === event.id && bubble.state === 'running'
+            ? { ...bubble, progress: sanitizeTerminalText(event.text) }
+            : bubble,
+        ),
       }
 
     case 'tool_end':
@@ -133,6 +144,7 @@ export function applyEvent(state: TranscriptState, event: AgentEvent): Transcrip
     case 'turn_start':
     case 'usage':
     case 'rate_limits':
+    case 'speed':
       return state
   }
 }

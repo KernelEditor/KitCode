@@ -1,6 +1,10 @@
 export interface DiffLine {
   kind: 'add' | 'del' | 'ctx'
   text: string
+  /** 1-based line number in the old file (del, ctx) or the new file (add). */
+  line?: number
+  /** For a changed line paired with its counterpart: the [start, end) span that differs. */
+  changed?: [number, number]
 }
 
 export interface DiffResult {
@@ -56,20 +60,53 @@ function diffBody(
   let added = 0
   let removed = 0
   for (let i = Math.max(0, start - 2); i < start; i += 1) {
-    hunk.push({ kind: 'ctx', text: a[i] ?? '' })
+    hunk.push({ kind: 'ctx', text: a[i] ?? '', line: i + 1 })
   }
+  const dels: DiffLine[] = []
   for (let i = start; i < endA; i += 1) {
-    hunk.push({ kind: 'del', text: a[i] ?? '' })
+    dels.push({ kind: 'del', text: a[i] ?? '', line: i + 1 })
     removed += 1
   }
+  const adds: DiffLine[] = []
   for (let i = start; i < endB; i += 1) {
-    hunk.push({ kind: 'add', text: b[i] ?? '' })
+    adds.push({ kind: 'add', text: b[i] ?? '', line: i + 1 })
     added += 1
   }
+  // A one-for-one rewrite (same number of lines) is most often a tweak inside
+  // each line: mark the span that changed so it can be emphasised.
+  if (dels.length === adds.length) {
+    dels.forEach((del, index) => {
+      const add = adds[index]!
+      const span = changedSpans(del.text, add.text)
+      if (span) {
+        del.changed = span.before
+        add.changed = span.after
+      }
+    })
+  }
+  hunk.push(...dels, ...adds)
   for (let i = endA; i < Math.min(a.length, endA + 2); i += 1) {
-    hunk.push({ kind: 'ctx', text: a[i] ?? '' })
+    hunk.push({ kind: 'ctx', text: a[i] ?? '', line: i + 1 })
   }
   return { added, removed, hunk }
+}
+
+function changedSpans(
+  before: string,
+  after: string,
+): { before: [number, number]; after: [number, number] } | null {
+  if (before === after) return null
+  let head = 0
+  while (head < before.length && head < after.length && before[head] === after[head]) head += 1
+  let tail = 0
+  while (
+    tail < before.length - head &&
+    tail < after.length - head &&
+    before[before.length - 1 - tail] === after[after.length - 1 - tail]
+  ) tail += 1
+  // Lines rewritten almost entirely gain nothing from a highlighted span.
+  if (head + tail < Math.min(before.length, after.length) / 3) return null
+  return { before: [head, before.length - tail], after: [head, after.length - tail] }
 }
 
 export function truncate(text: string, width: number): string {

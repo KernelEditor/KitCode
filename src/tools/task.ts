@@ -28,7 +28,10 @@ export function createTaskTool(runner: SubagentRunner): Tool {
       required: ['description', 'prompt'],
       additionalProperties: false,
     },
-    defaultPermission: 'ask',
+    // Starting a subagent changes nothing by itself: each tool call it makes
+    // goes through the same permission and plan-mode checks as the parent.
+    defaultPermission: 'allow',
+    readOnly: true,
     summarize(input) {
       return `task(${brief(field(input, 'description'))})`
     },

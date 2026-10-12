@@ -106,6 +106,22 @@ describe('slash command keyboard navigation', () => {
     }
   })
 
+  it('collapses a large paste into a token and sends the full text', async () => {
+    const submitted = vi.fn()
+    const changes: string[] = []
+    const terminal = renderPrompt(submitted, (value) => changes.push(value))
+    const big = Array.from({ length: 40 }, (_, index) => `row ${index}`).join('\n')
+    try {
+      await terminal.input('see: ')
+      await terminal.input(`\u001b[200~${big}\u001b[201~`)
+      expect(changes.at(-1)).toBe('see: [paste #1 · 40 lines]')
+      await terminal.input('\r')
+      expect(submitted).toHaveBeenCalledWith(`see: ${big}`)
+    } finally {
+      terminal.cleanup()
+    }
+  })
+
   it('keeps normal pasted text editable and maps ctrl-v to clipboard images', async () => {
     const changes: string[] = []
     const pasteImage = vi.fn()

@@ -3,6 +3,8 @@ import { Box, Text as InkText } from 'ink'
 import { createContext, Fragment, useContext, useMemo } from 'react'
 import type { ComponentProps, ReactNode } from 'react'
 import stringWidth from 'string-width'
+import { grammarFor, highlightCode } from './highlight'
+import type { TokenKind } from './highlight'
 
 const DimContext = createContext(false)
 
@@ -112,20 +114,42 @@ function BlockView({ block }: { block: MdNode }): ReactNode {
     case 'table':
       return <TableView block={block} />
     case 'code':
-      return <CodeBlock code={block.text ?? ''} />
+      return <CodeBlock code={block.text ?? ''} lang={block.lang} />
     case 'hr':
       return <Box height={1} />
   }
 }
 
-function CodeBlock({ code }: { code: string }) {
-  const lines = code.split('\n')
+const TOKEN_COLORS: Record<TokenKind, string | undefined> = {
+  plain: undefined,
+  keyword: '#c4a7ff',
+  string: '#86efac',
+  comment: undefined,
+  number: '#fbbf24',
+  literal: '#fb923c',
+  type: '#67e8f9',
+}
 
+function CodeBlock({ code, lang }: { code: string; lang?: string }) {
+  const lines = useMemo(() => highlightCode(code.replace(/\t/g, '  '), lang), [code, lang])
+  // Unknown languages keep the old single colour so code still stands apart from prose.
+  const plain = grammarFor(lang) ? undefined : 'cyan'
+
+  // Colour only, no frame or gutter: copied code must paste exactly as written.
   return (
     <Box flexDirection="column" marginTop={1}>
-      {lines.map((line, i) => (
-        <Text key={i} color="cyan">
-          {line}
+      {lines.map((tokens, i) => (
+        <Text key={i}>
+          {tokens.map((token, j) => (
+            <Text
+              key={j}
+              color={TOKEN_COLORS[token.kind] ?? (token.kind === 'plain' ? plain : undefined)}
+              dimColor={token.kind === 'comment' ? true : undefined}
+              italic={token.kind === 'comment'}
+            >
+              {token.text}
+            </Text>
+          ))}
         </Text>
       ))}
     </Box>

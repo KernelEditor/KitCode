@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import { tokens } from '../core/usage'
 
 export type Lang = 'en' | 'ru'
 
@@ -25,6 +26,8 @@ export interface Strings {
   allowOnce: string
   always: string
   deny: string
+  dangerousCommand: string
+  permissionKeys: string
   yes: string
   noDefault: string
 
@@ -55,6 +58,9 @@ export interface Strings {
   escHelp: string
   cancelled: string
   queued: (count: number) => string
+  queueHint: string
+  pasteToken: (id: number, lines: number, chars: number) => string
+  inputRows: (from: number, to: number, total: number) => string
   configAt: (path: string) => string
   skillsEmpty: string
   skillsInstallUsage: string
@@ -78,14 +84,19 @@ export interface Strings {
   mcpDisabled: (name: string) => string
   mcpToggleFailed: (name: string, error: string) => string
   mcpState: Record<string, string>
-  activeAgents: (count: number) => string
-  subagentsStatus: (count: number) => string
+  moreAgents: (count: number) => string
+  noSubagents: string
+  subagentsTitle: string
+  subagentRunning: string
+  subagentDone: string
+  subagentWaiting: string
+  subagentBack: string
   attachUsage: string
   attachmentAdded: (name: string) => string
   attachmentsCleared: string
   compactNothing: string
   compactStarting: string
-  compactDone: (count: number) => string
+  compactDone: (summarised: number, cleared: number, before?: number, after?: number) => string
   sessionRenameUsage: string
   sessionRenamed: (title: string) => string
   sessionDeleteAsk: string
@@ -105,7 +116,11 @@ export interface Strings {
   updateCurrent: (version: string) => string
   updateFailed: (reason: string) => string
   accentSet: (name: string, hex: string) => string
+  accentInvalid: (value: string) => string
+  customAccent: string
+  customAccentPrompt: string
   reasoning: (on: boolean) => string
+  bellState: (on: boolean) => string
   effortSet: (value: string) => string
   budgetCurrent: (tokens: number) => string
   budgetSet: (tokens: number) => string
@@ -185,6 +200,8 @@ const en: Strings = {
   allowOnce: 'allow once',
   always: 'always',
   deny: 'deny',
+  dangerousCommand: 'risky command',
+  permissionKeys: '↑/↓ choose · enter confirm · y/a/n · esc deny',
   yes: 'yes',
   noDefault: 'no (default)',
 
@@ -215,6 +232,9 @@ const en: Strings = {
   escHelp: 'esc — cancel the running turn',
   cancelled: 'Cancelled.',
   queued: (count) => `queued: ${count}`,
+  pasteToken: (id, lines, chars) => `[paste #${id} · ${lines > 1 ? `${lines} lines` : `${chars} chars`}]`,
+  inputRows: (from, to, total) => `lines ${from}–${to} of ${total}`,
+  queueHint: 'waiting for the current answer · ↑/↓ pick one to edit · enter puts it back in its place',
   configAt: (path) => `config: ${path}`,
   skillsEmpty:
     'No skills installed. Drop a folder with a SKILL.md into ~/.kitcode/skills or ./.kitcode/skills',
@@ -245,16 +265,25 @@ const en: Strings = {
     error: 'error',
     disabled: 'disabled',
   },
-  activeAgents: (count) => `agents: ${count}`,
-  subagentsStatus: (count) =>
-    count > 0 ? `Active sub-agents: ${count}` : 'No active sub-agents.',
+  moreAgents: (count) => `+${count} more`,
+  noSubagents: 'No sub-agents in this session yet.',
+  subagentsTitle: 'Open a sub-agent chat',
+  subagentRunning: 'running',
+  subagentDone: 'done',
+  subagentWaiting: 'waiting for the first step…',
+  subagentBack: 'esc back',
   attachUsage:
     'Usage: /attach <image-or-text-file> · /attach clipboard · /attach clear',
   attachmentAdded: (name) => `Attached for the next message: ${name}`,
   attachmentsCleared: 'Pending attachments cleared.',
   compactNothing: 'Not enough older conversation to compact yet.',
   compactStarting: 'Compacting context…',
-  compactDone: (count) => `Context compacted · ${count} older messages replaced with a summary.`,
+  compactDone: (summarised, cleared, before, after) => [
+    'Context compacted',
+    summarised > 0 ? `${summarised} older messages replaced with a summary` : '',
+    cleared > 0 ? `${cleared} old tool outputs cleared` : '',
+    before !== undefined && after !== undefined ? `~${tokens(before)} → ~${tokens(after)} tokens` : '',
+  ].filter(Boolean).join(' · ') + '.',
   sessionRenameUsage: 'Type the title after the command: /sessions rename <id> <title>',
   sessionRenamed: (title) => `Session renamed to "${title}".`,
   sessionDeleteAsk: 'The saved chat file will be deleted. This cannot be undone.',
@@ -278,7 +307,11 @@ const en: Strings = {
   updateCurrent: (version) => `KitCode ${version} is up to date.`,
   updateFailed: (reason) => `Could not check for updates: ${reason}.`,
   accentSet: (name, hex) => `Accent: ${name} (${hex})`,
+  accentInvalid: (value) => `"${value}" is not a colour. Use a preset name or a hex code like #ff8800 or #f80.`,
+  customAccent: 'custom colour…',
+  customAccentPrompt: 'Hex colour, e.g. #ff8800 or #f80',
   reasoning: (on) => `Reasoning ${on ? 'on' : 'off'}`,
+  bellState: (on) => on ? 'Sound on: a beep when a long answer finishes or a permission is needed.' : 'Sound off.',
   effortSet: (value) => `Effort: ${value}`,
   budgetCurrent: (tokens) => `Token budget: ${tokens.toLocaleString()} per turn`,
   budgetSet: (tokens) => `Token budget set to ${tokens.toLocaleString()} per turn`,
@@ -312,7 +345,7 @@ const en: Strings = {
   promptsEmpty: 'No saved prompts. Use /prompt save <name>.',
   unknownCommand: (name) => `Unknown command /${name}. Try /help`,
   didYouMean: (typed, guess) => `Unknown command /${typed}. Did you mean /${guess}?`,
-  undoNothing: 'Nothing to undo in this session.',
+  undoNothing: 'Nothing to undo: no file changes made by kitcode in this folder.',
   undoResult: (restored, removed) =>
     `Undo complete: ${restored} restored, ${removed} newly created removed.`,
   undoConflicts: (paths) =>
@@ -340,7 +373,7 @@ const en: Strings = {
   titleMcpDelete: 'Remove an MCP server',
   titleMcpEnable: 'Enable an MCP server',
   titleMcpDisable: 'Disable an MCP server',
-  modeLabel: { normal: 'normal', accept: 'auto-accept edits', plan: 'plan only' },
+  modeLabel: { normal: 'normal', accept: 'auto-accept edits', plan: 'plan only', bypass: 'BYPASS — no permission prompts' },
   modeChanged: (label) => `Mode: ${label}  (shift+tab to cycle)`,
 
   cmd: {
@@ -352,6 +385,7 @@ const en: Strings = {
     refresh: 'reload the model list for a provider',
     effort: 'set reasoning depth',
     thinking: 'toggle reasoning',
+    bell: 'toggle the sound for finished answers and permission prompts',
     context: 'set or show the model context window',
     budget: 'set token budget per turn',
     theme: 'change the accent colour',
@@ -385,7 +419,7 @@ const en: Strings = {
     clear: 'start a fresh session',
     help: 'list commands',
     exit: 'quit',
-    subagents: 'show active sub-agents and what they are doing',
+    subagents: 'open a sub-agent and watch its chat live',
   },
 }
 
@@ -407,6 +441,8 @@ const ru: Strings = {
   allowOnce: 'разрешить один раз',
   always: 'всегда',
   deny: 'отклонить',
+  dangerousCommand: 'рискованная команда',
+  permissionKeys: '↑/↓ выбрать · enter подтвердить · y/a/n · esc отклонить',
   yes: 'да',
   noDefault: 'нет (по умолчанию)',
 
@@ -437,6 +473,9 @@ const ru: Strings = {
   escHelp: 'esc — отменить текущий ход',
   cancelled: 'Отменено.',
   queued: (count) => `в очереди: ${count}`,
+  pasteToken: (id, lines, chars) => `[вставка #${id} · ${lines > 1 ? `${lines} строк` : `${chars} символов`}]`,
+  inputRows: (from, to, total) => `строки ${from}–${to} из ${total}`,
+  queueHint: 'ждут текущего ответа · ↑/↓ — выбрать одно для правки · enter вернёт его на место',
   configAt: (path) => `конфиг: ${path}`,
   skillsEmpty:
     'Скиллов нет. Положи папку с файлом SKILL.md в ~/.kitcode/skills или ./.kitcode/skills',
@@ -467,16 +506,25 @@ const ru: Strings = {
     error: 'ошибка',
     disabled: 'отключён',
   },
-  activeAgents: (count) => `агентов: ${count}`,
-  subagentsStatus: (count) =>
-    count > 0 ? `Активных суб-агентов: ${count}` : 'Нет активных суб-агентов.',
+  moreAgents: (count) => `+${count} ещё`,
+  noSubagents: 'В этой сессии ещё не было суб-агентов.',
+  subagentsTitle: 'Открыть чат суб-агента',
+  subagentRunning: 'работает',
+  subagentDone: 'готово',
+  subagentWaiting: 'ждём первый шаг…',
+  subagentBack: 'esc — назад',
   attachUsage:
     'Использование: /attach <картинка-или-текстовый-файл> · /attach clipboard · /attach clear',
   attachmentAdded: (name) => `Прикреплено к следующему сообщению: ${name}`,
   attachmentsCleared: 'Ожидающие вложения убраны.',
   compactNothing: 'Пока недостаточно старых сообщений для сжатия контекста.',
   compactStarting: 'Сжатие контекста…',
-  compactDone: (count) => `Контекст сжат · старых сообщений заменено сводкой: ${count}.`,
+  compactDone: (summarised, cleared, before, after) => [
+    'Контекст сжат',
+    summarised > 0 ? `старых сообщений заменено сводкой: ${summarised}` : '',
+    cleared > 0 ? `очищено старых выводов инструментов: ${cleared}` : '',
+    before !== undefined && after !== undefined ? `~${tokens(before)} → ~${tokens(after)} токенов` : '',
+  ].filter(Boolean).join(' · ') + '.',
   sessionRenameUsage: 'Допиши название: /sessions rename <id> <название>',
   sessionRenamed: (title) => `Сессия переименована в «${title}».`,
   sessionDeleteAsk: 'Файл сохранённого чата будет удалён без возможности восстановления.',
@@ -500,7 +548,11 @@ const ru: Strings = {
   updateCurrent: (version) => `Установлена актуальная версия KitCode ${version}.`,
   updateFailed: (reason) => `Не удалось проверить обновления: ${reason}.`,
   accentSet: (name, hex) => `Цвет: ${name} (${hex})`,
+  accentInvalid: (value) => `«${value}» — не цвет. Укажи название из списка или hex-код, например #ff8800 или #f80.`,
+  customAccent: 'свой цвет…',
+  customAccentPrompt: 'Hex-код цвета, например #ff8800 или #f80',
   reasoning: (on) => `Размышления ${on ? 'включены' : 'выключены'}`,
+  bellState: (on) => on ? 'Звук включён: сигнал, когда долгий ответ готов или нужно разрешение.' : 'Звук выключен.',
   effortSet: (value) => `Глубина: ${value}`,
   budgetCurrent: (tokens) => `Лимит токенов: ${tokens.toLocaleString()} за ход`,
   budgetSet: (tokens) => `Лимит токенов установлен: ${tokens.toLocaleString()} за ход`,
@@ -534,7 +586,7 @@ const ru: Strings = {
   promptsEmpty: 'Сохранённых промтов нет. Используй /prompt save <имя>.',
   unknownCommand: (name) => `Неизвестная команда /${name}. Попробуй /help`,
   didYouMean: (typed, guess) => `Неизвестная команда /${typed}. Может быть /${guess}?`,
-  undoNothing: 'В этой сессии пока нечего откатывать.',
+  undoNothing: 'Нечего откатывать: kitcode ещё не менял файлы в этой папке.',
   undoResult: (restored, removed) =>
     `Откат завершён: восстановлено ${restored}, удалено новых файлов ${removed}.`,
   undoConflicts: (paths) =>
@@ -562,7 +614,7 @@ const ru: Strings = {
   titleMcpDelete: 'Удалить MCP-сервер',
   titleMcpEnable: 'Включить MCP-сервер',
   titleMcpDisable: 'Выключить MCP-сервер',
-  modeLabel: { normal: 'обычный', accept: 'правки без спроса', plan: 'только план' },
+  modeLabel: { normal: 'обычный', accept: 'правки без спроса', plan: 'только план', bypass: 'BYPASS — без запросов разрешений' },
   modeChanged: (label) => `Режим: ${label}  (shift+tab — переключить)`,
 
   cmd: {
@@ -574,6 +626,7 @@ const ru: Strings = {
     refresh: 'обновить список моделей провайдера',
     effort: 'глубина размышлений',
     thinking: 'включить/выключить размышления',
+    bell: 'включить/выключить звук о готовом ответе и запросах разрешений',
     context: 'задать или показать окно контекста модели',
     budget: 'лимит токенов за ход (0 = безлимит)',
     theme: 'сменить цвет акцента',
@@ -606,7 +659,7 @@ const ru: Strings = {
     clear: 'начать новую сессию',
     help: 'список команд',
     exit: 'выход',
-    subagents: 'показать активных суб-агентов и чем заняты',
+    subagents: 'открыть суб-агента и смотреть его чат вживую',
   },
 }
 

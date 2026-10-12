@@ -15,6 +15,8 @@ export interface ToolContext {
   requestPermission?(request: PermissionRequest): Promise<PermissionDecision>
   checkpoint?: FileCheckpointSink
   onEvent?(event: AgentEvent): void
+  /** Latest line of a long-running call, shown live under it in the chat. */
+  onProgress?(text: string): void
 }
 
 export type ToolDisplay =

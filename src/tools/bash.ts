@@ -7,6 +7,7 @@ const DEFAULT_TIMEOUT = 120_000
 const MAX_TIMEOUT = 600_000
 const MAX_OUTPUT = 100_000
 const MAX_COMMAND_CHARS = 20_000
+const PROGRESS_INTERVAL_MS = 250
 
 interface BashInput {
   command: string
@@ -85,6 +86,20 @@ export const bashTool: Tool = {
       })
 
       const chunks: string[] = []
+      // Show the newest output line live, at most a few times a second.
+      let partial = ''
+      let lastProgress = 0
+      const progress = (text: string) => {
+        if (!ctx.onProgress) return
+        const lines = (partial + text).split(/\r?\n|\r/)
+        partial = lines.at(-1) ?? ''
+        const now = Date.now()
+        if (now - lastProgress < PROGRESS_INTERVAL_MS) return
+        const latest = [...lines].reverse().find((line) => line.trim() !== '')
+        if (latest === undefined) return
+        lastProgress = now
+        ctx.onProgress(latest.trim())
+      }
       let captured = 0
       let truncated = false
       const collect = (buf: Buffer) => {
@@ -96,6 +111,7 @@ export const bashTool: Tool = {
         } catch {
           text = buf.toString()
         }
+        progress(text)
         if (text.length > MAX_OUTPUT - captured) {
           chunks.push(text.slice(0, MAX_OUTPUT - captured))
           truncated = true

@@ -17,6 +17,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'refresh', args: '[provider]' },
   { name: 'effort', ...BUSY_SAFE },
   { name: 'thinking', ...BUSY_SAFE },
+  { name: 'bell', args: '[on|off]', ...BUSY_SAFE },
   { name: 'context', args: '[tokens|auto]', ...BUSY_SAFE },
   { name: 'budget', args: '[tokens]', ...BUSY_SAFE },
   { name: 'theme', args: '[color]', ...BUSY_SAFE },
@@ -36,9 +37,9 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'resume' },
   { name: 'undo' },
   { name: 'clear' },
+  { name: 'subagents', ...BUSY_SAFE },
   { name: 'help', ...BUSY_SAFE },
   { name: 'exit', ...BUSY_SAFE },
-  { name: 'subagents', ...BUSY_SAFE },
 ]
 
 const SUBCOMMANDS: SlashCommand[] = [
@@ -103,19 +104,27 @@ function isSubsequence(needle: string, haystack: string): boolean {
   return needle.length === 0
 }
 
+// Optimal string alignment distance: like Levenshtein, but swapping two
+// neighbouring letters ("hepl" for "help") costs one edit, not two.
 function editDistance(a: string, b: string): number {
+  let beforePrevious: number[] = []
   let previous = Array.from({ length: b.length + 1 }, (_, index) => index)
 
   for (let i = 1; i <= a.length; i += 1) {
     const current = [i]
     for (let j = 1; j <= b.length; j += 1) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1
-      current[j] = Math.min(
+      let best = Math.min(
         (current[j - 1] ?? 0) + 1,
         (previous[j] ?? 0) + 1,
         (previous[j - 1] ?? 0) + cost,
       )
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        best = Math.min(best, (beforePrevious[j - 2] ?? 0) + 1)
+      }
+      current[j] = best
     }
+    beforePrevious = previous
     previous = current
   }
 

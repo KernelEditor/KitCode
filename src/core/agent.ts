@@ -76,6 +76,11 @@ export interface AgentConfig {
   permissionLane?: ExecutionLane
   executionLane?: ExecutionLane
   modelRequestLane?: ExecutionLane
+  /**
+   * Called before every follow-up model request of a turn. Returns a lighter
+   * history (old tool output cleared) when the window is nearly full, or null.
+   */
+  trimContext?(messages: Message[]): Message[] | null
 }
 
 interface StreamOutcome {
@@ -114,6 +119,18 @@ export async function runTurn(
       })
       hooks.onEvent({ type: 'turn_end', stopReason: 'max_tokens' })
       return messages
+    }
+
+    if (steps > 1) {
+      const trimmed = cfg.trimContext?.(messages)
+      if (trimmed) {
+        messages = trimmed
+        hooks.onEvent({
+          type: 'notice',
+          level: 'info',
+          text: 'Context is nearly full: cleared older tool output to keep going.',
+        })
+      }
     }
 
     const request = async (): Promise<StreamOutcome | null> => {
@@ -205,14 +222,22 @@ async function consumeStream(
   let outcome: StreamOutcome | undefined
   let text = ''
   let thinking = ''
+  let outputTokens = 0
+  const startedAt = Date.now()
+  let firstTokenAt: number | undefined
 
   for await (const event of streamWithRetry(cfg.provider, request, cfg.modelRef, signal)) {
     switch (event.type) {
       case 'text_delta':
+        firstTokenAt ??= Date.now()
         text += event.text
         hooks.onEvent({ type: 'text_delta', text: event.text })
         break
       case 'thinking_delta':
+        firstTokenAt ??= Date.now()
+        // Some endpoints stream reasoning even when it was switched off
+        // (or cannot be switched off): keep it out of the chat.
+        if (!cfg.thinking) break
         thinking += event.text
         hooks.onEvent({ type: 'thinking_delta', text: event.text })
         break
@@ -220,6 +245,7 @@ async function consumeStream(
         cfg.budget?.record(cfg.modelRef, event.usage)
         cfg.usage.record(cfg.modelRef, event.usage)
         hooks.onEvent({ type: 'usage', model: cfg.modelRef, usage: event.usage })
+        outputTokens = event.usage.output
         break
       case 'rate_limits':
         hooks.onEvent({ type: 'rate_limits', model: cfg.modelRef, limits: event.limits })
@@ -232,7 +258,16 @@ async function consumeStream(
     }
   }
 
-  if (outcome) return outcome
+  if (outcome) {
+    // Measure from the first streamed token so time-to-first-token (queueing,
+    // prompt processing) does not drag the rate down. Aborted streams report
+    // incomplete output counts, so they are skipped.
+    const ms = Date.now() - (firstTokenAt ?? startedAt)
+    if (outcome.stopReason !== 'aborted' && outputTokens > 0 && ms > 0) {
+      hooks.onEvent({ type: 'speed', model: cfg.modelRef, outputTokens, ms })
+    }
+    return outcome
+  }
   if (signal.aborted) {
     const content: ContentBlock[] = []
     if (thinking) content.push({ type: 'thinking', text: thinking })
@@ -376,24 +411,25 @@ async function runToolCalls(
       ? cfg.executionLane.run(operation)
       : operation()
   }
-  for (let index = 0; index < calls.length;) {
-    const call = calls[index]!
-    if (call.name !== 'task') {
-      results.push(await run(call))
-      index += 1
-      continue
-    }
-    const batch: Promise<ToolResultBlock>[] = []
-    while (calls[index]?.name === 'task') {
-      batch.push(run(calls[index]!))
-      index += 1
-    }
-    // Drain siblings even if a permission hook fails, before committing the turn.
-    const settled = await Promise.allSettled(batch)
-    for (const result of settled) {
-      if (result.status === 'rejected') throw result.reason
-      results.push(result.value)
-    }
+  // Every subagent in the message starts at once, even when other tool calls
+  // sit between them; the other calls run one by one alongside them.
+  const tasks = calls.filter((call) => call.name === 'task').map(run)
+  const others = (async () => {
+    const out: ToolResultBlock[] = []
+    for (const call of calls) if (call.name !== 'task') out.push(await run(call))
+    return out
+  })()
+  // Drain siblings even if a permission hook fails, before committing the turn.
+  const [settledOthers] = await Promise.allSettled([others])
+  const settledTasks = await Promise.allSettled(tasks)
+  for (const result of [settledOthers!, ...settledTasks]) {
+    if (result.status === 'rejected') throw result.reason
+  }
+  const otherResults = settledOthers!.status === 'fulfilled' ? settledOthers!.value : []
+  const taskResults = settledTasks.map((result) => (result as PromiseFulfilledResult<ToolResultBlock>).value)
+  // Results go back in the order the model issued the calls.
+  for (const call of calls) {
+    results.push((call.name === 'task' ? taskResults : otherResults).shift()!)
   }
   return results
 }
@@ -417,6 +453,7 @@ async function runOneCall(
     requestPermission: (request) => hooks.requestPermission(request),
     checkpoint: cfg.checkpoint,
     onEvent: (event) => hooks.onEvent(event),
+    onProgress: (text) => hooks.onEvent({ type: 'tool_progress', id: call.id, text }),
     confirm: async (question) =>
       (await hooks.requestPermission({
         toolName: tool.name,

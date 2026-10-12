@@ -6,6 +6,7 @@ import { attachmentLabel, looksLikeAttachmentPath } from '../core/attachments'
 import { parseMcpAddArgs } from '../mcp/add'
 import type { McpAddError } from '../mcp/add'
 import type { McpServerState } from '../mcp/client'
+import { createSpeedMeter, readSpeed, recordSpeed } from './speed'
 import type { ContentBlock, Effort, Message } from '../providers/types'
 import { COMMANDS, closestCommand, commandRunsWhileBusy } from './commands'
 import { extractMentions } from './mentions'
@@ -18,6 +19,7 @@ import { PermissionPrompt } from './components/PermissionPrompt'
 import { Picker } from './components/Picker'
 import { PromptInput } from './components/PromptInput'
 import { StatusBar } from './components/StatusBar'
+import { SubagentChat } from './components/SubagentChat'
 import { TerminalViewport, liveTranscriptRows } from './components/TerminalViewport'
 import { Transcript } from './components/Transcript'
 import { appendInputHistory } from './history'
@@ -25,13 +27,19 @@ import { LANGS, StringsContext, stringsFor } from './i18n'
 import type { Lang, Strings } from './i18n'
 import { useTerminalInput } from './input'
 import type { Runtime } from './runtime'
-import { PRESETS, ThemeContext, makeTheme, resolveAccent } from './theme'
+import { PRESETS, ThemeContext, makeTheme, parseAccent, resolveAccent } from './theme'
 import { formatDuration } from './time'
 import { applyEvents, emptyTranscript, fromHistory, pushNotice, pushUser } from './transcript'
-import type { PickerItem } from './types'
+import type { Bubble, PickerItem } from './types'
 
 const EFFORTS: Effort[] = ['auto', 'low', 'medium', 'high', 'xhigh', 'max']
 const STREAM_FRAME_MS = 50
+// Picker key for typing an arbitrary hex accent; not a valid colour itself.
+const CUSTOM_ACCENT = '__custom__'
+// Turns shorter than this finish while you are still watching: no beep.
+const BELL_AFTER_MS = 15_000
+// Rows the hidden prompt input frees up for the sub-agent chat.
+const SUBAGENT_CHAT_EXTRA_ROWS = 4
 const MAX_ATTACHMENTS = 8
 
 // The windows every current frontier model is sold under. Anything else is still
@@ -53,12 +61,13 @@ function parseContextTokens(input: string): number | null {
 
 type QueuedItem =
   | { kind: 'command'; line: string }
-  | { kind: 'message'; text: string; content: ContentBlock[] }
+  | { kind: 'message'; text: string; content: ContentBlock[]; attachments: ContentBlock[] }
 
 type Overlay =
   | { kind: 'none' }
   | { kind: 'permission'; request: PermissionRequest; resolve: (d: PermissionDecision) => void }
   | { kind: 'picker'; title: string; items: PickerItem[]; select: (key: string) => void }
+  | { kind: 'subagent'; id: string }
   | {
       kind: 'confirm'
       title: string
@@ -90,6 +99,8 @@ export function App({
     warnings.reduce((state, text) => pushNotice(state, 'warn', text), fromHistory(initialHistory)),
   )
   const [transcriptRevision, setTranscriptRevision] = useState(0)
+  const transcriptRef = useRef(transcript)
+  transcriptRef.current = transcript
   const [input, setInput] = useState('')
   const [promptHistory, setPromptHistory] = useState(() =>
     inputHistoryFromMessages(initialHistory),
@@ -118,8 +129,23 @@ export function App({
   const [turnStart, setTurnStart] = useState<number | null>(null)
   const [, tick] = useState(0)
   const [context, setContext] = useState(() => runtime.modelContext())
+  const speedMeter = useRef(createSpeedMeter())
+  // After /undo the model still believes its edits are in place; tell it with
+  // the next message instead of adding a message of its own to the history.
+  const undoNote = useRef<string | null>(null)
+  const withUndoNote = (content: ContentBlock[]): ContentBlock[] => {
+    const note = undoNote.current
+    if (!note) return content
+    undoNote.current = null
+    return [{ type: 'text', text: note }, ...content]
+  }
   const transcriptEvents = useRef<AgentEvent[]>([])
   const transcriptTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // The terminal's own bell: a soft system sound (or a flash, per terminal settings).
+  const bell = useCallback(() => {
+    if (stdout.isTTY && runtime.getBell()) stdout.write('\x07')
+  }, [runtime, stdout])
 
   const clearScreen = useCallback(() => {
     if (stdout.isTTY) stdout.write('\x1b[2J\x1b[3J\x1b[H')
@@ -150,6 +176,7 @@ export function App({
 
   const queueTranscriptEvent = useCallback(
     (event: AgentEvent) => {
+      recordSpeed(speedMeter.current, event)
       transcriptEvents.current.push(event)
       if (event.type !== 'text_delta' && event.type !== 'thinking_delta') {
         flushTranscriptEvents()
@@ -237,7 +264,8 @@ export function App({
     abort.current = controller
     busyRef.current = true
     setBusy(true)
-    setTurnStart(Date.now())
+    const startedAt = Date.now()
+    setTurnStart(startedAt)
     turns.current += 1
     const hooks: AgentHooks = {
       onEvent: queueTranscriptEvent,
@@ -263,7 +291,13 @@ export function App({
             return
           }
           controller.signal.addEventListener('abort', cancel, { once: true })
-          setOverlay({ kind: 'permission', request, resolve: finish })
+          bell()
+          setOverlay((current) => {
+            // A sub-agent can ask for approval while /subagents is open; settle
+            // the picker so the slash command does not wait forever.
+            if (current.kind === 'picker') current.select('')
+            return { kind: 'permission', request, resolve: finish }
+          })
         }),
     }
     try {
@@ -282,6 +316,8 @@ export function App({
     } catch (error) {
       notice('error', error instanceof Error ? error.message : String(error))
     } finally {
+      // Long answers finish while you are elsewhere: a short beep says it is done.
+      if (!controller.signal.aborted && Date.now() - startedAt >= BELL_AFTER_MS) bell()
       flushTranscriptEvents()
       abort.current = null
       busyRef.current = false
@@ -289,10 +325,15 @@ export function App({
       setTurnStart(null)
       drainQueueRef.current()
     }
-  }, [flushTranscriptEvents, notice, queueTranscriptEvent, runtime])
+  }, [bell, flushTranscriptEvents, notice, queueTranscriptEvent, runtime])
 
   const applyAccent = useCallback(
-    async (value: string) => {
+    async (requested: string) => {
+      const value = parseAccent(requested)
+      if (!value) {
+        notice('warn', strings.accentInvalid(requested))
+        return
+      }
       await runtime.setAccent(value)
       setAccent(value)
       notice('info', strings.accentSet(value, resolveAccent(value)))
@@ -516,6 +557,10 @@ export function App({
             if (!result.found) {
               notice('info', strings.undoNothing)
               return
+            }
+            const reverted = [...result.restored, ...result.removed]
+            if (reverted.length > 0) {
+              undoNote.current = `[kitcode] The user ran /undo. These file changes from the previous turn were reverted and are no longer on disk: ${reverted.join(', ')}. Re-read files before relying on them.`
             }
             const lines = [strings.undoResult(result.restored.length, result.removed.length)]
             if (result.conflicts.length > 0) {
@@ -982,7 +1027,7 @@ export function App({
               history.current = result.history
               setPromptHistory(inputHistoryFromMessages(result.history))
               setTranscript(
-                pushNotice(fromHistory(result.history), 'info', strings.compactDone(result.removedMessages)),
+                pushNotice(fromHistory(result.history), 'info', strings.compactDone(result.removedMessages, result.clearedToolResults ?? 0, result.tokensBefore, result.tokensAfter)),
               )
               setTranscriptRevision((revision) => revision + 1)
               await runtime.persist(result.history)
@@ -1002,17 +1047,30 @@ export function App({
         }
 
         case 'subagents': {
-          const agents = runtime.activeAgentsList()
+          const agents = transcriptRef.current.bubbles.filter(
+            (bubble): bubble is Extract<Bubble, { kind: 'subagent' }> => bubble.kind === 'subagent',
+          )
           if (agents.length === 0) {
-            notice('info', strings.subagentsStatus(0))
+            notice('info', strings.noSubagents)
             return
           }
-          const lines = agents.map((a, i) => {
-            const label = a.description || `subagent ${i + 1}`
-            const progress = a.progress.length > 0 ? ` · ${a.progress[a.progress.length - 1]}` : ''
-            return `${label}${progress}`
-          })
-          notice('info', lines.join('\n'))
+          // Running ones first, then the most recent finished ones.
+          const ordered = [
+            ...agents.filter((agent) => agent.state === 'running'),
+            ...agents.filter((agent) => agent.state !== 'running').reverse(),
+          ]
+          const running = ordered.filter((agent) => agent.state === 'running')
+          const id = running.length === 1 && rawRest === ''
+            ? running[0]!.id
+            : await pick(
+                strings.subagentsTitle,
+                ordered.slice(0, 20).map((agent) => ({
+                  key: agent.id,
+                  label: agent.description || 'subagent',
+                  hint: agent.state === 'running' ? strings.subagentRunning : strings.subagentDone,
+                })),
+              )
+          if (id) setOverlay({ kind: 'subagent', id })
           return
         }
 
@@ -1032,9 +1090,22 @@ export function App({
           }
           const choice = await pick(
             strings.titleAccent,
-            Object.entries(PRESETS).map(([name, hex]) => ({ key: name, label: name, hint: hex })),
+            [
+              ...Object.entries(PRESETS).map(([name, hex]) => ({ key: name, label: name, hint: hex })),
+              { key: CUSTOM_ACCENT, label: strings.customAccent, hint: '#rrggbb' },
+            ],
           )
-          if (choice) await applyAccent(choice)
+          if (choice === CUSTOM_ACCENT) {
+            const typed = await promptInput(strings.customAccentPrompt)
+            if (typed) await applyAccent(typed)
+          } else if (choice) await applyAccent(choice)
+          return
+        }
+
+        case 'bell': {
+          const next = rawRest === 'on' ? true : rawRest === 'off' ? false : !runtime.getBell()
+          await runtime.setBell(next)
+          notice('info', strings.bellState(next))
           return
         }
 
@@ -1306,7 +1377,7 @@ export function App({
         return
       }
       setTranscript((state) => pushUser(state, userDisplay(item.text, item.content)))
-      history.current = [...history.current, { role: 'user', content: item.content }]
+      history.current = [...history.current, { role: 'user', content: withUndoNote(item.content) }]
       void runAgent()
     },
     [runAgent, runSlash],
@@ -1324,6 +1395,60 @@ export function App({
     queueMicrotask(() => enqueueNext(next))
   }, [enqueueNext])
   drainQueueRef.current = drainQueue
+
+  // ↑/↓ over the queue: one waiting item at a time is taken out into the input
+  // (remembering its place); moving on puts it back, with any edits, and takes
+  // the neighbour. Everything else stays queued.
+  const checkedOut = useRef<{ index: number; item: QueuedItem } | null>(null)
+
+  const putBackCheckedOut = (currentValue: string): number | null => {
+    const out = checkedOut.current
+    if (!out) return null
+    checkedOut.current = null
+    const restored = withEditedText(out.item, currentValue, attachmentsRef.current)
+    replaceAttachments([])
+    const index = Math.min(out.index, queueRef.current.length)
+    queueRef.current = [...queueRef.current.slice(0, index), restored, ...queueRef.current.slice(index)]
+    return index
+  }
+
+  const checkOut = (index: number): string => {
+    const item = queueRef.current[index]!
+    queueRef.current = queueRef.current.filter((_, at) => at !== index)
+    checkedOut.current = { index, item }
+    replaceAttachments(item.kind === 'message' ? item.attachments : [])
+    return item.kind === 'command' ? item.line : item.text
+  }
+
+  const navigateQueue = useCallback(
+    (direction: 'previous' | 'next', currentValue: string): string | null => {
+      // Only while an answer is running: afterwards a put-back item would sit
+      // in the queue until the next turn. The text simply stays in the input.
+      if (!busyRef.current && slashPendingRef.current === 0) {
+        checkedOut.current = null
+        return null
+      }
+      if (!checkedOut.current && (currentValue !== '' || queueRef.current.length === 0)) return null
+      const from = putBackCheckedOut(currentValue)
+      const length = queueRef.current.length
+      let value: string
+      if (from === null) value = direction === 'previous' ? checkOut(length - 1) : ''
+      else if (direction === 'previous') value = checkOut(Math.max(0, from - 1))
+      else value = from + 1 < length ? checkOut(from + 1) : ''
+      setPendingCount(queueRef.current.length)
+      return value
+    },
+    [replaceAttachments],
+  )
+
+  // A message sent while one was taken out of the queue goes back to its place.
+  const enqueue = (item: QueuedItem) => {
+    const out = checkedOut.current
+    checkedOut.current = null
+    const index = out ? Math.min(out.index, queueRef.current.length) : queueRef.current.length
+    queueRef.current = [...queueRef.current.slice(0, index), item, ...queueRef.current.slice(index)]
+    setPendingCount(queueRef.current.length)
+  }
 
   const tryQueueAutomaticAttachment = useCallback(
     (requestedPath: string): Promise<boolean> => {
@@ -1416,10 +1541,10 @@ export function App({
         if (!detachedInput) setInput('')
         const command = text.slice(1).trim().split(/\s+/)[0]?.toLowerCase()
         if ((busyRef.current && !commandRunsWhileBusy(command)) || slashPendingRef.current > 0) {
-          queueRef.current = [...queueRef.current, { kind: 'command', line: text }]
-          setPendingCount(queueRef.current.length)
+          enqueue({ kind: 'command', line: text })
           return
         }
+        checkedOut.current = null
         runSlash(text)
       }
 
@@ -1464,14 +1589,14 @@ export function App({
         ...mentioned,
       ]
       replaceAttachments([])
-      const item: QueuedItem = { kind: 'message', text, content }
+      const item: QueuedItem = { kind: 'message', text, content, attachments: queuedAttachments }
       if (busyRef.current || slashPendingRef.current > 0) {
-        queueRef.current = [...queueRef.current, item]
-        setPendingCount(queueRef.current.length)
+        enqueue(item)
         return
       }
+      checkedOut.current = null
       setTranscript((state) => pushUser(state, userDisplay(text, content)))
-      history.current = [...history.current, { role: 'user', content }]
+      history.current = [...history.current, { role: 'user', content: withUndoNote(content) }]
       void runAgent()
     },
     [replaceAttachments, runAgent, runSlash, tryQueueAutomaticAttachment],
@@ -1485,6 +1610,20 @@ export function App({
       return
     }
     if (!key.escape) return
+    // The sub-agent chat closes itself on Esc; it must not cancel the run.
+    if (overlay.kind === 'subagent') return
+    // Editing a queued message: Esc leaves the queue edit (the message goes
+    // back to its place, edits kept) instead of cancelling the running answer.
+    if (checkedOut.current && overlay.kind === 'none') {
+      if (busyRef.current || slashPendingRef.current > 0) {
+        putBackCheckedOut(input)
+        setPendingCount(queueRef.current.length)
+        setInput('')
+        return
+      }
+      // The answer already finished: nothing would drain a put-back item.
+      checkedOut.current = null
+    }
     if (busyRef.current && abort.current) {
       if (!abort.current.signal.aborted) {
         abort.current.abort()
@@ -1554,7 +1693,7 @@ export function App({
         key={transcriptRevision}
         bubbles={transcript.bubbles}
         workspace={runtime.cwd}
-        maxLiveRows={liveTranscriptRows(rows)}
+        maxLiveRows={overlay.kind === 'subagent' ? 0 : liveTranscriptRows(rows)}
       />
 
       {overlay.kind === 'permission' && (
@@ -1579,6 +1718,17 @@ export function App({
             overlay.select('')
             setOverlay({ kind: 'none' })
           }}
+        />
+      )}
+
+      {overlay.kind === 'subagent' && (
+        <SubagentChat
+          bubble={transcript.bubbles.find(
+            (bubble): bubble is Extract<Bubble, { kind: 'subagent' }> =>
+              bubble.kind === 'subagent' && bubble.id === overlay.id,
+          )}
+          rows={liveTranscriptRows(rows) + SUBAGENT_CHAT_EXTRA_ROWS}
+          onClose={() => setOverlay({ kind: 'none' })}
         />
       )}
 
@@ -1619,7 +1769,11 @@ export function App({
           onListFiles={listWorkspaceFiles}
           disabled={busy}
           pending={pendingCount}
+          queued={queueRef.current.map((item) => item.kind === 'command' ? item.line : item.text || attachmentSummary(item.attachments))}
+          onNavigateQueue={navigateQueue}
           hint={busy ? strings.escCancel : undefined}
+          mode={runtime.getMode()}
+          bypass={runtime.isBypassEnabled()}
           history={promptHistory}
           attachments={attachments.flatMap((block) => {
             const label = attachmentLabel(block)
@@ -1632,15 +1786,17 @@ export function App({
         status={{
           modelRef: runtime.getModelRef() || strings.noModel,
           effort: runtime.getEffort(),
+          effectiveEffort: runtime.getEffectiveEffort(history.current),
           thinking: runtime.getThinking(),
           usage: runtime.usageParts(),
+          speed: readSpeed(speedMeter.current, busy),
           mcp: runtime.mcpSummary(),
           mode: runtime.getMode(),
           bypass: runtime.isBypassEnabled(),
           busy,
           sessionMs: Date.now() - sessionStart.current,
           turnMs: turnStart === null ? null : Date.now() - turnStart,
-          activeAgents: runtime.activeAgentsCount(),
+          agents: runtime.activeAgentsList().map((agent) => agent.description),
           context,
         }}
       />
@@ -1684,6 +1840,27 @@ function TextInputOverlay({
       </Box>
     </Box>
   )
+}
+
+// A queued item put back after editing in the input: keep it untouched when
+// nothing changed, otherwise rebuild it from the edited text and attachments.
+function withEditedText(item: QueuedItem, text: string, attachments: ContentBlock[]): QueuedItem {
+  if (item.kind === 'command') {
+    if (text.startsWith('/')) return { kind: 'command', line: text }
+    return { kind: 'message', text, attachments, content: messageContent(text, attachments, []) }
+  }
+  if (text === item.text && attachments === item.attachments) return item
+  // Files pulled in by @mentions are neither the text nor explicit attachments.
+  const mentioned = item.content.filter((block) => block.type !== 'text' && !item.attachments.includes(block))
+  return { kind: 'message', text, attachments, content: messageContent(text, attachments, mentioned) }
+}
+
+function messageContent(text: string, attachments: ContentBlock[], mentioned: ContentBlock[]): ContentBlock[] {
+  return [...(text ? ([{ type: 'text', text }] as ContentBlock[]) : []), ...attachments, ...mentioned]
+}
+
+function attachmentSummary(blocks: ContentBlock[]): string {
+  return '📎 ' + blocks.map((block) => attachmentLabel(block) ?? 'attachment').join(', ')
 }
 
 function isKnownSlashCommand(line: string): boolean {

@@ -63,15 +63,17 @@ describe('bottom status panel', () => {
           status: {
             modelRef: 'provider/test-model',
             effort: 'high',
+            effectiveEffort: 'high',
             thinking: true,
             usage: null,
+            speed: null,
             mcp: { connected: 2, failed: 0 },
             mode: 'normal',
             bypass: false,
             busy: false,
             sessionMs: 1_000,
             turnMs: null,
-            activeAgents: 0,
+            agents: [],
             context: { window: 100_000, used: 50_000, exact: true },
           },
         }),
@@ -89,7 +91,9 @@ describe('bottom status panel', () => {
     expect(statusLine).toContain('█')
     expect(statusLine).toContain('░')
     expect(statusLine).toContain('▌')
-    expect(lines[contextLineIndex + 1]).toContain('mcp:2')
+    // Everything shares one line now: the status bar no longer stacks rows.
+    expect(statusLine).toContain('mcp:2')
+    expect(lines.filter((line) => line.trim() !== '' && !/^─+$/.test(line.trim()))).toHaveLength(1)
     expect(output).not.toContain('$5.00')
   })
 })

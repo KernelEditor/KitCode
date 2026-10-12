@@ -121,9 +121,11 @@ export function formatUsageBreakdown(tracker: UsageTracker): string {
   return lines.join('\n')
 }
 
-function tokens(count: number): string {
+export function tokens(count: number): string {
   if (count < 1000) return String(count)
-  const [value, suffix] = count < 1_000_000 ? [count / 1000, 'k'] : [count / 1_000_000, 'M']
+  // Pick the unit after rounding so 999,960 reads "1M", not "1000k".
+  const k = Number((count / 1000).toFixed(1))
+  const [value, suffix] = k < 1000 ? [k, 'k'] : [count / 1_000_000, 'M']
   return `${value.toFixed(1).replace(/\.0$/, '')}${suffix}`
 }
 

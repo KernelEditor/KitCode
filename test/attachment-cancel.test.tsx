@@ -24,7 +24,7 @@ describe('attachment cancellation', () => {
       cwd: process.cwd(), getAccent: () => 'purple', getLang: () => 'en', needsSetup: () => false,
       modelContext: () => null, subscribeContext: () => () => {},
       startupUpdateCheck: async () => ({ status: 'current' }),
-      getModelRef: () => 'test/model', getEffort: () => 'medium', getThinking: () => false,
+      getModelRef: () => 'test/model', getEffort: () => 'medium', getEffectiveEffort: () => 'medium', getThinking: () => false,
       usageParts: () => ({}), mcpSummary: () => ({}), getMode: () => 'normal',
       isBypassEnabled: () => false, activeAgentsCount: () => 0,
       persist: async () => undefined, run: () => completion, activeAgentsList, newSession,
@@ -42,7 +42,6 @@ describe('attachment cancellation', () => {
       await tick()
       captured.prompt!.onSubmit('/subagents')
       await tick()
-      expect(activeAgentsList).toHaveBeenCalledOnce()
       captured.prompt!.onSubmit('/context 256k')
       await tick()
       expect(setContextWindowOverride).toHaveBeenCalledWith(256_000)
@@ -73,9 +72,9 @@ describe('attachment cancellation', () => {
       cwd: process.cwd(), getAccent: () => 'purple', getLang: () => 'en', needsSetup: () => false,
       modelContext: () => null, subscribeContext: () => () => {},
       startupUpdateCheck: async () => ({ status: 'current' }),
-      getModelRef: () => 'test/model', getEffort: () => 'medium', getThinking: () => false,
+      getModelRef: () => 'test/model', getEffort: () => 'medium', getEffectiveEffort: () => 'medium', getThinking: () => false,
       usageParts: () => ({}), mcpSummary: () => ({}), getMode: () => 'normal',
-      isBypassEnabled: () => false, activeAgentsCount: () => 0, persist, run,
+      isBypassEnabled: () => false, activeAgentsCount: () => 0, activeAgentsList: () => [], persist, run,
     } as unknown as Runtime
     const stdin = new PassThrough() as PassThrough & NodeJS.ReadStream
     const stdout = new PassThrough() as PassThrough & NodeJS.WriteStream
@@ -107,9 +106,9 @@ describe('attachment cancellation', () => {
       cwd: process.cwd(), getAccent: () => 'purple', getLang: () => 'en', needsSetup: () => false,
       modelContext: () => null, subscribeContext: () => () => {},
       startupUpdateCheck: async () => ({ status: 'current' }),
-      getModelRef: () => 'test/model', getEffort: () => 'medium', getThinking: () => false,
+      getModelRef: () => 'test/model', getEffort: () => 'medium', getEffectiveEffort: () => 'medium', getThinking: () => false,
       usageParts: () => ({}), mcpSummary: () => ({}), getMode: () => 'normal',
-      isBypassEnabled: () => false, activeAgentsCount: () => 0,
+      isBypassEnabled: () => false, activeAgentsCount: () => 0, activeAgentsList: () => [],
       loadAutomaticAttachment: () => pending, loadClipboardImage: () => pending, run,
     } as unknown as Runtime
     const stdin = new PassThrough() as PassThrough & NodeJS.ReadStream

@@ -92,9 +92,11 @@ export async function loadSession(id: string): Promise<SessionState> {
 export async function listSessions(limit = 20): Promise<SessionSummary[]> {
   const files = await filesByRecency()
   const summaries: SessionSummary[] = []
-  for (const file of files.slice(0, limit)) {
+  for (const file of files) {
+    if (summaries.length >= limit) break
     const state = readState(await readFile(file, 'utf8').catch(() => ''))
-    if (state) {
+    // Empty chats saved by older versions are not worth resuming.
+    if (state && state.messages.length > 0) {
       summaries.push({
         id: state.id,
         title: state.title,

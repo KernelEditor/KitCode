@@ -1,4 +1,4 @@
-import { resolveEffort } from './effort'
+import { effectiveEffort } from './effort'
 import Anthropic from '@anthropic-ai/sdk'
 import {
   captureResponseHead,
@@ -78,8 +78,11 @@ async function* streamTurn(
     messages: toMessageParams(req.messages),
     tools: toToolParams(req.tools),
   }
-  if (req.thinking) params.thinking = { type: 'adaptive', display: 'summarized' }
-  const effort = resolveEffort(req.effort, req.messages)
+  if (req.thinking) {
+    const thinking = thinkingParam(req.model, req.maxTokens)
+    if (thinking) params.thinking = thinking
+  }
+  const effort = effectiveEffort('anthropic', req.model, req.effort, req.messages)
   if (effort) params.output_config = { effort }
 
   let thinking = ''
@@ -172,6 +175,14 @@ function toMessageParams(messages: Message[]): Anthropic.MessageParam[] {
     const content = message.content.flatMap(toBlockParams)
     if (content.length > 0) params.push({ role: message.role, content })
   }
+  // Cache the conversation up to the newest block. Without this only the
+  // system prompt and tools were cached, so every step of an agentic loop
+  // paid full price for the whole history again.
+  const last = params.at(-1)?.content
+  if (Array.isArray(last)) {
+    const block = last.findLast((candidate) => candidate.type !== 'thinking' && candidate.type !== 'redacted_thinking')
+    if (block) (block as { cache_control?: Anthropic.CacheControlEphemeral }).cache_control = { type: 'ephemeral' }
+  }
   return params
 }
 
@@ -244,6 +255,20 @@ function toUsage(usage: Anthropic.Usage): Usage {
     cacheWrite: usage.cache_creation_input_tokens ?? 0,
     cacheRead: usage.cache_read_input_tokens ?? 0,
   }
+}
+
+// Claude models from before adaptive thinking (Claude 3.x, the 4.0–4.5
+// generation and Haiku 4.5) reject {type: "adaptive"} and need a budget.
+const BUDGET_THINKING = /^claude-(?:3|[a-z]+-3|haiku-4|(?:sonnet|opus)-4(?:-[0-5])?(?:-\d{8}|@|$))/
+const THINKING_BUDGET = 16_000
+const MIN_THINKING_BUDGET = 1_024
+
+export function thinkingParam(model: string, maxTokens: number): Anthropic.ThinkingConfigParam | undefined {
+  const id = (model.split('/').at(-1) ?? model).replace(/^(?:[a-z]{2}\.)?anthropic\./, '')
+  if (!BUDGET_THINKING.test(id)) return { type: 'adaptive', display: 'summarized' }
+  // The budget must stay below max_tokens and at or above 1024.
+  const budget = Math.min(THINKING_BUDGET, maxTokens - 1)
+  return budget >= MIN_THINKING_BUDGET ? { type: 'enabled', budget_tokens: budget } : undefined
 }
 
 function toRefusal(details: Anthropic.RefusalStopDetails | null) {

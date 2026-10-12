@@ -42,8 +42,12 @@ export interface Runtime {
   clearMemory(): Promise<void>
   effortDescription(history: Message[]): string
   getEffort(): Effort
+  /** The level actually sent with the next request; null when the model takes none. */
+  getEffectiveEffort(history: Message[]): Exclude<Effort, 'auto'> | null
   setEffort(effort: Effort): Promise<void>
   getThinking(): boolean
+  getBell(): boolean
+  setBell(enabled: boolean): Promise<void>
   setThinking(enabled: boolean): Promise<void>
   getContextWindowOverride(): number | undefined
   setContextWindowOverride(tokens: number | undefined): Promise<void>

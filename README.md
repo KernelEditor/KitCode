@@ -111,6 +111,7 @@ Press `/` to open the command list.
 | `/key [provider]` | Change API key for a provider. |
 | `/refresh [provider]` | Reload a provider's model list, bypassing the 24h cache. |
 | `/effort [auto|low|medium|high|xhigh|max]` · `/thinking` | Select reasoning effort and configure reasoning output. |
+| `/bell [on|off]` | Toggle the beep when a long answer finishes or a permission prompt appears. |
 | `/context [tokens]` | Show or set the model context window used by the meter and automatic compaction. |
 | `/memory show` · `/memory set <text>` · `/memory clear` | View, replace, or clear this project's persistent notes. |
 | `/resume` · `/clear` | Resume a session or start a new one. |
@@ -152,8 +153,8 @@ Press `/` to open the command list.
 | `Ctrl+V` / `Cmd+V` | Attach an image from the system clipboard; `/attach clipboard` is the explicit fallback. |
 | `Esc` | Cancel the current request or close an overlay. |
 
-Messages entered while the agent is running are queued and processed in order. Status and settings
-commands — `/help`, `/usage`, `/context`, `/model`, `/effort`, `/thinking`, `/budget`, `/theme`,
+Messages entered while the agent is running are queued and processed in order; they are listed above the input, and ↑/↓ on an empty input pick one to edit. Status and settings
+commands — `/help`, `/usage`, `/context`, `/model`, `/effort`, `/thinking`, `/bell`, `/budget`, `/theme`,
 `/lang`, `/subagents`, `/config`, `/checker`, `/exit` — run immediately instead. Commands that
 change the running turn or the session (`/clear`, `/compact`, `/resume`, `/undo`, `/login`,
 `/provider`, `/logout`, `/key`, `/refresh`, `/mcp`, `/sessions`) wait for the turn to finish.

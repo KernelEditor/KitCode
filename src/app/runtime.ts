@@ -2,7 +2,7 @@ import { createMemoryTool } from '../tools/memory'
 import { searchWorkspaceFiles } from '../ui/workspace-files'
 import { killAllJobs } from '../tools/jobs'
 import { readProjectMemory, saveProjectMemory, clearProjectMemory } from '../core/memory'
-import { openAiEffort, resolveEffort } from '../providers/effort'
+import { effectiveEffort } from '../providers/effort'
 import { detectProvider } from '../config/detect'
 import type { DetectedProvider } from '../config/detect'
 import { formatModelRef, parseModelRef } from '../config/schema'
@@ -32,10 +32,13 @@ import {
   loadClipboardImage as readClipboardImage,
 } from '../core/attachments'
 import {
+  clearOldToolResults,
   compactCutIndex,
   compactHistory,
   estimateCompactBudget,
+  estimateHistoryTokens,
   shouldAutoCompact,
+  withoutThinkingReplay,
 } from '../core/compact'
 import { buildSystemPrompt } from '../core/prompt'
 import {
@@ -52,10 +55,12 @@ import {
   shortSessionId,
 } from '../core/session'
 import { createSubagentRunner } from '../core/subagent'
+import type { CompactResult } from '../core/compact'
 import type { AgentHooks, ContextUsage, SessionState } from '../core/types'
 import {
   contextTokens,
   createUsageTracker,
+  tokens as formatTokens,
   formatUsageBreakdown,
   formatUsageCompact,
   usageParts,
@@ -66,7 +71,7 @@ import { loadModels, refreshModels } from '../providers/catalog'
 import { pricingFor } from '../providers/pricing'
 import { createRegistry } from '../providers/registry'
 import { formatRateLimits } from '../providers/rate-limits'
-import type { Effort, Message, ModelInfo, ModelPricing, RateLimits } from '../providers/types'
+import type { Effort, Message, ModelInfo, ModelPricing, ProviderKind, RateLimits } from '../providers/types'
 import { createPermissionEngine } from '../tools/permissions'
 import type { AgentMode } from '../tools/permissions'
 import { builtinTools, createToolRegistry } from '../tools/registry'
@@ -82,6 +87,10 @@ import { checkForUpdates } from '../core/update'
 import { KITCODE_COMMIT, KITCODE_VERSION } from '../version'
 
 const PREFERRED = ['claude-opus-5', 'claude-sonnet-5', 'gpt-5', 'claude-opus-4-8']
+
+// Share of the context window (by rough estimate) at which a running turn
+// clears older tool output before its next request.
+const MID_TURN_TRIM_RATIO = 0.8
 
 export interface Boot {
   runtime: Runtime
@@ -257,7 +266,18 @@ export async function boot(options: {
       thinking: config.thinking,
       budget: activeBudget,
       checkpoint: activeCheckpoint,
+      trimContext: (messages) => trimForWindow(resolved.provider.kind, messages),
     }
+  }
+
+  // Mid-turn relief for long agentic loops. Only for OpenAI-compatible
+  // providers: rewriting earlier turns mid-loop breaks Claude's preserved
+  // thinking (the API rejects the edited history).
+  const trimForWindow = (kind: ProviderKind, messages: Message[]): Message[] | null => {
+    if (kind !== 'openai' || !modelContextWindow) return null
+    if (estimateHistoryTokens(messages) < modelContextWindow * MID_TURN_TRIM_RATIO) return null
+    const cleared = clearOldToolResults(messages)
+    return cleared.cleared > 0 ? cleared.history : null
   }
 
   let activeBudget: TurnBudget | undefined
@@ -315,8 +335,24 @@ export async function boot(options: {
     signal: AbortSignal,
     budget: TurnBudget,
   ) => {
+    const tokensBefore = estimateHistoryTokens(history)
     if (compactCutIndex(history) <= 0) {
-      return { history, compacted: false as const, removedMessages: 0 }
+      // Nothing older to summarise (typically one long agentic turn): free
+      // room by clearing old tool output instead, without a model call.
+      const cleared = clearOldToolResults(history)
+      if (cleared.cleared === 0) return { history, compacted: false as const, removedMessages: 0 }
+      const next = withoutThinkingReplay(cleared.history)
+      contextUsage = undefined
+      session.context = undefined
+      notifyContext()
+      return {
+        history: next,
+        compacted: true as const,
+        removedMessages: 0,
+        clearedToolResults: cleared.cleared,
+        tokensBefore,
+        tokensAfter: estimateHistoryTokens(next),
+      }
     }
     const resolved = registry.resolve(modelRef)
     const estimate = estimateCompactBudget(history, config.maxTokens)
@@ -344,7 +380,7 @@ export async function boot(options: {
       session.context = undefined
       notifyContext()
     }
-    return result
+    return { ...result, tokensBefore, tokensAfter: estimateHistoryTokens(result.history) }
   }
 
   const runtime: Runtime = {
@@ -610,17 +646,32 @@ export async function boot(options: {
     effortDescription(history) {
       if (!modelRef) return 'unavailable'
       const { provider, modelId } = registry.resolve(modelRef)
-      const requested = resolveEffort(config.effort, history)
-      const effective = provider.kind === 'openai' ? openAiEffort(modelId, requested) : requested
-      return effective ? `${config.effort} → ${effective} (API request)` : `${config.effort} → not sent: unknown model support`
+      const effective = effectiveEffort(provider.kind, modelId, config.effort, history, provider.id)
+      return effective ? `${config.effort} → ${effective} (API request)` : `${config.effort} → not sent: this model/provider does not accept an effort level`
     },
     getEffort: () => config.effort,
+    getEffectiveEffort(history) {
+      if (!modelRef) return null
+      try {
+        const { provider, modelId } = registry.resolve(modelRef)
+        return effectiveEffort(provider.kind, modelId, config.effort, history, provider.id) ?? null
+      } catch {
+        // Rendered on every frame: an unresolvable model must not crash the status bar.
+        return null
+      }
+    },
     async setEffort(effort: Effort) {
       await persistConfig((draft) => {
         draft.effort = effort
       })
     },
 
+    getBell: () => config.bell,
+    async setBell(enabled) {
+      await persistConfig((draft) => {
+        draft.bell = enabled
+      })
+    },
     getThinking: () => config.thinking,
     async setThinking(enabled) {
       await persistConfig((draft) => {
@@ -936,7 +987,7 @@ export async function boot(options: {
             hooks.onEvent({
               type: 'notice',
               level: 'info',
-              text: `Compacted older context; kept the latest conversation (${result.removedMessages} messages replaced).`,
+              text: describeCompaction(result),
             })
           }
         } catch (error) {
@@ -955,10 +1006,6 @@ export async function boot(options: {
       const trackedHooks: AgentHooks = {
         ...hooks,
         onEvent(event) {
-          if (event.type === 'turn_start') {
-            contextUsage = undefined
-            notifyContext()
-          }
           if (event.type === 'usage') {
             contextUsage = { model: requestModelRef, usage: event.usage }
             notifyContext()
@@ -1013,6 +1060,8 @@ export async function boot(options: {
         context: contextUsage,
       }
       session = snapshot
+      // A chat nobody wrote in is not worth a file in /resume.
+      if (history.length === 0) return
       const save = persistQueue.catch(() => undefined).then(() => saveSession(snapshot))
       persistQueue = save
       await save
@@ -1056,3 +1105,14 @@ function preferredDetectedModel(
   }
   return candidates[0]
 }
+
+function describeCompaction(result: CompactResult): string {
+  const parts: string[] = []
+  if (result.removedMessages > 0) parts.push(`${result.removedMessages} older messages summarised`)
+  if (result.clearedToolResults) parts.push(`${result.clearedToolResults} old tool outputs cleared`)
+  const size = result.tokensBefore !== undefined && result.tokensAfter !== undefined
+    ? ` · ~${formatTokens(result.tokensBefore)} → ~${formatTokens(result.tokensAfter)} tokens`
+    : ''
+  return `Context compacted: ${parts.join(', ')}${size}.`
+}
+

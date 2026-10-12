@@ -96,6 +96,81 @@ async function failure(promise: Promise<unknown>): Promise<unknown> {
   )
 }
 
+describe('openai token limit field', () => {
+  it('sends max_completion_tokens to reasoning models and retries when a gateway asks for it', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const baseUrl = await startServer((req, res) => {
+      let raw = ''
+      req.on('data', (chunk) => { raw += chunk.toString() })
+      req.on('end', () => {
+        const body = JSON.parse(raw)
+        bodies.push(body)
+        if ('max_tokens' in body && body.model === 'strict-model') {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: { message: "Unsupported parameter: 'max_tokens'. Use 'max_completion_tokens' instead.", type: 'invalid_request_error' } }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end(sseChunk({ content: 'ok' }, 'stop') + 'data: [DONE]\n\n')
+      })
+    })
+    const provider = createOpenAiProvider({ id: 'tokens', apiKey: 'test', baseUrl })
+    await collect(provider.stream({ ...chatRequest(), model: 'gpt-5.2' }))
+    expect(bodies[0]).toMatchObject({ max_completion_tokens: 64 })
+    expect(bodies[0]).not.toHaveProperty('max_tokens')
+    await collect(provider.stream({ ...chatRequest(), model: 'glm-4.6' }))
+    expect(bodies[1]).toMatchObject({ max_tokens: 64 })
+    await collect(provider.stream({ ...chatRequest(), model: 'strict-model' }))
+    expect(bodies.at(-1)).toMatchObject({ max_completion_tokens: 64 })
+  })
+})
+
+describe('anthropic request shape', () => {
+  async function capture(model: string, thinking: boolean): Promise<Record<string, any>> {
+    let body: Record<string, any> = {}
+    const baseUrl = await startServer((req, res) => {
+      let raw = ''
+      req.on('data', (chunk) => { raw += chunk.toString() })
+      req.on('end', () => {
+        body = JSON.parse(raw)
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end([
+          ...anthropicPrefix(),
+          `event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`,
+          `event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 2 } })}\n\n`,
+          `event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`,
+        ].join(''))
+      })
+    })
+    const provider = createAnthropicProvider({ id: 'anthropic', apiKey: 'sk-test', baseUrl })
+    await collect(provider.stream({
+      ...chatRequest(),
+      model,
+      thinking,
+      maxTokens: 64_000,
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'first' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'answer' }] },
+        { role: 'user', content: [{ type: 'text', text: 'second' }] },
+      ],
+    }))
+    return body
+  }
+
+  it('caches the conversation up to the newest message', async () => {
+    const body = await capture('claude-opus-5-5', false)
+    expect(body.messages.at(-1).content.at(-1).cache_control).toEqual({ type: 'ephemeral' })
+    expect(body.messages[0].content[0].cache_control).toBeUndefined()
+  })
+
+  it('uses adaptive thinking on current models and a budget on older ones', async () => {
+    expect((await capture('claude-opus-5-5', true)).thinking).toEqual({ type: 'adaptive', display: 'summarized' })
+    expect((await capture('claude-haiku-4-5', true)).thinking).toEqual({ type: 'enabled', budget_tokens: 16_000 })
+    expect((await capture('claude-sonnet-4-6', true)).thinking.type).toBe('adaptive')
+    expect((await capture('claude-opus-4-5-20251101', true)).thinking.type).toBe('enabled')
+  })
+})
+
 describe('transient provider faults', () => {
   it.each([
     ['gpt-5', 'low', 'low'],
@@ -105,7 +180,8 @@ describe('transient provider faults', () => {
     ['gpt-5.2', 'xhigh', 'xhigh'],
     ['gpt-5.2', 'max', 'xhigh'],
     ['gpt-5', 'auto', 'medium'],
-    ['test-model', 'high', undefined],
+    ['test-model', 'high', 'high'],
+    ['kimi-k3', 'max', 'high'],
   ] as const)('encodes effort for %s (%s)', async (model, effort, expected) => {
     let body: Record<string, unknown> = {}
     const baseUrl = await startServer((req, res) => {
@@ -121,7 +197,31 @@ describe('transient provider faults', () => {
     await collect(provider.stream({ ...chatRequest(), model, effort }))
     expect(body.reasoning_effort).toBe(expected)
   })
-  it.each(['stream error', 'invalid tool JSON'])('preserves received usage on %s', async (failureMode) => {
+  it('asks GLM/Kimi to skip reasoning when thinking is off, and drops the switch if refused', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const baseUrl = await startServer((req, res) => {
+      let raw = ''
+      req.on('data', (chunk) => { raw += chunk.toString() })
+      req.on('end', () => {
+        const body = JSON.parse(raw)
+        bodies.push(body)
+        if (body.thinking) {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: { message: 'unknown field: thinking', type: 'invalid_request_error' } }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end(sseChunk({ content: 'ok' }, 'stop') + 'data: [DONE]\n\n')
+      })
+    })
+    const provider = createOpenAiProvider({ id: 'thinking-off', apiKey: 'test', baseUrl })
+    await collect(provider.stream({ ...chatRequest(), model: 'glm-4.6', thinking: false }))
+    expect(bodies[0]?.thinking).toEqual({ type: 'disabled' })
+    expect(bodies.at(-1)?.thinking).toBeUndefined()
+    await collect(provider.stream({ ...chatRequest(), model: 'glm-4.6', thinking: true }))
+    expect(bodies.at(-1)?.thinking).toBeUndefined()
+  })
+    it.each(['stream error', 'invalid tool JSON'])('preserves received usage on %s', async (failureMode) => {
     const baseUrl = await startServer((_req, res) => {
       res.writeHead(200, { 'content-type': 'text/event-stream' })
       res.write('data: ' + JSON.stringify({ choices: [], usage: { prompt_tokens: 42, completion_tokens: 7, total_tokens: 49 } }) + '\n\n')

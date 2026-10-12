@@ -196,14 +196,18 @@ export async function undoLatestCheckpoint(options: {
 }): Promise<UndoResult> {
   assertSessionId(options.sessionId)
   const root = workspaceRoot(options.cwd)
-  const sessionDir = path.join(options.storageDir ?? checkpointsDir, options.sessionId)
-  const file = await newestCheckpoint(sessionDir)
+  const storageDir = options.storageDir ?? checkpointsDir
   const empty: UndoResult = { found: false, restored: [], removed: [], conflicts: [], failed: [] }
+  // A restart or /clear starts a new session; the latest change made in this
+  // workspace by an earlier session is still the one the user means to undo.
+  const file =
+    (await newestCheckpoint(path.join(storageDir, options.sessionId))) ??
+    (await newestWorkspaceCheckpoint(storageDir, root))
   if (!file) return empty
 
   const checkpoint = await readCheckpoint(file)
-  if (checkpoint.sessionId !== options.sessionId || checkpoint.cwd !== root) {
-    throw new Error('The latest undo checkpoint belongs to a different workspace or session.')
+  if (checkpoint.cwd !== root) {
+    throw new Error('The latest undo checkpoint belongs to a different workspace.')
   }
 
   const result: UndoResult = { ...empty, found: true }
@@ -417,6 +421,29 @@ function decodeSnapshot(snapshot: FileSnapshot): Buffer {
 
 function validBase64(value: string): boolean {
   return value.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(value)
+}
+
+async function newestWorkspaceCheckpoint(storageDir: string, root: string): Promise<string | null> {
+  let sessions: string[]
+  try {
+    sessions = await readdir(storageDir)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+  const candidates: { name: string; file: string }[] = []
+  for (const session of sessions) {
+    if (!/^[A-Za-z0-9_-]{1,240}$/.test(session)) continue
+    const file = await newestCheckpoint(path.join(storageDir, session)).catch(() => null)
+    if (file) candidates.push({ name: path.basename(file), file })
+  }
+  // Names start with a millisecond timestamp, so they sort by age.
+  candidates.sort((a, b) => b.name.localeCompare(a.name))
+  for (const candidate of candidates) {
+    const checkpoint = await readCheckpoint(candidate.file).catch(() => null)
+    if (checkpoint?.cwd === root) return candidate.file
+  }
+  return null
 }
 
 async function newestCheckpoint(sessionDir: string): Promise<string | null> {

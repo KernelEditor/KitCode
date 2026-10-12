@@ -57,6 +57,50 @@ it('starts sibling tasks together, serializes approvals and preserves result ord
   ])
 })
 
+it('starts every task in a message together even when other calls sit between them', async () => {
+  const started: string[] = []
+  let releaseAll!: () => void
+  const gate = new Promise<void>((resolve) => { releaseAll = resolve })
+  const task = createTaskTool({
+    run: async (request) => {
+      started.push(request.prompt)
+      if (started.length === 2) releaseAll()
+      await gate
+      return `${request.prompt} result`
+    },
+  })
+  const reads: string[] = []
+  const read = {
+    name: 'read',
+    description: 'read',
+    inputSchema: { type: 'object' },
+    defaultPermission: 'allow' as const,
+    readOnly: true,
+    summarize: () => 'read',
+    async execute() {
+      reads.push('read')
+      return { content: 'file' }
+    },
+  }
+  const { provider } = scripted([
+    [{ type: 'done', stopReason: 'tool_use', content: [
+      { type: 'tool_use', id: 'a', name: 'task', input: { prompt: 'a', description: 'a' } },
+      { type: 'tool_use', id: 'r', name: 'read', input: {} },
+      { type: 'tool_use', id: 'b', name: 'task', input: { prompt: 'b', description: 'b' } },
+    ] }],
+    answerTurn('done'),
+  ])
+  const config = makeConfigWith(provider)('', lookupOf([task, read]))
+  const history = await runTurn(config, [], { onEvent: () => {}, requestPermission: async () => 'once' }, new AbortController().signal)
+  expect(started).toEqual(['a', 'b'])
+  expect(reads).toHaveLength(1)
+  expect(history[1]?.content).toMatchObject([
+    { toolUseId: 'a', content: expect.stringContaining('a result') },
+    { toolUseId: 'r', content: 'file' },
+    { toolUseId: 'b', content: expect.stringContaining('b result') },
+  ])
+})
+
 function scripted(turns: StreamEvent[][]): { provider: Provider; requests: ChatRequest[] } {
   const requests: ChatRequest[] = []
   let turn = 0
@@ -362,7 +406,8 @@ describe('subagent runner', () => {
       expect(request.system).not.toContain('This is your last model call.')
     }
     const last = requests.at(-1)!
-    expect(last.tools).toEqual([])
+    // Tools stay defined: providers reject tool_use history without them.
+    expect(last.tools.map((tool) => tool.name)).toEqual(['read'])
     expect(last.system).toContain('This is your last model call. Do not call tools.')
     expect(last.system).toContain('clearly stating any unfinished work')
     expect(last.messages.at(-1)?.content).toEqual([
@@ -506,6 +551,7 @@ describe('task tool', () => {
     expect(task.summarize({ description: 'find all callers of foo', prompt: 'x' })).toBe(
       'task(find all callers of foo)',
     )
-    expect(task.defaultPermission).toBe('ask')
+    expect(task.defaultPermission).toBe('allow')
+    expect(task.readOnly).toBe(true)
   })
 })

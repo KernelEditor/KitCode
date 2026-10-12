@@ -6,7 +6,9 @@ import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } fr
 
 export const TASK_TOOL_NAME = 'task'
 
-export const MAX_SUBAGENT_STEPS = 12
+// Exploration (search, read, follow references) routinely needs 15-25 calls;
+// the turn budget still bounds cost.
+export const MAX_SUBAGENT_STEPS = 30
 
 export const SUBAGENT_NO_ANSWER =
   'The subagent stopped without writing a final answer — it was interrupted or ended on a tool call. Nothing was reported back: do the work directly, or delegate it again with a narrower prompt.'
@@ -65,10 +67,13 @@ export function createSubagentRunner(
           kind: base.provider.kind,
           listModels: () => base.provider.listModels(),
           knownModels: () => base.provider.knownModels(),
+          // Keep the tool definitions on the last call: the history holds
+          // tool_use/tool_result blocks, and providers reject those without
+          // tools (Anthropic: 400 "must define tools"). Calls made anyway are
+          // refused by tools.get below.
           stream: (chat) => base.provider.stream(steps === MAX_SUBAGENT_STEPS
             ? {
                 ...chat,
-                tools: [],
                 system: `${chat.system}\n\nThis is your last model call. Do not call tools. Return your findings now, clearly stating any unfinished work.`,
               }
             : chat),

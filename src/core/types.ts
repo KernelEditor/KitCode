@@ -16,9 +16,12 @@ export type AgentEvent =
   | { type: 'text_delta'; text: string }
   | { type: 'thinking_delta'; text: string }
   | { type: 'tool_start'; id: string; name: string; summary: string }
+  | { type: 'tool_progress'; id: string; text: string }
   | { type: 'tool_end'; id: string; isError: boolean; content: string; display?: ToolDisplay }
   | { type: 'usage'; model: string; usage: Usage }
   | { type: 'rate_limits'; model: string; limits: RateLimits }
+  /** Output throughput of one finished model request (from the provider's own token count). */
+  | { type: 'speed'; model: string; outputTokens: number; ms: number }
   | { type: 'turn_end'; stopReason: StopReason }
   | { type: 'notice'; level: 'info' | 'warn' | 'error'; text: string }
   | { type: 'subagent_start'; id: string; description: string }

@@ -10,8 +10,10 @@ export function interactiveViewportRows(rows: number): number {
   return Math.max(1, Math.floor(rows) - 2)
 }
 
-const INTERACTIVE_CHROME_ROWS = 14
-const MAX_LIVE_ROWS = 8
+// Prompt (5) + one-line status bar (3) + margins, with two rows to spare.
+// The status bar used to take 6 rows; those went to the live answer instead.
+const INTERACTIVE_CHROME_ROWS = 11
+const MAX_LIVE_ROWS = 11
 const MIN_LIVE_ROWS = 4
 
 export function liveTranscriptRows(rows: number): number {

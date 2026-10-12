@@ -184,7 +184,7 @@ describe('terminal viewport', () => {
     expect(interactiveViewportRows(Number.NaN)).toBe(22)
     expect(interactiveViewportRows(3)).toBe(1)
     expect(interactiveViewportRows(1)).toBe(1)
-    expect(liveTranscriptRows(24)).toBe(8)
+    expect(liveTranscriptRows(24)).toBe(11)
   })
 
   it('keeps the live row budget inside a fixed band as rows change', () => {

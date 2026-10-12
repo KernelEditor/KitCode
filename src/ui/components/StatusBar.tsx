@@ -1,7 +1,6 @@
 import { Box, Text } from 'ink'
-import { Fragment } from 'react'
 import type { ReactNode } from 'react'
-import { dollars } from '../../core/usage'
+import { dollars, tokens } from '../../core/usage'
 import type { Effort } from '../../providers/types'
 import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
@@ -10,16 +9,23 @@ import { sanitizeTerminalText } from '../sanitize'
 import type { StatusBarProps } from '../types'
 
 const BAR_WIDTH = 12
+const VISIBLE_AGENTS = 3
+const AGENT_LABEL_WIDTH = 28
+
+function shortTask(task: string): string {
+  const label = sanitizeTerminalText(task).replace(/\s+/g, ' ').trim() || 'subagent'
+  return label.length <= AGENT_LABEL_WIDTH ? label : `${label.slice(0, AGENT_LABEL_WIDTH - 1)}…`
+}
 
 export function StatusBar({ status }: StatusBarProps) {
   const theme = useTheme()
   const strings = useStrings()
 
-  const primary: ReactNode[] = []
+  // One line: every row spent here is a row the live answer cannot use.
   const details: ReactNode[] = []
 
-  primary.push(<ModelBadge key="model" ref={status.modelRef} />)
-  primary.push(<EffortLabel key="effort" effort={status.effort} />)
+  details.push(<Text key="model" color={theme.accent} bold>{shortModel(status.modelRef)}</Text>)
+  details.push(<EffortLabel key="effort" effort={status.effort} effective={status.effectiveEffort} />)
   if (!status.thinking) {
     details.push(
       <Text key="think" color={theme.warn}>
@@ -27,23 +33,15 @@ export function StatusBar({ status }: StatusBarProps) {
       </Text>,
     )
   }
-  if (status.mode !== 'normal') {
-    const modeColor = status.mode === 'accept' ? 'yellow' : status.mode === 'plan' ? 'blue' : theme.accent
-    details.push(
-      <Text key="mode" color={modeColor}>
-        {strings.modeLabel[status.mode] ?? status.mode}
-      </Text>,
-    )
-  }
-
-  if (status.usage) {
+  // The permission mode and BYPASS are shown on the prompt frame, not here.
+  if (status.usage && status.usage.totalTokens > 0) {
     const u = status.usage
     details.push(
       <Text key="usage">
         <Text color="white" bold>{u.input}</Text>
-        <Text dimColor> ↑ </Text>
+        <Text dimColor>↑ </Text>
         <Text color={theme.ok}>{u.output}</Text>
-        <Text dimColor> ↓</Text>
+        <Text dimColor>↓</Text>
         {u.cache && (
           <>
             <Text dimColor> (</Text>
@@ -63,6 +61,18 @@ export function StatusBar({ status }: StatusBarProps) {
     )
   }
 
+  if (status.speed) {
+    const rate = status.speed.tokensPerSecond
+    details.push(
+      <Text key="speed">
+        <Text color={status.speed.live ? theme.accent : 'white'} bold={!status.speed.live}>
+          {`${status.speed.live ? '~' : ''}${rate < 10 ? rate.toFixed(1) : Math.round(rate)}`}
+        </Text>
+        <Text dimColor> tok/s</Text>
+      </Text>,
+    )
+  }
+
   details.push(
     <Text
       key="elapsed"
@@ -75,12 +85,11 @@ export function StatusBar({ status }: StatusBarProps) {
     </Text>,
   )
 
-  if (status.bypass) {
-    details.push(
-      <Text key="bypass" color="black" backgroundColor={theme.warn} bold>
-        {' '}BYPASS{' '}
-      </Text>,
-    )
+  if (status.mcp.connected > 0) {
+    details.push(<Text key="mcp" color={theme.ok}>mcp:{status.mcp.connected}</Text>)
+  }
+  if (status.mcp.failed > 0) {
+    details.push(<Text key="mcp-failed" color={theme.error}>{strings.mcpFailed(status.mcp.failed)}</Text>)
   }
 
   return (
@@ -101,76 +110,38 @@ export function StatusBar({ status }: StatusBarProps) {
     >
       <Box width="100%" alignItems="flex-start">
         <Box flexGrow={1} flexShrink={1} flexWrap="wrap">
-          <Segments items={primary} />
-        </Box>
-        <Box
-          flexShrink={0}
-          marginLeft={2}
-          flexDirection="column"
-          alignItems="flex-end"
-        >
-          <ContextMeter context={status.context} />
-          {(status.mcp.connected > 0 || status.mcp.failed > 0) && (
-            <Text>
-              {status.mcp.connected > 0 && (
-                <Text color={theme.ok}>mcp:{status.mcp.connected}</Text>
-              )}
-              {status.mcp.connected > 0 && status.mcp.failed > 0 && (
-                <Text dimColor> · </Text>
-              )}
-              {status.mcp.failed > 0 && (
-                <Text color={theme.error}>{strings.mcpFailed(status.mcp.failed)}</Text>
-              )}
-            </Text>
-          )}
-          {status.activeAgents > 0 && (
-            <Text color={theme.accent}>{strings.activeAgents(status.activeAgents)}</Text>
-          )}
-        </Box>
-      </Box>
-      {details.length > 0 && (
-        <Box flexWrap="wrap">
+          {/* The separator travels with its item so a wrap never strands a lone dot. */}
           {details.map((item, index) => (
-            <Fragment key={index}>
+            <Text key={index}>
               {index > 0 && <Text dimColor> · </Text>}
               {item}
-            </Fragment>
+            </Text>
           ))}
+        </Box>
+        <Box flexShrink={0} marginLeft={2}>
+          <ContextMeter context={status.context} />
+        </Box>
+      </Box>
+      {status.agents.length > 0 && (
+        <Box width="100%" flexDirection="column" alignItems="flex-end">
+          {status.agents.slice(0, VISIBLE_AGENTS).map((task, index) => (
+            <Text key={index} color={theme.accent} wrap="truncate-end">
+              ◌ {shortTask(task)}
+            </Text>
+          ))}
+          {status.agents.length > VISIBLE_AGENTS && (
+            <Text dimColor>{strings.moreAgents(status.agents.length - VISIBLE_AGENTS)}</Text>
+          )}
         </Box>
       )}
     </Box>
   )
 }
 
-function Segments({ items }: { items: ReactNode[] }) {
-  return items.flatMap((item, index) => {
-    const elements: ReactNode[] = []
-    if (index > 0) {
-      elements.push(
-        <Box key={`sep-${index}`} marginTop={1}>
-          <Text dimColor>{' · '}</Text>
-        </Box>,
-      )
-    }
-    elements.push(<Fragment key={`item-${index}`}>{item}</Fragment>)
-    return elements
-  })
-}
-
 function shortModel(ref: string): string {
   const safe = sanitizeTerminalText(ref)
   const slash = safe.lastIndexOf('/')
   return slash === -1 ? safe : safe.slice(slash + 1)
-}
-
-function ModelBadge({ ref: modelRef }: { ref: string }) {
-  const theme = useTheme()
-  const name = shortModel(modelRef)
-  return (
-    <Box borderColor={theme.accent} borderStyle="round" paddingX={1}>
-      <Text color={theme.accent} bold>{name}</Text>
-    </Box>
-  )
 }
 
 const EFFORT_STYLES: Record<
@@ -185,25 +156,28 @@ const EFFORT_STYLES: Record<
   low: { label: 'low', color: 'gray', dim: true },
 }
 
-function EffortLabel({ effort }: { effort: Effort }) {
+function EffortLabel({ effort, effective }: { effort: Effort; effective: Exclude<Effort, 'auto'> | null }) {
   const style = EFFORT_STYLES[effort]
+  // The model ignores effort entirely: show the setting struck through so it
+  // is not mistaken for something that affects the request.
+  if (effective === null) {
+    return <Text color="gray" dimColor strikethrough>{style.label}</Text>
+  }
+  // auto resolves per request; other levels may be capped to what the model supports.
+  const sent = effective !== effort ? EFFORT_STYLES[effective] : undefined
   return (
-    <Box borderColor={style.color ?? 'gray'} borderStyle="round" paddingX={1}>
-      <Text
-        color={style.color}
-        bold={style.bold}
-        dimColor={style.dim}
-      >
+    <Text>
+      <Text color={style.color} bold={style.bold} dimColor={style.dim}>
         {style.label}
       </Text>
-    </Box>
+      {sent && (
+        <>
+          <Text dimColor>{effort === 'auto' ? '·' : '→'}</Text>
+          <Text color={sent.color} bold={sent.bold} dimColor={sent.dim}>{sent.label}</Text>
+        </>
+      )}
+    </Text>
   )
-}
-
-function tokens(count: number): string {
-  if (count < 1000) return String(count)
-  const [value, suffix] = count < 1_000_000 ? [count / 1000, 'k'] : [count / 1_000_000, 'M']
-  return `${value.toFixed(1).replace(/\.0$/, '')}${suffix}`
 }
 
 function ContextMeter({
@@ -212,13 +186,15 @@ function ContextMeter({
   context: { window: number | null; used: number; exact: boolean }
 }) {
   const theme = useTheme()
-  const { window: win, used, exact } = context
-  if (!exact || win === null || win <= 0) {
+  const { window: win, exact } = context
+  // Before the first answer for this model there is no provider count yet;
+  // nothing has been sent, so 0 is the honest figure.
+  const used = exact ? context.used : 0
+  if (win === null || win <= 0) {
     return (
       <Text>
         <Text dimColor>ctx </Text>
-        <Text color="gray">{exact ? tokens(used) : '?'}</Text>
-        {win && win > 0 && <Text dimColor>/{tokens(win)}</Text>}
+        <Text color="gray">{tokens(used)}</Text>
       </Text>
     )
   }

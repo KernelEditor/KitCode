@@ -1,6 +1,6 @@
 import { useTerminalSize } from '../terminal-size'
 import { Box, Static, Text } from 'ink'
-import { memo, useMemo, useRef } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import Spinner from 'ink-spinner'
 import stringWidth from 'string-width'
@@ -8,6 +8,7 @@ import { diffLines, truncate } from '../diff'
 import { Markdown } from '../markdown'
 import { useTheme } from '../theme'
 import { sanitizeThinkingText } from '../sanitize'
+import { formatDuration } from '../time'
 import type { Bubble, TranscriptProps } from '../types'
 import { DiffHunk } from './Diff'
 import { Logo } from './Logo'
@@ -93,7 +94,7 @@ export const Transcript = memo(function Transcript({
   )
 })
 
-const BubbleView = memo(function BubbleView({
+export const BubbleView = memo(function BubbleView({
   bubble,
   maxRows,
 }: {
@@ -261,12 +262,19 @@ function NonDiffToolView({
   mark: string
   color: string
 }) {
+  const running = bubble.state === 'running'
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text color={color}>
         {mark} {bubble.summary}
+        {running && bubble.startedAt !== undefined && <Elapsed since={bubble.startedAt} />}
       </Text>
-      {bubble.state !== 'running' &&
+      {running && bubble.progress && (
+        <Box marginLeft={2}>
+          <Text dimColor wrap="truncate-end">└ {bubble.progress}</Text>
+        </Box>
+      )}
+      {!running &&
         bubble.content.trim() !== '' && (
           <Box flexDirection="column" marginLeft={2}>
             {previewLines(bubble.content).map((line, index) => (
@@ -278,6 +286,19 @@ function NonDiffToolView({
         )}
     </Box>
   )
+}
+
+// Only shown after a couple of seconds: quick calls should not flash a timer.
+const ELAPSED_AFTER_MS = 2_000
+
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1_000)
+    return () => clearInterval(timer)
+  }, [])
+  const ms = now - since
+  return ms < ELAPSED_AFTER_MS ? null : <Text dimColor> · {formatDuration(ms)}</Text>
 }
 
 function previewLines(content: string): string[] {
@@ -307,7 +328,7 @@ function SubagentSummary({ agents }: { agents: Extract<Bubble, { kind: 'subagent
           </Text>
         )
       })}
-      <Text dimColor>/subagents · all active tasks</Text>
+      <Text dimColor>/subagents · open a sub-agent chat</Text>
     </Box>
   )
 }

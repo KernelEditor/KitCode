@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { COMMANDS, closestCommand, commandRunsWhileBusy, matchCommands } from '../src/ui/commands'
 import { shouldAutoCompact } from '../src/core/compact'
 import { LANGS, stringsFor } from '../src/ui/i18n'
-import { PRESETS, makeTheme, resolveAccent } from '../src/ui/theme'
+import { PRESETS, makeTheme, parseAccent, resolveAccent } from '../src/ui/theme'
 import { formatDuration } from '../src/ui/time'
 
 const names = (line: string) => matchCommands(line).map((command) => command.name)
@@ -119,6 +119,18 @@ describe('theme', () => {
 
   it('falls back to the default for garbage', () => {
     expect(resolveAccent('not-a-colour')).toBe(PRESETS.purple)
+  })
+
+  it('normalises typed colours and rejects anything else', () => {
+    expect(parseAccent('#FF8800')).toBe('#ff8800')
+    expect(parseAccent('ff8800')).toBe('#ff8800')
+    expect(parseAccent('#f80')).toBe('#ff8800')
+    expect(parseAccent(' Green ')).toBe('green')
+    expect(resolveAccent('#f80')).toBe('#ff8800')
+    expect(parseAccent('blu')).toBeUndefined()
+    expect(parseAccent('#12')).toBeUndefined()
+    expect(parseAccent('#gggggg')).toBeUndefined()
+    expect(parseAccent('constructor')).toBeUndefined()
   })
 })
 
