@@ -124,3 +124,19 @@ describe('mid-turn trimming', () => {
     expect(notices.some((text) => text.includes('cleared older tool output'))).toBe(true)
   })
 })
+
+describe('compaction budget estimate', () => {
+  it('counts tokens, not characters, so a turn budget does not refuse it', async () => {
+    const { estimateCompactBudget } = await import('../src/core/compact')
+    const turn = (text: string) => [
+      { role: 'user' as const, content: [{ type: 'text' as const, text }] },
+      { role: 'assistant' as const, content: [{ type: 'text' as const, text: 'ok' }] },
+    ]
+    const history = Array.from({ length: 30 }, (_, index) => turn(`${index} ${'x'.repeat(1_500)}`)).flat()
+    const estimate = estimateCompactBudget(history)
+    // Some 40k characters of older turns are ~10k tokens plus request overhead;
+    // the old estimate counted the characters themselves (40k+).
+    expect(estimate.inputTokens).toBeGreaterThan(10_000)
+    expect(estimate.inputTokens).toBeLessThan(13_000)
+  })
+})

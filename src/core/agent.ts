@@ -384,20 +384,24 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
+// Characters per token, as the compactor estimates it. This used to return the
+// character count itself, four times the real figure, so a turn budget stopped
+// work long before it was reached ("next request would exceed the budget").
+const CHARS_PER_TOKEN = 4
+
 function estimateRequestTokens(cfg: AgentConfig, messages: Message[]): number {
   let characters = cfg.system.length
   try {
     characters += JSON.stringify(messages, (_key, value) =>
       typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'image'
-        ? `[image:${'#'.repeat(2_000)}]`
+        ? `[image:${'#'.repeat(6_000)}]`
         : value,
     ).length
     characters += JSON.stringify(cfg.tools.schemas()).length
   } catch {
-    return Math.max(1, characters)
+    // Keep what was counted so far.
   }
-
-  return Math.max(1, characters)
+  return Math.max(1, Math.ceil(characters / CHARS_PER_TOKEN))
 }
 
 async function runToolCalls(

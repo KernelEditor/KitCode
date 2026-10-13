@@ -1,4 +1,5 @@
-import { effectiveEffort, markEffortRejected } from './effort'
+import { sdkUserAgent, withKitcodeUserAgent } from '../version'
+import { effectiveEffort, markEffortCapped, markEffortRejected } from './effort'
 import OpenAI from 'openai'
 import {
   captureResponseHead,
@@ -50,13 +51,14 @@ export function createOpenAiProvider(args: {
   headers?: Record<string, string>
   timeoutMs?: number
 }): Provider {
-  const client = new OpenAI({
+  const options = {
     baseURL: args.baseUrl,
     apiKey: args.apiKey,
-    defaultHeaders: args.headers,
     maxRetries: MAX_RETRIES,
     timeout: args.timeoutMs ?? REQUEST_TIMEOUT_MS,
-  })
+  }
+  const userAgent = sdkUserAgent(new OpenAI(options))
+  const client = new OpenAI({ ...options, defaultHeaders: withKitcodeUserAgent(userAgent, args.headers) })
 
   return {
     id: args.id,
@@ -98,10 +100,19 @@ async function* streamTurn(
         continue
       }
       if (effort && rejectsField(error, /reasoning|effort/i)) {
-        // Stop sending reasoning_effort for this model (the status bar then
-        // shows effort as unsupported) and retry.
-        markEffortRejected(providerId, req.model)
-        effort = undefined
+        // Step down one level at a time and drop the field only at the bottom.
+        // Many gateways know low/medium/high but not xhigh/max, and some route
+        // "high" to an upstream that rewrites it into "xhigh" and then fails;
+        // a gateway can also misbehave with no effort at all. The level that
+        // worked is remembered, so the status bar shows what is really sent.
+        const lower = effort === 'xhigh' || effort === 'max' ? 'high' : effort === 'high' ? 'medium' : undefined
+        if (lower) {
+          markEffortCapped(providerId, req.model, lower)
+          effort = lower
+        } else {
+          markEffortRejected(providerId, req.model)
+          effort = undefined
+        }
         continue
       }
       if (thinkingOff && rejectsField(error, /thinking/i)) {
@@ -136,7 +147,11 @@ function thinkingOffParams(model: string): Record<string, unknown> | undefined {
 }
 
 function rejectsField(error: unknown, field: RegExp): boolean {
-  if (!(error instanceof ProviderError) || (error.status !== 400 && error.status !== 422)) return false
+  if (!(error instanceof ProviderError)) return false
+  // Some gateways answer 200 and report the refusal inside the stream; the SDK
+  // then raises an error without a status. It counts as long as the message
+  // names the field.
+  if (error.status !== undefined && error.status !== 400 && error.status !== 422) return false
   const cause = error.cause instanceof Error ? error.cause.message : ''
   return field.test(`${error.message} ${cause}`)
 }

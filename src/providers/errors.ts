@@ -67,7 +67,12 @@ export function isRetryableFailure(error: unknown): boolean {
 
 function statusOf(error: unknown): number | undefined {
   const value = prop(error, 'status') ?? prop(error, 'statusCode')
-  return typeof value === 'number' && value >= 100 ? value : undefined
+  if (typeof value === 'number' && value >= 100) return value
+  // An error sent inside a 200 stream has no HTTP status; gateways such as
+  // OpenRouter put the real one in its code ({"error":{"code":429,…}}).
+  const code = prop(error, 'code') ?? prop(prop(error, 'error'), 'code')
+  const numeric = typeof code === 'string' && /^\d{3}$/.test(code) ? Number(code) : code
+  return typeof numeric === 'number' && numeric >= 400 && numeric <= 599 ? numeric : undefined
 }
 
 export function isUserAbort(error: unknown, signal?: AbortSignal): boolean {

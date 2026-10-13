@@ -122,6 +122,11 @@ describe('a refused image', () => {
     expect(recovered?.messages[0]?.content[1]).toMatchObject({ type: 'text', text: expect.stringContaining('shot.png removed') })
   })
 
+  it('also recognises a refusal sent inside a 200 stream, without a status', () => {
+    const refused = new ProviderError('Request to "gw" failed — image_url is not supported for this model', 'gw')
+    expect(imageRejection(refused, history)?.removed).toBe(1)
+  })
+
   it('leaves the history alone for unrelated failures', () => {
     expect(imageRejection(new ProviderError('rate limited (429)', 'x', 429), history)).toBeNull()
     expect(imageRejection(new ProviderError('rejected (400) — max_tokens too large', 'x', 400), history)).toBeNull()

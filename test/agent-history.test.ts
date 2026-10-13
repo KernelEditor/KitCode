@@ -59,3 +59,24 @@ describe('turn history', () => {
     expect(history.at(-1)).toMatchObject({ role: 'assistant', content: [{ type: 'text', text: 'done' }] })
   })
 })
+
+describe('turn budget estimate', () => {
+  it('passes the budget an input estimate in tokens, not characters', async () => {
+    const seen: number[] = []
+    const budget = {
+      hasLimits: true,
+      beforeRequest(request: { estimatedInputTokens: number; maxOutputTokens: number }) {
+        seen.push(request.estimatedInputTokens)
+        return { allowed: true as const, maxOutputTokens: request.maxOutputTokens }
+      },
+      record() {},
+      snapshot: () => ({ tokens: 0, costUsd: 0 }),
+    }
+    const text = 'x'.repeat(40_000)
+    const cfg = { ...config(scripted([{ stopReason: 'end_turn', content: [{ type: 'text', text: 'ok' }] }])), budget }
+    await runTurn(cfg, [{ role: 'user', content: [{ type: 'text', text }] }], hooks, new AbortController().signal)
+    // ~40k characters of prompt are ~10k tokens; the old estimate said 40k.
+    expect(seen[0]).toBeGreaterThan(10_000)
+    expect(seen[0]).toBeLessThan(11_000)
+  })
+})

@@ -12,6 +12,8 @@ import {
 import { modelInfoFromRaw } from './model-info'
 import { pricingFor } from './pricing'
 import { parseRateLimits } from './rate-limits'
+import { ProviderError } from './types'
+import { sdkUserAgent, withKitcodeUserAgent } from '../version'
 import type {
   ChatRequest,
   ContentBlock,
@@ -48,13 +50,14 @@ export function createAnthropicProvider(args: {
   headers?: Record<string, string>
   timeoutMs?: number
 }): Provider {
-  const client = new Anthropic({
+  const options = {
     apiKey: args.apiKey,
     baseURL: args.baseUrl,
-    defaultHeaders: args.headers,
     maxRetries: MAX_RETRIES,
     timeout: args.timeoutMs ?? REQUEST_TIMEOUT_MS,
-  })
+  }
+  const userAgent = sdkUserAgent(new Anthropic(options))
+  const client = new Anthropic({ ...options, defaultHeaders: withKitcodeUserAgent(userAgent, args.headers) })
 
   return {
     id: args.id,
@@ -65,11 +68,52 @@ export function createAnthropicProvider(args: {
   }
 }
 
+// provider/model pairs whose endpoint refused the thinking parameter.
+const thinkingRejected = new Set<string>()
+
 async function* streamTurn(
   client: Anthropic,
   providerId: string,
   apiKey: string,
   req: ChatRequest,
+): AsyncGenerator<StreamEvent> {
+  const key = `${providerId}/${req.model}`
+  let thinking = req.thinking === true && !thinkingRejected.has(key)
+  for (;;) {
+    let streamed = false
+    try {
+      for await (const event of streamOnce(client, providerId, apiKey, req, thinking)) {
+        if (event.type !== 'rate_limits' && event.type !== 'usage') streamed = true
+        yield event
+      }
+      return
+    } catch (error) {
+      // Anthropic-compatible gateways for other models (GLM, Kimi, MiniMax…)
+      // may not know the thinking parameter: ask once more without it, and
+      // remember, instead of failing every message.
+      if (!streamed && thinking && refusesThinking(error)) {
+        thinkingRejected.add(key)
+        thinking = false
+        continue
+      }
+      throw error
+    }
+  }
+}
+
+function refusesThinking(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return false
+  if (error.status !== undefined && error.status !== 400 && error.status !== 422) return false
+  const cause = error.cause instanceof Error ? error.cause.message : ''
+  return /thinking|budget_tokens|adaptive/i.test(`${error.message} ${cause}`)
+}
+
+async function* streamOnce(
+  client: Anthropic,
+  providerId: string,
+  apiKey: string,
+  req: ChatRequest,
+  thinkingOn: boolean,
 ): AsyncGenerator<StreamEvent> {
   const params: Anthropic.MessageStreamParams = {
     model: req.model,
@@ -78,7 +122,7 @@ async function* streamTurn(
     messages: toMessageParams(req.messages),
     tools: toToolParams(req.tools),
   }
-  if (req.thinking) {
+  if (thinkingOn) {
     const thinking = thinkingParam(req.model, req.maxTokens)
     if (thinking) params.thinking = thinking
   }
@@ -265,7 +309,9 @@ const MIN_THINKING_BUDGET = 1_024
 
 export function thinkingParam(model: string, maxTokens: number): Anthropic.ThinkingConfigParam | undefined {
   const id = (model.split('/').at(-1) ?? model).replace(/^(?:[a-z]{2}\.)?anthropic\./, '')
-  if (!BUDGET_THINKING.test(id)) return { type: 'adaptive', display: 'summarized' }
+  // Adaptive thinking is Claude's own; Anthropic-compatible gateways serving
+  // other models know the older budget form, so they get that.
+  if (id.startsWith('claude-') && !BUDGET_THINKING.test(id)) return { type: 'adaptive', display: 'summarized' }
   // The budget must stay below max_tokens and at or above 1024.
   const budget = Math.min(THINKING_BUDGET, maxTokens - 1)
   return budget >= MIN_THINKING_BUDGET ? { type: 'enabled', budget_tokens: budget } : undefined

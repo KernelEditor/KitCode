@@ -245,6 +245,8 @@ export function withoutThinkingReplay(history: Message[]): Message[] {
 }
 
 /** Rough token count of a history (≈4 characters per token), for notices. */
+const CHARS_PER_TOKEN = 4
+
 export function estimateHistoryTokens(history: Message[]): number {
   let chars = 0
   for (const message of history) {
@@ -256,7 +258,7 @@ export function estimateHistoryTokens(history: Message[]): number {
       else if (block.type === 'image') chars += 6_000
     }
   }
-  return Math.round(chars / 4)
+  return Math.round(chars / CHARS_PER_TOKEN)
 }
 
 export function shouldAutoCompact(used: number, window: number | null): boolean {
@@ -287,7 +289,9 @@ export function estimateCompactBudget(
   const rendered = renderedMessages.join('\n\n')
   if (rendered.length <= SINGLE_REQUEST_MAX_CHARS) {
     return {
-      inputTokens: Math.max(1, rendered.length + 1_000),
+      // Tokens, not characters: counting characters made a turn budget refuse
+      // compaction (four times too expensive) just when the window was full.
+      inputTokens: Math.max(1, Math.ceil(rendered.length / CHARS_PER_TOKEN) + 1_000),
       maxOutputTokens: Math.max(1, Math.min(SINGLE_MAX_TOKENS, Math.floor(maxTokens))),
     }
   }
@@ -302,13 +306,13 @@ export function estimateCompactBudget(
   const mergeOutput = Math.max(1, Math.min(MERGE_MAX_TOKENS, Math.floor(maxTokens)))
   const mergeRequests = Math.max(0, chunks.length - 1)
   const totalOutput = chunks.length * chunkOutput + mergeRequests * mergeOutput
-  // Every non-final summary can become input to a later merge. Eight chars per
-  // output token is intentionally conservative for budget enforcement.
+  // Every non-final summary can become input to a later merge; counting it
+  // twice is intentionally conservative for budget enforcement.
   const intermediateOutput =
     chunks.length * chunkOutput + Math.max(0, mergeRequests - 1) * mergeOutput
   const requestCount = chunks.length + mergeRequests
   return {
-    inputTokens: Math.max(1, chunkInput + intermediateOutput * 8 + requestCount * 1_000),
+    inputTokens: Math.max(1, Math.ceil(chunkInput / CHARS_PER_TOKEN) + intermediateOutput * 2 + requestCount * 1_000),
     maxOutputTokens: totalOutput,
   }
 }

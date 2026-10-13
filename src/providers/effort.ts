@@ -14,9 +14,17 @@ export function resolveEffort(effort: Effort | undefined, messages: Message[]): 
 
 // provider/model pairs whose endpoint rejected reasoning_effort this session.
 const rejected = new Set<string>()
+// provider/model pairs whose endpoint refused a level above this one
+// (e.g. a gateway that knows low/medium/high but not xhigh).
+const capped = new Map<string, Level>()
+const RANK: Record<Level, number> = { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 }
 
 export function markEffortRejected(providerId: string, model: string): void {
   rejected.add(`${providerId}/${model}`)
+}
+
+export function markEffortCapped(providerId: string, model: string, level: Level): void {
+  capped.set(`${providerId}/${model}`, level)
 }
 
 /** The effort level actually sent to the API, or undefined when the model does not accept one. */
@@ -29,7 +37,9 @@ export function effectiveEffort(
 ): Level | undefined {
   if (providerId !== undefined && rejected.has(`${providerId}/${model}`)) return undefined
   const requested = resolveEffort(effort, messages)
-  return kind === 'openai' ? openAiEffort(model, requested) : anthropicEffort(model, requested)
+  const level = kind === 'openai' ? openAiEffort(model, requested) : anthropicEffort(model, requested)
+  const cap = providerId === undefined ? undefined : capped.get(`${providerId}/${model}`)
+  return level && cap && RANK[level] > RANK[cap] ? cap : level
 }
 
 export function anthropicEffort(model: string, effort: Level | undefined): Level | undefined {

@@ -1130,7 +1130,8 @@ ${recovered.removed === 1 ? 'The image was' : `${recovered.removed} images were`
 
 export function imageRejection(error: unknown, history: Message[]): { messages: Message[]; removed: number } | null {
   const status = (error as { status?: unknown })?.status
-  if (typeof status !== 'number' || ![400, 413, 415, 422].includes(status)) return null
+  // No status: the gateway refused inside a 200 stream; the message decides.
+  if (status !== undefined && (typeof status !== 'number' || ![400, 413, 415, 422].includes(status))) return null
   const message = error instanceof Error ? error.message : String(error)
   if (status !== 413 && !/image|vision|multi-?modal/i.test(message)) return null
   const result = withoutImages(history)

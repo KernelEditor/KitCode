@@ -1,3 +1,4 @@
+import { effectiveEffort } from '../src/providers/effort'
 import http from 'node:http'
 import type { AddressInfo, Socket } from 'node:net'
 import OpenAI from 'openai'
@@ -168,6 +169,51 @@ describe('anthropic request shape', () => {
     expect((await capture('claude-haiku-4-5', true)).thinking).toEqual({ type: 'enabled', budget_tokens: 16_000 })
     expect((await capture('claude-sonnet-4-6', true)).thinking.type).toBe('adaptive')
     expect((await capture('claude-opus-4-5-20251101', true)).thinking.type).toBe('enabled')
+    // Adaptive thinking is Claude's own; a gateway serving GLM gets the budget form.
+    expect((await capture('glm-5', true)).thinking).toEqual({ type: 'enabled', budget_tokens: 16_000 })
+  })
+
+  it('retries without thinking when an Anthropic-compatible gateway refuses it', async () => {
+    const bodies: Record<string, any>[] = []
+    const baseUrl = await startServer((req, res) => {
+      let raw = ''
+      req.on('data', (chunk) => { raw += chunk.toString() })
+      req.on('end', () => {
+        const body = JSON.parse(raw)
+        bodies.push(body)
+        if (body.thinking) {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: 'thinking: unknown field' } }))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end([
+          ...anthropicPrefix(),
+          `event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`,
+          `event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 2 } })}\n\n`,
+          `event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`,
+        ].join(''))
+      })
+    })
+    const provider = createAnthropicProvider({ id: 'gateway-thinking', apiKey: 'sk-test', baseUrl })
+    const events = await collect(provider.stream({ ...chatRequest(), model: 'kimi-k3', thinking: true, maxTokens: 64_000 }))
+    expect(events.find((event) => event.type === 'done')).toMatchObject({ stopReason: 'end_turn' })
+    expect(bodies.map((body) => Boolean(body.thinking))).toEqual([true, false])
+    await collect(provider.stream({ ...chatRequest(), model: 'kimi-k3', thinking: true, maxTokens: 64_000 }))
+    expect(bodies.map((body) => Boolean(body.thinking))).toEqual([true, false, false])
+  })
+})
+
+describe('errors reported inside a stream', () => {
+  it('reads the real status from the error code, so a rate limit is recognised', async () => {
+    const baseUrl = await startServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.end('data: ' + JSON.stringify({ error: { message: 'Rate limit exceeded', code: 429 } }) + '\n\n')
+    })
+    const provider = createOpenAiProvider({ id: 'router', apiKey: 'test', baseUrl })
+    const failure = collect(provider.stream(chatRequest()))
+    await expect(failure).rejects.toMatchObject({ status: 429 })
+    await expect(failure).rejects.toThrow(/rate limited this request \(429\)/)
   })
 })
 
@@ -197,6 +243,34 @@ describe('transient provider faults', () => {
     await collect(provider.stream({ ...chatRequest(), model, effort }))
     expect(body.reasoning_effort).toBe(expected)
   })
+  it('steps effort down when a gateway refuses it inside a 200 stream, and remembers the level', async () => {
+    // What api.hcnsec.cn does: it answers 200 and reports the refusal as an
+    // SSE error event, and one of its upstreams turns "high" into "xhigh".
+    const sent: unknown[] = []
+    const baseUrl = await startServer((req, res) => {
+      let raw = ''
+      req.on('data', (chunk) => { raw += chunk.toString() })
+      req.on('end', () => {
+        const effort = JSON.parse(raw).reasoning_effort
+        sent.push(effort)
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        if (effort === 'xhigh' || effort === 'high') {
+          res.end('data: ' + JSON.stringify({ error: { message: 'Failed to deserialize the JSON body into the target type: reasoning_effort: unknown variant `xhigh`, expected one of `low`, `medium`, `high`', type: 'client_error' } }) + '\n\n')
+          return
+        }
+        res.end(sseChunk({ content: 'ok' }, 'stop') + 'data: [DONE]\n\n')
+      })
+    })
+    const provider = createOpenAiProvider({ id: 'gateway-ladder', apiKey: 'test', baseUrl })
+    const events = await collect(provider.stream({ ...chatRequest(), model: 'gpt-5.2', effort: 'xhigh' }))
+    expect(events.find((event) => event.type === 'done')).toMatchObject({ stopReason: 'end_turn' })
+    expect(sent).toEqual(['xhigh', 'high', 'medium'])
+
+    await collect(provider.stream({ ...chatRequest(), model: 'gpt-5.2', effort: 'xhigh' }))
+    expect(sent.at(-1)).toBe('medium')
+    expect(effectiveEffort('openai', 'gpt-5.2', 'xhigh', [], 'gateway-ladder')).toBe('medium')
+  })
+
   it('asks GLM/Kimi to skip reasoning when thinking is off, and drops the switch if refused', async () => {
     const bodies: Record<string, unknown>[] = []
     const baseUrl = await startServer((req, res) => {
