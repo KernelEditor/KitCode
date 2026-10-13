@@ -27,6 +27,25 @@ describe('background commands', () => {
     resetJobs()
   })
 
+  it('keeps unread output when the buffer overflows after a read', async () => {
+    const script =
+      "process.stdout.write('a'.repeat(60000));setTimeout(()=>process.stdout.write('b'.repeat(60000)),400)"
+    const started = await bashTool.execute(
+      { command: `"${process.execPath}" -e "${script}"`, background: true },
+      ctx,
+    )
+    const id = /bg-\d+/.exec(started.content)?.[0]!
+    let first = ''
+    for (let attempt = 0; attempt < 40 && !first.includes('a'.repeat(60000)); attempt += 1) {
+      first += (await bashOutputTool.execute({ id }, ctx)).content
+      await new Promise((resolve) => setTimeout(resolve, 25))
+    }
+    expect(first).not.toContain('bbb')
+
+    const rest = await settle(id)
+    expect((rest.match(/b{100,}/g) ?? []).join('').length).toBe(60000)
+  })
+
   it('returns before the command finishes and collects its output later', async () => {
     const started = await bashTool.execute(
       { command: `"${process.execPath}" -e "console.log('worked')"`, background: true },

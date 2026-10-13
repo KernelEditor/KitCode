@@ -85,6 +85,7 @@ interface Session {
 export function createMcpManager(servers: Record<string, McpServerConfig>) {
   const serverStates = new Map<string, McpServerState>()
   const sessions = new Map<string, Session>()
+  const changeListeners = new Set<() => void>()
 
   for (const [name, config] of Object.entries(servers)) {
     serverStates.set(name, {
@@ -114,14 +115,19 @@ export function createMcpManager(servers: Record<string, McpServerConfig>) {
     serverStates.set(name, { name, status: 'connecting', toolCount: 0 })
     const client = new Client(clientInfo)
     client.onclose = () => {
-      if (sessions.delete(name)) {
-        serverStates.set(name, {
-          name,
-          status: 'error',
-          toolCount: 0,
-          error: 'connection closed',
-        })
-      }
+      // Only this client's own session: after a reconnect the name already
+      // belongs to a newer one that must stay.
+      if (sessions.get(name)?.client !== client) return
+      sessions.delete(name)
+      serverStates.set(name, {
+        name,
+        status: 'error',
+        toolCount: 0,
+        error: 'connection closed',
+      })
+      // The server died on its own: its tools must leave the registry, or the
+      // model keeps calling them and gets "not connected" every time.
+      for (const listener of changeListeners) listener()
     }
     const transport = createTransport(config)
     const stderrTail = captureStderr(transport)
@@ -194,6 +200,12 @@ export function createMcpManager(servers: Record<string, McpServerConfig>) {
     },
 
     callTool,
+
+    /** Called when a server drops on its own, outside connect/disconnect. */
+    onChange(listener: () => void): () => void {
+      changeListeners.add(listener)
+      return () => changeListeners.delete(listener)
+    },
   }
 }
 

@@ -3,7 +3,9 @@ import { lstat, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { ContentBlock, FileBlock, ImageBlock } from '../providers/types'
+import type { ContentBlock, FileBlock, ImageBlock, Message } from '../providers/types'
+import { resolveInside } from '../tools/safepath'
+import { isSensitivePath } from '../tools/sensitive'
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const MAX_TEXT_BYTES = 256 * 1024
@@ -81,6 +83,49 @@ export async function loadAutomaticAttachment(
   if (info?.isDirectory()) return loadFirstImageFromDirectory(resolved)
   if (!info?.isFile()) return null
   return loadResolvedAttachment(resolved, info.size)
+}
+
+/**
+ * A file named with "@path" inside a message. Unlike /attach this happens
+ * without a separate step, and a pasted text can carry the "@" too, so it is
+ * held to the agent's own read rules: workspace files only, credentials never.
+ * Null means "not a file to attach" and the word stays plain text.
+ */
+export async function loadMentionAttachment(
+  cwd: string,
+  requestedPath: string,
+): Promise<LoadedAttachment | null> {
+  const safe = resolveInside(cwd, normalizeInputPath(requestedPath.trim()))
+  if (!safe.ok || safe.relative === '') return null
+  if (isSensitivePath(safe.relative) || isSensitiveAutomaticPath(safe.path)) {
+    throw new Error(
+      `For safety, sensitive-looking files must be attached explicitly with /attach: ${path.basename(safe.path)}`,
+    )
+  }
+  const info = await stat(safe.path).catch(() => null)
+  // A folder mention ("@src") names a place, not something to send.
+  if (!info?.isFile()) return null
+  return loadResolvedAttachment(safe.path, info.size)
+}
+
+/**
+ * The history with every image replaced by a short note. Used when the model
+ * refused an image: left in place, it would fail every later request too.
+ */
+export function withoutImages(messages: Message[]): { messages: Message[]; removed: number } {
+  let removed = 0
+  const cleaned = messages.map((message) => {
+    if (!message.content.some((block) => block.type === 'image')) return message
+    return {
+      ...message,
+      content: message.content.map((block): ContentBlock => {
+        if (block.type !== 'image') return block
+        removed += 1
+        return { type: 'text', text: `[image ${block.name} removed: the model could not accept it]` }
+      }),
+    }
+  })
+  return { messages: cleaned, removed }
 }
 
 const MAX_PATH_CHARS = 2048
@@ -166,12 +211,13 @@ async function loadResolvedAttachment(resolved: string, size: number): Promise<L
   if (data.length > MAX_TEXT_BYTES) {
     throw new Error(`Text attachment is larger than ${formatBytes(MAX_TEXT_BYTES)}: ${name}`)
   }
-  if (data.includes(0)) throw new Error(`Unsupported binary attachment: ${name}`)
-  let text: string
-  try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(data)
-  } catch {
-    throw new Error(`Attachment is neither a supported image nor UTF-8 text: ${name}`)
+  const text = decodeText(data)
+  if (text === null) {
+    throw new Error(
+      data.includes(0)
+        ? `Unsupported binary attachment: ${name}`
+        : `Attachment is neither a supported image nor UTF-8 text: ${name}`,
+    )
   }
   return {
     path: resolved,
@@ -181,7 +227,9 @@ async function loadResolvedAttachment(resolved: string, size: number): Promise<L
 }
 
 async function loadFirstImageFromDirectory(dirPath: string): Promise<LoadedAttachment | null> {
-  const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'])
+  // Only formats detectImage accepts: a .bmp sorted first would otherwise
+  // fail the whole directory even when PNGs sit right next to it.
+  const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp'])
   const entries = await readdir(dirPath, { withFileTypes: true }).catch(() => null)
   if (!entries) return null
   const sorted = entries
@@ -217,6 +265,8 @@ function resolveAttachmentPath(cwd: string, requestedPath: string): string {
 function isSensitiveAutomaticPath(file: string): boolean {
   const basename = path.basename(file).toLowerCase()
   return (
+    // Also covers ~/.ssh/config, ~/.aws/credentials, .git-credentials and the like.
+    isSensitivePath(file) ||
     basename.startsWith('.env.') ||
     SENSITIVE_AUTO_NAMES.has(basename) ||
     SENSITIVE_AUTO_EXTENSIONS.has(path.extname(basename))
@@ -226,6 +276,65 @@ function isSensitiveAutomaticPath(file: string): boolean {
 export function attachmentLabel(block: ContentBlock): string | null {
   if (block.type === 'image') return `image: ${block.name}`
   if (block.type === 'file') return `file: ${block.name}`
+  return null
+}
+
+// UTF-8, or UTF-16 with a byte order mark: what Notepad and PowerShell's ">"
+// write on Windows. UTF-16 is full of zero bytes, so it has to be recognised
+// before the binary check.
+function decodeText(data: Buffer): string | null {
+  try {
+    if (data[0] === 0xff && data[1] === 0xfe) return new TextDecoder('utf-16le', { fatal: true }).decode(data)
+    if (data[0] === 0xfe && data[1] === 0xff) return new TextDecoder('utf-16be', { fatal: true }).decode(data)
+    if (data.includes(0)) return null
+    return new TextDecoder('utf-8', { fatal: true }).decode(data)
+  } catch {
+    return null
+  }
+}
+
+/** Pixel size from the file header, without decoding the image. */
+export function imageSize(data: Buffer, mediaType: ImageBlock['mediaType']): { width: number; height: number } | null {
+  try {
+    if (mediaType === 'image/png' && data.length >= 24) {
+      return { width: data.readUInt32BE(16), height: data.readUInt32BE(20) }
+    }
+    if (mediaType === 'image/gif' && data.length >= 10) {
+      return { width: data.readUInt16LE(6), height: data.readUInt16LE(8) }
+    }
+    if (mediaType === 'image/webp' && data.length >= 30) {
+      const chunk = data.subarray(12, 16).toString('ascii')
+      if (chunk === 'VP8X') return { width: data.readUIntLE(24, 3) + 1, height: data.readUIntLE(27, 3) + 1 }
+      if (chunk === 'VP8L') {
+        const bits = data.readUInt32LE(21)
+        return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 }
+      }
+      if (chunk === 'VP8 ') return { width: data.readUInt16LE(26) & 0x3fff, height: data.readUInt16LE(28) & 0x3fff }
+      return null
+    }
+    if (mediaType === 'image/jpeg') {
+      let offset = 2
+      while (offset + 9 < data.length) {
+        if (data[offset] !== 0xff) return null
+        const marker = data[offset + 1] as number
+        if (marker === 0xff) {
+          offset += 1
+          continue
+        }
+        // Start-of-frame markers carry the size; C4, C8 and CC are not frames.
+        if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+          return { width: data.readUInt16BE(offset + 7), height: data.readUInt16BE(offset + 5) }
+        }
+        if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+          offset += 2
+          continue
+        }
+        offset += 2 + data.readUInt16BE(offset + 2)
+      }
+    }
+  } catch {
+    return null
+  }
   return null
 }
 
@@ -367,7 +476,15 @@ const WINDOWS_CLIPBOARD_SCRIPT = String.raw`
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 $image = [System.Windows.Forms.Clipboard]::GetImage()
-if ($null -eq $image) { exit 2 }
+if ($null -eq $image) {
+  # An image file copied in Explorer arrives as a file list, not a bitmap.
+  $files = [System.Windows.Forms.Clipboard]::GetFileDropList()
+  $file = $files | Where-Object { $_ -match '\.(png|jpe?g|gif|webp)$' } | Select-Object -First 1
+  if ($null -eq $file) { exit 2 }
+  $bytes = [System.IO.File]::ReadAllBytes($file)
+  [Console]::OpenStandardOutput().Write($bytes, 0, $bytes.Length)
+  exit 0
+}
 $stream = New-Object System.IO.MemoryStream
 try {
   $image.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -383,6 +500,10 @@ try {
 // failed image then stays in the history, breaking every later request.
 // Bigger images (4K screenshots) are scaled down and re-encoded as JPEG.
 export const MAX_SENT_IMAGE_BYTES = 3_700_000
+// The API also refuses an image with an edge over 8000 px, however small the
+// file: a full-page screenshot (1200×12000) is a few hundred KB and would
+// break the conversation the same way.
+const MAX_IMAGE_EDGE = 8000
 const SHRINK_LONG_EDGE = 2000
 
 export type ImageShrinker = (input: string, output: string, platform: NodeJS.Platform) => Promise<void>
@@ -393,7 +514,9 @@ export async function fitImage(
   platform: NodeJS.Platform = process.platform,
   shrink: ImageShrinker = shrinkWithSystemTools,
 ): Promise<{ data: Buffer; mediaType: ImageBlock['mediaType'] }> {
-  if (data.length <= MAX_SENT_IMAGE_BYTES) return { data, mediaType }
+  const size = imageSize(data, mediaType)
+  const tooTall = size !== null && Math.max(size.width, size.height) > MAX_IMAGE_EDGE
+  if (data.length <= MAX_SENT_IMAGE_BYTES && !tooTall) return { data, mediaType }
   const dir = await mkdtemp(path.join(os.tmpdir(), 'kitcode-image-'))
   try {
     const input = path.join(dir, `in${extensionFor(mediaType)}`)
@@ -432,7 +555,9 @@ async function shrinkWithSystemTools(input: string, output: string, platform: No
     return
   }
   // Linux and the rest: ImageMagick, as `magick` (v7) or `convert` (v6).
-  const args = [input, '-resize', `${SHRINK_LONG_EDGE}x${SHRINK_LONG_EDGE}>`, '-background', 'white', '-flatten', '-quality', '85', output]
+  // -auto-orient: a phone photo is stored sideways with an EXIF rotation flag
+  // that the re-encoded JPEG would no longer carry.
+  const args = [input, '-auto-orient', '-resize', `${SHRINK_LONG_EDGE}x${SHRINK_LONG_EDGE}>`, '-background', 'white', '-flatten', '-quality', '85', output]
   try {
     await runQuiet('magick', args)
   } catch {
@@ -457,6 +582,12 @@ const WINDOWS_SHRINK_SCRIPT = String.raw`
 Add-Type -AssemblyName System.Drawing
 $source = [System.Drawing.Image]::FromFile($env:KITCODE_IMAGE_IN)
 try {
+  # Apply the EXIF orientation: the re-encoded JPEG drops the flag that kept a
+  # phone photo upright.
+  if ($source.PropertyIdList -contains 0x0112) {
+    $flip = @{ 2 = 'RotateNoneFlipX'; 3 = 'Rotate180FlipNone'; 4 = 'Rotate180FlipX'; 5 = 'Rotate90FlipX'; 6 = 'Rotate90FlipNone'; 7 = 'Rotate270FlipX'; 8 = 'Rotate270FlipNone' }[[int]$source.GetPropertyItem(0x0112).Value[0]]
+    if ($flip) { $source.RotateFlip([System.Drawing.RotateFlipType]$flip) }
+  }
   $edge = [double]$env:KITCODE_IMAGE_EDGE
   $scale = [Math]::Min(1.0, $edge / [Math]::Max($source.Width, $source.Height))
   $width = [Math]::Max(1, [int]($source.Width * $scale))

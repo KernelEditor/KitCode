@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { bashTool } from '../tools/bash'
@@ -28,19 +29,29 @@ export async function detectDiagnosticCommands(
   cwd: string,
   configured: string[] = [],
 ): Promise<string[]> {
-  const custom = configured.map((command) => command.trim()).filter(Boolean)
-  if (custom.length > 0) return custom.slice(0, 8)
+  return (await detectChecks(cwd, configured)).map((check) => check.command)
+}
 
-  const commands: string[] = []
+interface Check {
+  command: string
+  /** What the command really runs, when it is only a name (a package script). */
+  runs?: string
+}
+
+async function detectChecks(cwd: string, configured: string[] = []): Promise<Check[]> {
+  const custom = configured.map((command) => command.trim()).filter(Boolean)
+  if (custom.length > 0) return custom.slice(0, 8).map((command) => ({ command }))
+
+  const checks: Check[] = []
   const packageJson = await readPackageJson(path.join(cwd, 'package.json'))
   if (packageJson) {
     const manager = await packageManager(cwd, packageJson.packageManager)
     for (const name of ['lint', 'typecheck', 'check', 'test']) {
-      if (typeof packageJson.scripts?.[name] === 'string') {
-        commands.push(scriptCommand(manager, name))
-      }
+      const body = packageJson.scripts?.[name]
+      if (typeof body === 'string') checks.push({ command: scriptCommand(manager, name), runs: body })
     }
   }
+  const commands: string[] = []
 
   if (await isFile(path.join(cwd, 'Cargo.toml'))) {
     commands.push('cargo check', 'cargo test')
@@ -54,7 +65,9 @@ export async function detectDiagnosticCommands(
     commands.push('python -m pytest')
   }
 
-  return [...new Set(commands)].slice(0, 8)
+  for (const command of commands) checks.push({ command })
+  const seen = new Set<string>()
+  return checks.filter((check) => !seen.has(check.command) && seen.add(check.command)).slice(0, 8)
 }
 
 export async function runAutomaticDiagnostics(options: {
@@ -66,7 +79,8 @@ export async function runAutomaticDiagnostics(options: {
   signal: AbortSignal
   execute?: (command: string, ctx: ToolContext) => Promise<ToolResult>
 }): Promise<DiagnosticsSummary> {
-  const commands = await detectDiagnosticCommands(options.cwd, options.configuredCommands)
+  const checks = await detectChecks(options.cwd, options.configuredCommands)
+  const commands = checks.map((check) => check.command)
   const summary: DiagnosticsSummary = { commands, failed: [], skipped: false }
   if (options.changedFiles.length === 0 || commands.length === 0 || options.signal.aborted) {
     summary.skipped = true
@@ -84,7 +98,15 @@ export async function runAutomaticDiagnostics(options: {
     return summary
   }
 
-  if (gate === 'ask') {
+  // "npm run test" is only a name; the model may have just rewritten what it
+  // runs in package.json. Show the real commands, and tie an "always" to them:
+  // once a script changes, the user is asked again instead of the new script
+  // running unseen (in accept mode, edits are not confirmed one by one).
+  const items = checks.map((check) => (check.runs ? `${check.command}  →  ${check.runs}` : check.command))
+  const grantName = `${diagnosticsTool.name}#${createHash('sha256').update(items.join('\n')).digest('hex').slice(0, 16)}`
+  const granted = gate === 'ask' && options.permissions.decide({ ...diagnosticsTool, name: grantName }) === 'allow'
+
+  if (gate === 'ask' && !granted) {
     const decision = await options.hooks.requestPermission({
       toolName: diagnosticsTool.name,
       summary: `run ${commands.length} automatic project ${commands.length === 1 ? 'check' : 'checks'}`,
@@ -92,7 +114,7 @@ export async function runAutomaticDiagnostics(options: {
       display: {
         kind: 'list',
         title: `After changes to ${options.changedFiles.length} ${options.changedFiles.length === 1 ? 'file' : 'files'}`,
-        items: commands,
+        items,
       },
       allowAlways: true,
     })
@@ -109,7 +131,7 @@ export async function runAutomaticDiagnostics(options: {
       })
       return summary
     }
-    if (decision === 'always') options.permissions.grantForSession(diagnosticsTool.name)
+    if (decision === 'always') options.permissions.grantForSession(grantName)
   }
 
   const ctx: ToolContext = {

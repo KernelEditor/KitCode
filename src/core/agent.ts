@@ -11,7 +11,7 @@ import type {
   ToolUseBlock,
   Usage,
 } from '../providers/types'
-import { ProviderError } from '../providers/types'
+import { INVALID_ARGUMENTS_KEY, ProviderError } from '../providers/types'
 import type {
   FileCheckpointSink,
   PermissionMode,
@@ -197,7 +197,10 @@ export async function runTurn(
     }
 
     hooks.onEvent({ type: 'turn_end', stopReason: outcome.stopReason })
-    return messages
+    // A reply cut off by max_tokens (or a refusal) can end on a tool call that
+    // never ran. Kept as is, every later request fails: providers refuse a
+    // tool_use without its tool_result, and the history is saved that way.
+    return sanitizeHistory(messages)
   }
 }
 
@@ -445,6 +448,13 @@ async function runOneCall(
   if (!tool) {
     return toolError(call.id, `Unknown tool "${call.name}". Use only the tools provided.`)
   }
+  const invalid = invalidArguments(call.input)
+  if (invalid !== undefined) {
+    return toolError(
+      call.id,
+      `The arguments for "${call.name}" were not valid JSON, so the tool did not run. Call it again with a complete JSON object. Received: ${invalid}`,
+    )
+  }
 
   const summary = describeCall(tool, call.input)
   const ctx: ToolContext = {
@@ -561,6 +571,12 @@ function describeRefusal(refusal: RefusalInfo | undefined): string {
   if (refusal?.category) parts.push(`Category: ${refusal.category}.`)
   if (refusal?.explanation) parts.push(refusal.explanation)
   return parts.join(' ')
+}
+
+function invalidArguments(input: unknown): string | undefined {
+  if (typeof input !== 'object' || input === null) return undefined
+  const raw = (input as Record<string, unknown>)[INVALID_ARGUMENTS_KEY]
+  return typeof raw === 'string' ? raw : undefined
 }
 
 function toolError(toolUseId: string, content: string): ToolResultBlock {

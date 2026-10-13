@@ -105,7 +105,7 @@ Press `/` to open the command list.
 
 | Command | Purpose |
 | --- | --- |
-| `/model` | Select a model. |
+| `/model [model]` | Select a model; a full or unambiguous partial id skips the list. |
 | `/provider` | Switch providers. |
 | `/login` · `/logout [provider]` | Add a provider or choose exactly which provider to remove. |
 | `/key [provider]` | Change API key for a provider. |
@@ -117,10 +117,10 @@ Press `/` to open the command list.
 | `/resume` · `/clear` | Resume a session or start a new one. |
 | `/sessions` | Search sessions, then resume, rename, delete, or export one. |
 | `/sessions list` | List all saved sessions. |
-| `/sessions rename <id> <title>` | Give a saved session a title. |
+| `/sessions rename [id] <title>` | Give a saved session a title. |
 | `/sessions delete <id>` | Delete a saved session. |
 | `/sessions delete all` | Delete every saved chat after two separate confirmations. |
-| `/sessions export <id> [path]` | Export a session to a private Markdown file (default: `.kitcode-exports/`). |
+| `/sessions export [id] [path]` | Export a session to a private Markdown file (default: `.kitcode-exports/`). |
 | `/attach <path>` · `/attach clipboard` · `/attach clear` | Manage attachments for the next message; type `@` in the prompt to find and attach a workspace file. |
 | `/compact` | Replace older conversation context with a concise model-generated summary. |
 | `/update` | Check npm for a newer KitCode version. |
@@ -128,16 +128,18 @@ Press `/` to open the command list.
 | `/undo` | Undo built-in file edits from the latest message. |
 | `/usage` | Show tokens, requests, cost, balance/key limits, and response rate-limit headers when available. |
 | `/checker` | Check the local setup and provider model listing without sending a paid chat request. |
-| `/prompt` | Insert a saved prompt. |
-| `/prompt save <name>` | Save the latest message as a prompt. |
-| `/prompt delete <name>` | Delete a saved prompt. |
+| `/prompt [name]` | Insert a saved prompt. |
+| `/prompt save [name]` | Save the latest message as a prompt, or pick a recent one and name it. Asks before replacing. |
+| `/prompt delete [name]` | Delete a saved prompt. |
 | `/skills` | Show discovered skills. |
-| `/mcp add <name> <https://url>` | Add and connect a remote MCP server. |
-| `/mcp add <name> -- <command> [args]` | Add and connect a local MCP server. |
+| `/skills install <source>` | Install a skill from a GitHub URL, an npm package, or a local folder. |
+| `/skills remove [name]` | Remove an installed global skill. |
+| `/mcp add <name> [-H "Name: value"] <https://url>` | Add and connect a remote MCP server. |
+| `/mcp add <name> [-e KEY=value] -- <command> [args]` | Add and connect a local MCP server. |
 | `/mcp list` | Show configured MCP servers and connection status. |
 | `/mcp enable <name>` · `/mcp disable <name>` | Connect or disconnect an MCP server without removing it. |
 | `/mcp delete <name>` | Disconnect and remove an MCP server. |
-| `/theme` · `/lang` | Change the accent or interface language. |
+| `/theme [color]` · `/lang [en\|ru]` | Change the accent or interface language. |
 | `/config` | Show the active config. |
 | `/bypass` | Toggle approval-free operation. |
 | `/help` · `/exit` | Show help or quit. |
@@ -306,16 +308,19 @@ immediately without a restart:
 
 ```text
 /mcp add docs https://mcp.example.com/mcp
-/mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem .
+/mcp add filesystem -- npx -y @modelcontextprotocol/server-filesystem "C:\My Projects"
+/mcp add github -e GITHUB_TOKEN=${env:GITHUB_TOKEN} -- npx -y @modelcontextprotocol/server-github
+/mcp add search -H "Authorization: Bearer ${env:SEARCH_TOKEN}" https://mcp.example.com/mcp
 /mcp list
 /mcp disable filesystem
 /mcp enable filesystem
 /mcp delete filesystem
 ```
 
-The server is saved to the active config. Use `${env:NAME}` references in a manually configured
-`env` or `headers` object when a server needs a secret; this keeps the secret itself out of the
-config file:
+Quotes keep spaces in paths and values. `-e` sets environment variables for a local server and
+`-H` sets headers for a remote one; both go before the URL or command. The server is saved to the
+active config. Use `${env:NAME}` references for secrets, on the command line or in the config,
+so the secret itself never lands in the config file:
 
 ```json
 {
@@ -332,12 +337,29 @@ config file:
 }
 ```
 
-A skill is a directory containing a `SKILL.md` file. Global skills live in
-`~/.kitcode/skills`; project skills live in `./.kitcode/skills`.
+A skill is a directory containing a `SKILL.md` file, plus any scripts or reference files it uses.
+Global skills live in `~/.kitcode/skills`; project skills live in `./.kitcode/skills`. Install one
+without leaving the TUI:
 
-Attachments support PNG, JPEG, GIF, and WebP images up to 10 MB, plus UTF-8 text files up to
-256 KB. Pasting or dragging a standalone existing path queues it automatically and displays a
-chip below the prompt. File contents are sent only when the attachment is submitted with a message.
+```text
+/skills install https://github.com/anthropics/skills/tree/main/skills/pdf
+/skills install @scope/some-skill
+/skills install ./my-skill
+/skills remove pdf
+```
+
+The whole skill folder is copied (symlinks are skipped). A link to a repository with several skills
+lists them so you can pick one by its path.
+
+Attachments support PNG, JPEG, GIF, and WebP images up to 10 MB, plus UTF-8 (or UTF-16) text
+files up to 256 KB. Pasting or dragging a standalone existing path queues it automatically and
+displays a chip below the prompt. File contents are sent only when the attachment is submitted with
+a message. Large or very tall images are scaled down to fit the API limits.
+
+Writing `@path/to/file` in a message sends that workspace file along with it. Mentions never reach
+outside the workspace and never pick up credentials (`.env`, keys, `~/.ssh`): attach those
+explicitly with `/attach` if you really mean to. If the model refuses an image (for example, it has
+no vision), the image is removed from the conversation so the next message still goes through.
 
 ## Development
 

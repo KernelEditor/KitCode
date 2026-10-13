@@ -9,21 +9,21 @@ export interface SlashCommand {
 const BUSY_SAFE = { runsWhileBusy: true } as const
 
 export const COMMANDS: SlashCommand[] = [
-  { name: 'model', ...BUSY_SAFE },
+  { name: 'model', args: '[model]', ...BUSY_SAFE },
   { name: 'login' },
   { name: 'provider' },
   { name: 'logout', args: '[provider]' },
   { name: 'key', args: '[provider]' },
   { name: 'refresh', args: '[provider]' },
   { name: 'effort', ...BUSY_SAFE },
-  { name: 'thinking', ...BUSY_SAFE },
+  { name: 'thinking', args: '[on|off]', ...BUSY_SAFE },
   { name: 'bell', args: '[on|off]', ...BUSY_SAFE },
   { name: 'context', args: '[tokens|auto]', ...BUSY_SAFE },
   { name: 'budget', args: '[tokens]', ...BUSY_SAFE },
   { name: 'theme', args: '[color]', ...BUSY_SAFE },
-  { name: 'lang', ...BUSY_SAFE },
-  { name: 'prompt', args: '[save <name>|delete <name>]' },
-  { name: 'skills', args: '[install <source>]' },
+  { name: 'lang', args: '[en|ru]', ...BUSY_SAFE },
+  { name: 'prompt', args: '[name|save [name]|delete [name]]' },
+  { name: 'skills', args: '[install <source>|remove [name]]' },
   { name: 'bypass' },
   { name: 'usage', ...BUSY_SAFE },
   { name: 'mcp', args: '[add|list|delete|enable|disable]' },
@@ -43,7 +43,9 @@ export const COMMANDS: SlashCommand[] = [
 ]
 
 const SUBCOMMANDS: SlashCommand[] = [
-  { name: 'mcp add', args: '<name> <url|-- command>' },
+  { name: 'skills install', args: '<github-url|npm-package|path>' },
+  { name: 'skills remove', args: '[name]' },
+  { name: 'mcp add', args: '<name> [-e K=V] [-H "N: V"] <url|-- command>' },
   { name: 'mcp list' },
   { name: 'mcp delete', args: '[name]' },
   { name: 'mcp enable', args: '[name]' },

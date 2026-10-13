@@ -2,6 +2,7 @@ import { renderToString } from 'ink'
 import type { ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
 import { PermissionPrompt, isDangerousCommand } from '../src/ui/components/PermissionPrompt'
+import { BubbleView } from '../src/ui/components/Transcript'
 import { PromptInput } from '../src/ui/components/PromptInput'
 import { diffLines } from '../src/ui/diff'
 import { highlightCode } from '../src/ui/highlight'
@@ -86,5 +87,24 @@ describe('prompt frame', () => {
     ), { columns: 60 })
     expect(output).toContain('plan only · shift+tab')
     expect(output).not.toContain('│')
+  })
+})
+
+describe('notices', () => {
+  const notice = (level: 'info' | 'warn' | 'error', text: string) =>
+    renderToString(wrap(<BubbleView bubble={{ kind: 'notice', id: 'n', level, text }} />), { columns: 40 })
+
+  it('marks warnings and errors with an icon and aligns wrapped lines under the text', () => {
+    const error = notice('error', '"anthropic" rejected this request (400 Bad Request)\nimage exceeds 5 MB')
+    const lines = error.split('\n')
+    expect(lines[1]).toBe('✗ "anthropic" rejected this request (400')
+    // Continuation lines sit under the text, not under the icon.
+    expect(lines[2]).toMatch(/^ {2,3}Bad Request\)$/)
+    expect(lines[3]).toBe('  image exceeds 5 MB')
+    expect(notice('warn', 'Context is 80% full')).toContain('▲ Context is 80% full')
+  })
+
+  it('keeps info without an icon', () => {
+    expect(notice('info', 'Model set')).toBe('\n  Model set')
   })
 })

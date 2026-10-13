@@ -15,7 +15,7 @@ export async function savePrompt(input: {
   description?: string
   body: string
 }): Promise<SavedPrompt> {
-  const slug = slugify(input.name)
+  const slug = promptSlug(input.name)
   if (!slug) throw new Error(`Prompt name has no letters or digits to name a file after: ${input.name}`)
   const prompt: SavedPrompt = {
     slug,
@@ -52,14 +52,19 @@ export async function listPrompts(): Promise<SavedPrompt[]> {
     if (!isMissing(error)) throw error
     return []
   }
+  // A file dropped in by hand with an odd name, or one that cannot be read,
+  // is skipped instead of taking the whole list down with it.
   const prompts = await Promise.all(
     names
-      .filter((name) => name.endsWith('.md'))
-      .map(async (name) =>
-        parse(name.slice(0, -3), await readFile(path.join(promptsDir, name), 'utf8')),
-      ),
+      .filter((name) => name.endsWith('.md') && validSlug(name.slice(0, -3)))
+      .map(async (name) => {
+        const text = await readFile(path.join(promptsDir, name), 'utf8').catch(() => null)
+        return text === null ? null : parse(name.slice(0, -3), text)
+      }),
   )
-  return prompts.sort((a, b) => a.name.localeCompare(b.name))
+  return prompts
+    .filter((prompt): prompt is SavedPrompt => prompt !== null)
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 export async function deletePrompt(slug: string): Promise<boolean> {
@@ -99,15 +104,30 @@ function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT'
 }
 
-function slugify(name: string): string {
-  return name
+// Device names Windows refuses as file names, with or without an extension.
+const RESERVED_NAMES = /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])$/
+
+/**
+ * File name for a prompt name. Letters of any script are kept, so "Ревью кода"
+ * becomes "ревью-кода" instead of an empty string (and an error).
+ */
+export function promptSlug(name: string): string {
+  const slug = name
+    .normalize('NFC')
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
     .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
+    .replace(/-+$/, '')
+  return RESERVED_NAMES.test(slug) ? `${slug}-prompt` : slug
+}
+
+function validSlug(slug: string): boolean {
+  return /^[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*$/u.test(slug) && !RESERVED_NAMES.test(slug)
 }
 
 function assertSlug(slug: string): void {
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+  if (!validSlug(slug)) {
     throw new Error(`Invalid prompt id: ${slug}`)
   }
 }

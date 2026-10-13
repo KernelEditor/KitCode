@@ -11,7 +11,7 @@ import {
 import { modelInfoFromRaw } from './model-info'
 import { pricingFor } from './pricing'
 import { parseRateLimits } from './rate-limits'
-import { emptyUsage, ProviderError } from './types'
+import { emptyUsage, INVALID_ARGUMENTS_KEY, ProviderError } from './types'
 import type {
   Effort,
   ChatRequest,
@@ -274,7 +274,7 @@ function toContentBlocks(
       type: 'tool_use',
       id: call.id || tmpId(position),
       name: call.name,
-      input: parseArguments(providerId, call.name, call.args),
+      input: parseArguments(call.args),
     })
   }
   return content
@@ -287,25 +287,20 @@ function toTextContentBlocks(thinking: string, text: string): ContentBlock[] {
   return content
 }
 
-function parseArguments(
-  providerId: string,
-  toolName: string,
-  args: string,
-): Record<string, unknown> {
+function parseArguments(args: string): Record<string, unknown> {
+  // Some endpoints send no arguments at all for a tool without parameters.
+  if (args.trim() === '') return {}
   let parsed: unknown
   try {
     parsed = JSON.parse(args)
   } catch {
-    throw new ProviderError(
-      `Tool "${toolName || 'unknown'}" returned malformed JSON arguments; the tool was not run.`,
-      providerId,
-    )
+    parsed = undefined
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new ProviderError(
-      `Tool "${toolName || 'unknown'}" arguments must be a JSON object; the tool was not run.`,
-      providerId,
-    )
+    // Not fatal: the agent hands this back to the model as a tool error so it
+    // can retry, instead of losing the whole reply (smaller and local models
+    // do this now and then).
+    return { [INVALID_ARGUMENTS_KEY]: args.slice(0, 300) }
   }
   return parsed as Record<string, unknown>
 }

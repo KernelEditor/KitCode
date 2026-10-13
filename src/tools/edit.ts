@@ -1,4 +1,5 @@
 import { readFile, stat } from 'node:fs/promises'
+import { protectedWritePermission } from './protected'
 import { resolveInside } from './safepath'
 import { atomicWriteSafeFile, readSafeFileSnapshot } from './safe-write'
 import type { SafeFileSnapshot } from './safe-write'
@@ -46,6 +47,7 @@ export const editTool: Tool = {
     additionalProperties: false,
   },
   defaultPermission: 'ask',
+  permission: protectedWritePermission,
   summarize(input) {
     return `edit(${brief((input as EditInput).path)})`
   },

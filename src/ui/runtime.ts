@@ -35,6 +35,7 @@ export interface Runtime {
   exportSession(id: string, destination?: string): Promise<string>
   listSkills(): { name: string; description: string }[]
   installSkill(source: string): Promise<{ name: string; dir: string; source: string }>
+  uninstallSkill(name: string): Promise<void>
   getModelRef(): string
   setModelRef(ref: string): Promise<void>
   readMemory(): string
@@ -83,11 +84,17 @@ export interface Runtime {
   refreshProviderModels(providerId: string): Promise<number>
   listPromptItems(): Promise<PickerItem[]>
   readPrompt(slug: string): Promise<string>
-  savePrompt(name: string, body: string): Promise<void>
-  deletePrompt(slug: string): Promise<void>
+  /** Saves (replacing a prompt of the same name) and returns its slug. */
+  savePrompt(name: string, body: string): Promise<string>
+  promptExists(name: string): Promise<boolean>
+  deletePrompt(name: string): Promise<void>
   loadSkill(name: string): Promise<string>
   loadAttachment(path: string): Promise<ContentBlock>
   loadAutomaticAttachment(path: string): Promise<ContentBlock | null>
+  /** An "@path" in a message: workspace files only, never credentials. */
+  loadMentionAttachment(path: string): Promise<ContentBlock | null>
+  /** The label a tool call gets in the transcript, e.g. "read(src/app.ts)". */
+  summarizeToolCall(name: string, input: unknown): string
   loadClipboardImage(): Promise<ContentBlock>
   compact(history: Message[], signal: AbortSignal): Promise<CompactResult>
   checkerReport(): Promise<string>

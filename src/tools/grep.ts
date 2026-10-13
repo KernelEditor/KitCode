@@ -95,7 +95,13 @@ export const grepTool: Tool = {
             size: entry.stats?.size ?? 0,
           }))
       : [{ absolute: safe.path, relative: safe.relative, size: target.size }]
-    const files = discovered.slice(0, MAX_FILES)
+    // Credentials are only searched when the call named them (and so went
+    // through the permission prompt); a broad pattern must not dump them.
+    const sensitiveRequested =
+      isSensitivePath(path) || isSensitivePath(safe.relative) || mentionsSensitivePattern(glob)
+    const files = (
+      sensitiveRequested ? discovered : discovered.filter((file) => !isSensitivePath(file.relative))
+    ).slice(0, MAX_FILES)
     const filesCapped = discovered.length > MAX_FILES
 
     const limit = Math.min(maxMatches ?? MAX_MATCHES, MAX_MATCHES)

@@ -139,6 +139,12 @@ export interface Provider {
   knownModels(): ModelInfo[]
 }
 
+/**
+ * Tool input key a provider sets when the model streamed arguments that do not
+ * parse; the agent turns it into a tool error the model can recover from.
+ */
+export const INVALID_ARGUMENTS_KEY = '__kitcode_invalid_arguments'
+
 export class ProviderError extends Error {
   constructor(
     message: string,

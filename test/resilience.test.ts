@@ -235,9 +235,13 @@ describe('transient provider faults', () => {
     })
     const events: StreamEvent[] = []
     const provider = createOpenAiProvider({ id: 'gateway', apiKey: 'test', baseUrl })
-    await expect((async () => {
+    const run = (async () => {
       for await (const event of provider.stream(chatRequest())) events.push(event)
-    })()).rejects.toThrow()
+    })()
+    // Broken tool JSON no longer fails the stream (the agent answers it with a
+    // tool error); either way the usage already billed must be kept.
+    if (failureMode === 'stream error') await expect(run).rejects.toThrow()
+    else await run
     expect(events.filter((event) => event.type === 'usage')).toEqual([
       { type: 'usage', usage: { input: 42, output: 7, cacheRead: 0, cacheWrite: 0 } },
     ])

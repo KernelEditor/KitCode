@@ -1,5 +1,6 @@
 import { mkdir, readFile, stat } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { protectedWritePermission } from './protected'
 import { resolveInside } from './safepath'
 import { atomicWriteSafeFile, readSafeFileSnapshot } from './safe-write'
 import type { SafeFileSnapshot } from './safe-write'
@@ -27,6 +28,7 @@ export const writeTool: Tool = {
     additionalProperties: false,
   },
   defaultPermission: 'ask',
+  permission: protectedWritePermission,
   summarize(input) {
     return `write(${brief((input as WriteInput).path)})`
   },

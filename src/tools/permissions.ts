@@ -44,6 +44,10 @@ export function createPermissionEngine(
       const configured = resolve(tool, requested)
       if (configured === 'deny') return 'deny'
       if (current === 'plan' && tool.readOnly !== true) return 'deny'
+      // A tool asks explicitly for this one call (a credential read, a write to
+      // kitcode.json or .git): a blanket "allow", accept mode or an earlier
+      // "always" must not wave it through. Only an explicit bypass does.
+      if (requested === 'ask') return bypassEnabled ? 'allow' : 'ask'
       if (configured === 'allow') return 'allow'
       if (bypassEnabled) return 'allow'
       if (current === 'accept' && isFileEdit(tool)) return 'allow'

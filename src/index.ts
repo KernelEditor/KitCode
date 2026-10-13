@@ -1,4 +1,5 @@
 import { Command } from 'commander'
+import { statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import type { AgentMode } from './tools/permissions'
 import { addProvider } from './app/add'
@@ -7,7 +8,7 @@ import { showConfig } from './app/configcmd'
 import { readApiKey } from './app/secret'
 import { listSessions, shortSessionId } from './core/session'
 import { startTui } from './app/tui'
-import { deletePrompt, listPrompts } from './prompts/library'
+import { deletePrompt, listPrompts, promptSlug } from './prompts/library'
 import { revokeWorkspaceTrust, trustWorkspace } from './config/trust'
 import { KITCODE_VERSION } from './version'
 
@@ -27,13 +28,9 @@ program
     if (options.mode && !MODES.includes(options.mode as AgentMode)) {
       throw new Error(`Unknown mode "${options.mode}". Use normal, accept or plan.`)
     }
-    let cwd = options.cwd
-    if (cwd) {
-      try {
-        cwd = resolve(cwd)
-      } catch {
-        
-      }
+    const cwd = options.cwd ? resolve(options.cwd) : undefined
+    if (cwd && !statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) {
+      throw new Error(`--cwd is not a directory: ${cwd}`)
     }
     await startTui({
       continueSession: options.continue,
@@ -131,9 +128,11 @@ prompts
 prompts
   .command('rm')
   .description('delete a saved prompt')
-  .argument('<slug>')
-  .action(async (slug: string) => {
-    console.log((await deletePrompt(slug)) ? `deleted ${slug}` : `no such prompt: ${slug}`)
+  .argument('<name>')
+  .action(async (name: string) => {
+    // Accepts the name as shown by "prompt list" as well as its slug.
+    const slug = promptSlug(name)
+    console.log(slug && (await deletePrompt(slug)) ? `deleted ${name}` : `no such prompt: ${name}`)
   })
 
 program.parseAsync(process.argv).catch((error: unknown) => {

@@ -67,12 +67,17 @@ export interface Strings {
   skillsInstallUsage: string
   skillsInstalling: (source: string) => string
   skillsInstalled: (name: string, source: string) => string
+  skillsRemoved: (name: string) => string
+  titleSkillsRemove: string
   mcpStatus: (connected: number, failed: number) => string
   mcpEmpty: string
   mcpAddUsage: string
   mcpAddInvalidName: string
   mcpAddInvalidUrl: string
   mcpAddHttpArgs: string
+  mcpAddInvalidEnv: string
+  mcpAddInvalidHeader: string
+  mcpAddOptionMismatch: string
   mcpExists: (name: string) => string
   mcpConnecting: (name: string) => string
   mcpAdded: (name: string, tools: number) => string
@@ -95,6 +100,9 @@ export interface Strings {
   attachUsage: string
   attachmentAdded: (name: string) => string
   attachmentsCleared: string
+  attachmentsLimit: (max: number) => string
+  attachmentsTooLarge: (mb: number) => string
+  mentionAttached: (name: string) => string
   compactNothing: string
   compactStarting: string
   compactDone: (summarised: number, cleared: number, before?: number, after?: number) => string
@@ -147,11 +155,19 @@ export interface Strings {
   promptUsage: string
   promptNothing: string
   promptSaved: (name: string) => string
-  promptDeleteUsage: string
+  promptDeleteAsk: (name: string) => string
+  promptOverwriteAsk: (name: string) => string
+  promptNameTitle: string
+  sessionNoMatch: (query: string) => string
+  sessionAmbiguous: (query: string, count: number) => string
+  sessionsUsage: string
+  modelNoMatch: (query: string) => string
+  memoryUsage: string
+  memoryEmpty: string
+  memoryClearAsk: string
+  memoryReplaceAsk: string
   promptDeleted: (name: string) => string
   promptNotFound: (name: string) => string
-  promptSaveAsk: string
-  promptSaveAskBody: string
   promptsEmpty: string
   unknownCommand: (name: string) => string
   didYouMean: (typed: string, guess: string) => string
@@ -211,7 +227,7 @@ const en: Strings = {
 
   noModel: 'no model',
   busy: 'working',
-  sessionFor: (elapsed) => `up ${elapsed}`,
+  sessionFor: (elapsed) => `session ${elapsed}`,
   workingFor: (elapsed) => `working ${elapsed}`,
   titleProvider: 'Provider',
   titleLogout: 'Sign out of a provider',
@@ -240,16 +256,22 @@ const en: Strings = {
   configAt: (path) => `config: ${path}`,
   skillsEmpty:
     'No skills installed. Drop a folder with a SKILL.md into ~/.kitcode/skills or ./.kitcode/skills',
-  skillsInstallUsage: 'Usage: /skills install <github-url|npm-package|local-path>',
+  skillsInstallUsage:
+    'Usage: /skills install <github-url|npm-package|local-path> · /skills remove [name]',
   skillsInstalling: (source) => `Installing skill from "${source}"…`,
   skillsInstalled: (name, source) => `Skill "${name}" installed from "${source}"`,
+  skillsRemoved: (name) => `Skill "${name}" removed`,
+  titleSkillsRemove: 'Remove skill',
   mcpStatus: (connected, failed) => `MCP: ${connected} connected, ${failed} failed`,
   mcpEmpty: 'No MCP servers configured.',
   mcpAddUsage:
-    'List: /mcp list · Enable/disable: /mcp enable|disable [name] · Delete: /mcp delete [name]\nRemote: /mcp add <name> <https://url>\nLocal: /mcp add <name> -- <command> [args]',
+    'List: /mcp list · Enable/disable: /mcp enable|disable [name] · Delete: /mcp delete [name]\nRemote: /mcp add <name> [-H "Name: value"] <https://url>\nLocal: /mcp add <name> [-e KEY=value] -- <command> [args]\nKeep secrets out of the config with ${env:VAR}, e.g. -H "Authorization: Bearer ${env:TOKEN}"',
   mcpAddInvalidName: 'MCP name may contain only letters, numbers, _ and - (up to 64 chars).',
   mcpAddInvalidUrl: 'MCP URL must use HTTPS (HTTP is allowed only for localhost).',
   mcpAddHttpArgs: 'An HTTP MCP accepts one URL and no command arguments.',
+  mcpAddInvalidEnv: 'Environment variables look like -e KEY=value.',
+  mcpAddInvalidHeader: 'Headers look like -H "Name: value".',
+  mcpAddOptionMismatch: '-e is for local (command) servers, -H is for remote (URL) servers.',
   mcpExists: (name) => `MCP server "${name}" already exists.`,
   mcpConnecting: (name) => `Connecting MCP "${name}"…`,
   mcpAdded: (name, tools) => `MCP "${name}" connected and saved · ${tools} tools`,
@@ -278,6 +300,9 @@ const en: Strings = {
     'Usage: /attach <image-or-text-file> · /attach clipboard · /attach clear',
   attachmentAdded: (name) => `Attached for the next message: ${name}`,
   attachmentsCleared: 'Pending attachments cleared.',
+  attachmentsLimit: (max) => `At most ${max} attachments can be queued for one message.`,
+  attachmentsTooLarge: (mb) => `Attachments for one message are limited to about ${mb} MB in total. Send these first or use smaller files.`,
+  mentionAttached: (name) => `Sending with this message: ${name}`,
   compactNothing: 'Not enough older conversation to compact yet.',
   compactStarting: 'Compacting context…',
   compactDone: (summarised, cleared, before, after) => [
@@ -286,7 +311,7 @@ const en: Strings = {
     cleared > 0 ? `${cleared} old tool outputs cleared` : '',
     before !== undefined && after !== undefined ? `~${tokens(before)} → ~${tokens(after)} tokens` : '',
   ].filter(Boolean).join(' · ') + '.',
-  sessionRenameUsage: 'Type the title after the command: /sessions rename <id> <title>',
+  sessionRenameUsage: 'Type the title after the command: /sessions rename [id] <title>',
   sessionRenamed: (title) => `Session renamed to "${title}".`,
   sessionDeleteAsk: 'The saved chat file will be deleted. This cannot be undone.',
   sessionDeleted: (id) => `Session ${id} deleted.`,
@@ -339,11 +364,19 @@ const en: Strings = {
   promptUsage: 'Usage: /prompt save <name>',
   promptNothing: 'Nothing to save yet — send a message first.',
   promptSaved: (name) => `Saved prompt "${name}"`,
-  promptDeleteUsage: 'Usage: /prompt delete <name>',
+  promptDeleteAsk: (name) => `Delete prompt "${name}"?`,
+  promptOverwriteAsk: (name) => `A prompt named "${name}" exists. Replace it?`,
+  promptNameTitle: 'Prompt name',
+  sessionNoMatch: (query) => `No saved session matches "${query}".`,
+  sessionAmbiguous: (query, count) => `"${query}" matches ${count} sessions; give more of the id.`,
+  sessionsUsage: 'Usage: /sessions [list|rename [id] <title>|delete [id|all]|export [id] [path]]',
+  modelNoMatch: (query) => `No single model matches "${query}"; pick one from the list.`,
+  memoryUsage: '/memory show · /memory set <text> · /memory clear',
+  memoryEmpty: 'Project memory is empty.',
+  memoryClearAsk: 'Clear project memory?',
+  memoryReplaceAsk: 'Replace all project memory notes with this text?',
   promptDeleted: (name) => `Deleted prompt "${name}"`,
   promptNotFound: (name) => `Prompt "${name}" not found.`,
-  promptSaveAsk: 'Save this as a prompt?',
-  promptSaveAskBody: 'The text will be saved to a file and can be loaded later with /prompt.',
   promptsEmpty: 'No saved prompts. Use /prompt save <name>.',
   unknownCommand: (name) => `Unknown command /${name}. Try /help`,
   didYouMean: (typed, guess) => `Unknown command /${typed}. Did you mean /${guess}?`,
@@ -453,7 +486,7 @@ const ru: Strings = {
 
   noModel: 'нет модели',
   busy: 'работаю',
-  sessionFor: (elapsed) => `в работе ${elapsed}`,
+  sessionFor: (elapsed) => `сессия ${elapsed}`,
   workingFor: (elapsed) => `думает ${elapsed}`,
   titleProvider: 'Провайдер',
   titleLogout: 'Выбрать API для выхода',
@@ -482,16 +515,22 @@ const ru: Strings = {
   configAt: (path) => `конфиг: ${path}`,
   skillsEmpty:
     'Скиллов нет. Положи папку с файлом SKILL.md в ~/.kitcode/skills или ./.kitcode/skills',
-  skillsInstallUsage: 'Использование: /skills install <github-url|npm-пакет|локальный-путь>',
+  skillsInstallUsage:
+    'Использование: /skills install <github-url|npm-пакет|локальный-путь> · /skills remove [имя]',
   skillsInstalling: (source) => `Устанавливаю скилл из "${source}"…`,
   skillsInstalled: (name, source) => `Скилл «${name}» установлен из "${source}"`,
+  skillsRemoved: (name) => `Скилл «${name}» удалён`,
+  titleSkillsRemove: 'Удалить скилл',
   mcpStatus: (connected, failed) => `MCP: подключено ${connected}, с ошибкой ${failed}`,
   mcpEmpty: 'MCP-серверы пока не добавлены.',
   mcpAddUsage:
-    'Список: /mcp list · Вкл/выкл: /mcp enable|disable [имя] · Удалить: /mcp delete [имя]\nУдалённый: /mcp add <имя> <https://url>\nЛокальный: /mcp add <имя> -- <команда> [аргументы]',
+    'Список: /mcp list · Вкл/выкл: /mcp enable|disable [имя] · Удалить: /mcp delete [имя]\nУдалённый: /mcp add <имя> [-H "Имя: значение"] <https://url>\nЛокальный: /mcp add <имя> [-e КЛЮЧ=значение] -- <команда> [аргументы]\nСекреты лучше не хранить в конфиге: ${env:VAR}, например -H "Authorization: Bearer ${env:TOKEN}"',
   mcpAddInvalidName: 'Имя MCP: только буквы, цифры, _ и - (до 64 символов).',
   mcpAddInvalidUrl: 'URL MCP должен использовать HTTPS (HTTP разрешён только для localhost).',
   mcpAddHttpArgs: 'Для HTTP MCP укажи один URL без аргументов команды.',
+  mcpAddInvalidEnv: 'Переменные окружения задаются так: -e КЛЮЧ=значение.',
+  mcpAddInvalidHeader: 'Заголовки задаются так: -H "Имя: значение".',
+  mcpAddOptionMismatch: '-e — для локальных (команда) серверов, -H — для удалённых (URL).',
   mcpExists: (name) => `MCP-сервер «${name}» уже существует.`,
   mcpConnecting: (name) => `Подключаю MCP «${name}»…`,
   mcpAdded: (name, tools) => `MCP «${name}» подключён и сохранён · инструментов: ${tools}`,
@@ -520,6 +559,9 @@ const ru: Strings = {
     'Использование: /attach <картинка-или-текстовый-файл> · /attach clipboard · /attach clear',
   attachmentAdded: (name) => `Прикреплено к следующему сообщению: ${name}`,
   attachmentsCleared: 'Ожидающие вложения убраны.',
+  attachmentsLimit: (max) => `К одному сообщению можно прикрепить не больше ${max} вложений.`,
+  attachmentsTooLarge: (mb) => `Вложения одного сообщения — не больше ~${mb} МБ в сумме. Отправь эти сначала или возьми файлы поменьше.`,
+  mentionAttached: (name) => `Отправляю вместе с сообщением: ${name}`,
   compactNothing: 'Пока недостаточно старых сообщений для сжатия контекста.',
   compactStarting: 'Сжатие контекста…',
   compactDone: (summarised, cleared, before, after) => [
@@ -528,7 +570,7 @@ const ru: Strings = {
     cleared > 0 ? `очищено старых выводов инструментов: ${cleared}` : '',
     before !== undefined && after !== undefined ? `~${tokens(before)} → ~${tokens(after)} токенов` : '',
   ].filter(Boolean).join(' · ') + '.',
-  sessionRenameUsage: 'Допиши название: /sessions rename <id> <название>',
+  sessionRenameUsage: 'Допиши название: /sessions rename [id] <название>',
   sessionRenamed: (title) => `Сессия переименована в «${title}».`,
   sessionDeleteAsk: 'Файл сохранённого чата будет удалён без возможности восстановления.',
   sessionDeleted: (id) => `Сессия ${id} удалена.`,
@@ -581,11 +623,19 @@ const ru: Strings = {
   promptUsage: 'Использование: /prompt save <имя>',
   promptNothing: 'Пока нечего сохранять — сначала отправь сообщение.',
   promptSaved: (name) => `Промт «${name}» сохранён`,
-  promptDeleteUsage: 'Использование: /prompt delete <имя>',
+  promptDeleteAsk: (name) => `Удалить промт «${name}»?`,
+  promptOverwriteAsk: (name) => `Промт «${name}» уже есть. Заменить?`,
+  promptNameTitle: 'Название промта',
+  sessionNoMatch: (query) => `Нет сохранённой сессии, подходящей под «${query}».`,
+  sessionAmbiguous: (query, count) => `«${query}» подходит к ${count} сессиям — уточни id.`,
+  sessionsUsage: 'Использование: /sessions [list|rename [id] <название>|delete [id|all]|export [id] [путь]]',
+  modelNoMatch: (query) => `Нет одной модели под «${query}» — выбери из списка.`,
+  memoryUsage: '/memory show · /memory set <текст> · /memory clear',
+  memoryEmpty: 'Память проекта пуста.',
+  memoryClearAsk: 'Очистить память проекта?',
+  memoryReplaceAsk: 'Заменить все заметки памяти проекта этим текстом?',
   promptDeleted: (name) => `Промт «${name}» удалён`,
   promptNotFound: (name) => `Промт «${name}» не найден.`,
-  promptSaveAsk: 'Сохранить как промт?',
-  promptSaveAskBody: 'Текст будет сохранён в файл и его можно будет загрузить позже через /prompt.',
   promptsEmpty: 'Сохранённых промтов нет. Используй /prompt save <имя>.',
   unknownCommand: (name) => `Неизвестная команда /${name}. Попробуй /help`,
   didYouMean: (typed, guess) => `Неизвестная команда /${typed}. Может быть /${guess}?`,

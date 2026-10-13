@@ -193,7 +193,14 @@ function closeAssistant(bubbles: Bubble[]): Bubble[] {
   )
 }
 
-export function fromHistory(messages: Message[]): TranscriptState {
+/**
+ * Rebuilds the transcript from saved messages. `summarize` gives tool calls the
+ * same label they had live ("read(src/app.ts)"), not just the tool name.
+ */
+export function fromHistory(
+  messages: Message[],
+  summarize: (name: string, input: unknown) => string = (name) => name,
+): TranscriptState {
   let state = emptyTranscript()
 
   for (const message of messages) {
@@ -230,7 +237,7 @@ export function fromHistory(messages: Message[]): TranscriptState {
               kind: 'tool',
               id: block.id,
               name: sanitizeTerminalText(block.name),
-              summary: sanitizeTerminalText(block.name),
+              summary: sanitizeTerminalText(safeSummary(summarize, block.name, block.input)),
               state: 'ok',
               content: '',
             },
@@ -295,5 +302,13 @@ function sanitizeDisplay(display: ToolDisplay | undefined): ToolDisplay | undefi
     path: sanitizeTerminalText(display.path),
     before: sanitizeTerminalText(display.before),
     after: sanitizeTerminalText(display.after),
+  }
+}
+
+function safeSummary(summarize: (name: string, input: unknown) => string, name: string, input: unknown): string {
+  try {
+    return summarize(name, input) || name
+  } catch {
+    return name
   }
 }

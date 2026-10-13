@@ -30,6 +30,8 @@ import {
   loadAttachment,
   loadAutomaticAttachment,
   loadClipboardImage as readClipboardImage,
+  loadMentionAttachment,
+  withoutImages,
 } from '../core/attachments'
 import {
   clearOldToolResults,
@@ -75,9 +77,9 @@ import type { Effort, Message, ModelInfo, ModelPricing, ProviderKind, RateLimits
 import { createPermissionEngine } from '../tools/permissions'
 import type { AgentMode } from '../tools/permissions'
 import { builtinTools, createToolRegistry } from '../tools/registry'
-import { deletePrompt, getPrompt, listPrompts, promptExists, savePrompt } from '../prompts/library'
+import { deletePrompt, getPrompt, listPrompts, promptExists, promptSlug, savePrompt } from '../prompts/library'
 import { discoverSkills, formatSkillCatalogue, loadSkill } from '../skills/library'
-import { installSkill } from '../skills/install'
+import { installSkill, uninstallSkill } from '../skills/install'
 import { createSkillTool } from '../tools/skill'
 import { createTaskTool } from '../tools/task'
 import type { Lang } from '../ui/i18n'
@@ -138,6 +140,12 @@ export async function boot(options: {
   const skillRoots = workspaceTrusted ? [projectSkillsDir(workspaceRoot), skillsDir] : [skillsDir]
   let skills = await discoverSkills(skillRoots)
   if (skills.length > 0) tools.register([createSkillTool(skills)])
+  const reloadSkills = async () => {
+    skills = await discoverSkills(skillRoots)
+    skillCatalogue = formatSkillCatalogue(skills)
+    tools.unregister(['skill'])
+    if (skills.length > 0) tools.register([createSkillTool(skills)])
+  }
 
   const mcp = createMcpManager(config.mcp)
   await mcp.connectAll()
@@ -151,6 +159,7 @@ export async function boot(options: {
     )
   }
   syncMcpTools()
+  mcp.onChange(syncMcpTools)
   for (const state of mcp.states()) {
     if (state.status === 'error') warnings.push(`MCP "${state.name}": ${state.error ?? 'failed'}`)
   }
@@ -879,18 +888,24 @@ export async function boot(options: {
       }))
     },
 
-    async readPrompt(slug) {
-      const prompt = await getPrompt(slug)
+    async readPrompt(name) {
+      const prompt = await getPrompt(promptSlug(name))
       return prompt?.body ?? ''
     },
 
     async savePrompt(name, body) {
-      await savePrompt({ name, body })
+      return (await savePrompt({ name, body })).slug
     },
 
-    async deletePrompt(slug) {
-      const ok = await deletePrompt(slug)
-      if (!ok) throw new Error(`Prompt "${slug}" not found.`)
+    async promptExists(name) {
+      const slug = promptSlug(name)
+      return slug !== '' && (await promptExists(slug))
+    },
+
+    async deletePrompt(name) {
+      // Accepts the name as typed ("Code review") as well as the slug.
+      const slug = promptSlug(name)
+      if (!slug || !(await deletePrompt(slug))) throw new Error(`Prompt "${name}" not found.`)
     },
 
     async loadSkill(name) {
@@ -901,15 +916,30 @@ export async function boot(options: {
 
     async installSkill(source) {
       const result = await installSkill(source)
-      skills = await discoverSkills(skillRoots)
-      skillCatalogue = formatSkillCatalogue(skills)
-      tools.unregister(['skill'])
-      if (skills.length > 0) tools.register([createSkillTool(skills)])
+      await reloadSkills()
       return result
+    },
+
+    async uninstallSkill(name) {
+      const meta = skills.find((skill) => skill.name === name)
+      if (!meta) throw new Error(`Skill "${name}" not found.`)
+      // Only skills KitCode installed are removed; project skills live in the
+      // repository and are deleted there like any other file.
+      if (path.dirname(meta.dir) !== skillsDir) {
+        throw new Error(`Skill "${name}" belongs to this project: delete ${meta.dir} instead.`)
+      }
+      await uninstallSkill(path.basename(meta.dir))
+      await reloadSkills()
     },
 
     async loadAttachment(requestedPath) {
       return (await loadAttachment(options.cwd, requestedPath)).block
+    },
+
+    summarizeToolCall: (name, input) => tools.get(name)?.summarize(input) ?? name,
+
+    async loadMentionAttachment(requestedPath) {
+      return (await loadMentionAttachment(options.cwd, requestedPath))?.block ?? null
     },
 
     async loadAutomaticAttachment(requestedPath) {
@@ -1034,6 +1064,19 @@ export async function boot(options: {
           })
         }
         return next
+      } catch (error) {
+        // A model without vision, or one that refuses this particular image
+        // (too big, odd format), fails the request; the image would then sit in
+        // the history and fail every message after it. Drop images and go on.
+        const recovered = signal.aborted ? null : imageRejection(error, history)
+        if (!recovered) throw error
+        hooks.onEvent({
+          type: 'notice',
+          level: 'error',
+          text: `${error instanceof Error ? error.message : String(error)}
+${recovered.removed === 1 ? 'The image was' : `${recovered.removed} images were`} removed from the conversation so the next message can go through. Send a description or a smaller image instead, or switch to a model that accepts images.`,
+        })
+        return recovered.messages
       } finally {
         try {
           await checkpoint.commit()
@@ -1083,6 +1126,15 @@ export async function boot(options: {
       }
     },
   }
+}
+
+export function imageRejection(error: unknown, history: Message[]): { messages: Message[]; removed: number } | null {
+  const status = (error as { status?: unknown })?.status
+  if (typeof status !== 'number' || ![400, 413, 415, 422].includes(status)) return null
+  const message = error instanceof Error ? error.message : String(error)
+  if (status !== 413 && !/image|vision|multi-?modal/i.test(message)) return null
+  const result = withoutImages(history)
+  return result.removed > 0 ? result : null
 }
 
 function preferredModel(models: ModelInfo[]): string | undefined {

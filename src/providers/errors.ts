@@ -291,11 +291,13 @@ function oneLine(text: string): string {
 }
 
 export function redactSecrets(text: string, knownSecrets: Iterable<string> = []): string {
-  let safe = text.replace(NAMED_SECRET, '$1[redacted]').replace(SECRET, '[redacted]')
+  // Known secrets go first: a pattern pass can redact part of a key and
+  // leave the rest behind where the exact match would no longer find it.
+  let safe = text
   for (const secret of knownSecrets) {
     if (secret.length >= 4) safe = safe.split(secret).join('[redacted]')
   }
-  return safe
+  return safe.replace(NAMED_SECRET, '$1[redacted]').replace(SECRET, '[redacted]')
 }
 
 function prop(value: unknown, key: string): unknown {

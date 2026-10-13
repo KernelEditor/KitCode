@@ -173,10 +173,23 @@ function parseFrontmatter(text: string): { fields: Record<string, string>; body:
   if (lines[0]?.trim() === '---') {
     let i = 1
     for (; i < lines.length && lines[i].trim() !== '---'; i++) {
-      const colon = lines[i].indexOf(':')
+      const line = lines[i]
+      // Only top-level keys; indented lines belong to the previous value.
+      if (/^\s/.test(line)) continue
+      const colon = line.indexOf(':')
       if (colon <= 0) continue
-      const key = lines[i].slice(0, colon).trim()
-      if (key === 'name' || key === 'description') fields[key] = lines[i].slice(colon + 1).trim()
+      const key = line.slice(0, colon).trim()
+      if (key !== 'name' && key !== 'description') continue
+      let value = line.slice(colon + 1).trim()
+      if (/^[>|][+-]?$/.test(value)) {
+        // YAML block scalar: the indented lines that follow are the value.
+        const block: string[] = []
+        while (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1]) && lines[i + 1].trim() !== '---') {
+          block.push(lines[++i].trim())
+        }
+        value = block.join(value.startsWith('|') ? '\n' : ' ')
+      }
+      fields[key] = value.replace(/^(["'])(.*)\1$/, '$2').trim()
     }
     bodyStart = Math.min(i + 1, lines.length)
   }

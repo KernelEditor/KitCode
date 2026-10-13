@@ -6,6 +6,7 @@ import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
 import { formatDuration } from '../time'
 import { sanitizeTerminalText } from '../sanitize'
+import { useTerminalSize } from '../terminal-size'
 import type { StatusBarProps } from '../types'
 
 const BAR_WIDTH = 12
@@ -111,11 +112,15 @@ export function StatusBar({ status }: StatusBarProps) {
       <Box width="100%" alignItems="flex-start">
         <Box flexGrow={1} flexShrink={1} flexWrap="wrap">
           {/* The separator travels with its item so a wrap never strands a lone dot. */}
+          {/* flexShrink 0: an item moves to the next line whole instead of
+              breaking mid-word ("claude-sonnet-" / "5") on a narrow terminal. */}
           {details.map((item, index) => (
-            <Text key={index}>
-              {index > 0 && <Text dimColor> · </Text>}
-              {item}
-            </Text>
+            <Box key={index} flexShrink={0}>
+              <Text>
+                {index > 0 && <Text dimColor> · </Text>}
+                {item}
+              </Text>
+            </Box>
           ))}
         </Box>
         <Box flexShrink={0} marginLeft={2}>
@@ -186,6 +191,9 @@ function ContextMeter({
   context: { window: number | null; used: number; exact: boolean }
 }) {
   const theme = useTheme()
+  const { columns } = useTerminalSize()
+  // Below ~80 columns the bar costs the line its other details; the figure stays.
+  const compact = columns < 80
   const { window: win, exact } = context
   // Before the first answer for this model there is no provider count yet;
   // nothing has been sent, so 0 is the honest figure.
@@ -204,6 +212,14 @@ function ContextMeter({
   const color = pct < 0.6 ? theme.ok : pct < 0.85 ? theme.warn : theme.error
   const percent = Math.round(pct * 100)
 
+  if (compact) {
+    return (
+      <Text>
+        <Text dimColor>ctx </Text>
+        <Text color={color} bold>{`${percent}%`}</Text>
+      </Text>
+    )
+  }
   return (
     <Text>
       <Text dimColor>ctx </Text>

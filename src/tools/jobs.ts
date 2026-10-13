@@ -1,8 +1,12 @@
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 
 const MAX_JOBS = 8
 const MAX_JOB_OUTPUT = 100_000
+// Finished jobs are kept for bash_output, but not forever: each holds up to
+// MAX_JOB_OUTPUT characters for the whole session.
+const MAX_FINISHED_JOBS = 16
 
 export type JobState = 'running' | 'exited' | 'killed'
 
@@ -34,6 +38,8 @@ export function startJob(command: string, cwd: string): { id: string } | { error
   if (live.length >= MAX_JOBS) {
     return { error: `At most ${MAX_JOBS} background commands can run at once.` }
   }
+  pruneFinishedJobs()
+  installExitCleanup()
 
   counter += 1
   const id = `bg-${counter}`
@@ -58,8 +64,11 @@ export function startJob(command: string, cwd: string): { id: string } | { error
   }
   jobs.set(id, job)
 
-  const collect = (chunk: Buffer) => {
-    const text = chunk.toString('utf8')
+  const collector = () => {
+    const decoder = new StringDecoder('utf8')
+    return (chunk: Buffer) => collect(decoder.write(chunk))
+  }
+  const collect = (text: string) => {
     const room = MAX_JOB_OUTPUT - job.buffer.length
     if (text.length <= room) {
       job.buffer += text
@@ -68,11 +77,14 @@ export function startJob(command: string, cwd: string): { id: string } | { error
     // Keep the newest output: a watcher left running all session would
     // otherwise freeze on the first screenful and hide its latest errors.
     job.truncated = true
-    job.buffer = (job.buffer + text).slice(-MAX_JOB_OUTPUT)
-    job.reported = Math.min(job.reported, job.buffer.length)
+    const combined = job.buffer + text
+    const dropped = combined.length - MAX_JOB_OUTPUT
+    job.buffer = combined.slice(dropped)
+    // The read offset moves with the buffer so unread output stays unread.
+    job.reported = Math.max(0, job.reported - dropped)
   }
-  child.stdout?.on('data', collect)
-  child.stderr?.on('data', collect)
+  child.stdout?.on('data', collector())
+  child.stderr?.on('data', collector())
 
   child.on('error', (error) => {
     job.buffer += `\nCommand failed to start: ${error.message}`
@@ -125,6 +137,32 @@ export function resetJobs(): void {
   killAllJobs()
   jobs.clear()
   counter = 0
+}
+
+// Jobs run in their own process group, so they outlive kitcode unless killed
+// explicitly. The normal shutdown path does that; a closed terminal (SIGHUP)
+// or SIGTERM skips it, so stop them there too and then die as the signal would.
+let exitCleanupInstalled = false
+
+function installExitCleanup(): void {
+  if (exitCleanupInstalled) return
+  exitCleanupInstalled = true
+  process.once('exit', killAllJobs)
+  for (const signal of ['SIGTERM', 'SIGHUP'] as const) {
+    const onSignal = () => {
+      killAllJobs()
+      process.off(signal, onSignal)
+      process.kill(process.pid, signal)
+    }
+    process.on(signal, onSignal)
+  }
+}
+
+function pruneFinishedJobs(): void {
+  const finished = [...jobs.values()].filter((job) => job.state !== 'running')
+  for (const job of finished.slice(0, Math.max(0, finished.length - MAX_FINISHED_JOBS + 1))) {
+    jobs.delete(job.id)
+  }
 }
 
 function summary(job: Job): JobSummary {

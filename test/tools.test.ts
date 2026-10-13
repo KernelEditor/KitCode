@@ -8,6 +8,7 @@ import { editTool } from '../src/tools/edit'
 import { grepTool } from '../src/tools/grep'
 import { PLAN_REFUSAL, createPermissionEngine } from '../src/tools/permissions'
 import { readTool } from '../src/tools/read'
+import { protectedWritePermission } from '../src/tools/protected'
 import { resolveInside } from '../src/tools/safepath'
 import type { Tool, ToolContext } from '../src/tools/types'
 import { writeTool } from '../src/tools/write'
@@ -106,7 +107,35 @@ describe('grep', () => {
   }, 2_000)
 })
 
+describe('grep sensitive files', () => {
+  it('skips credential files unless the call names them', async () => {
+    await writeFile(join(cwd, 'secrets.json'), '{"token": "needle-secret"}')
+    await writeFile(join(cwd, 'server.key'), 'needle-key')
+    await writeFile(join(cwd, 'notes.txt'), 'needle-plain')
+
+    const broad = await grepTool.execute({ pattern: 'needle' }, context())
+    expect(broad.content).toContain('notes.txt')
+    expect(broad.content).not.toContain('needle-secret')
+    expect(broad.content).not.toContain('needle-key')
+
+    // Naming the file goes through the permission prompt, so it is searched.
+    const named = await grepTool.execute({ pattern: 'needle', glob: 'secrets.json' }, context())
+    expect(named.content).toContain('needle-secret')
+  })
+})
+
 describe('bash', () => {
+  it('decodes a multi-byte character split across output chunks', async () => {
+    const script =
+      "const b=Buffer.from('\u043f\u0440\u0438\u0432\u0435\u0442');" +
+      'process.stdout.write(b.subarray(0,3));setTimeout(()=>process.stdout.write(b.subarray(3)),100)'
+    const result = await bashTool.execute(
+      { command: `${JSON.stringify(process.execPath)} -e ${JSON.stringify(script)}` },
+      context(),
+    )
+    expect(result.content).toBe('привет')
+  })
+
   it('does not spawn when the signal is already aborted', async () => {
     const controller = new AbortController()
     controller.abort()
@@ -334,6 +363,28 @@ describe('permission engine', () => {
 
     engine.bypass.disable()
     expect(engine.decide(tool('write', 'ask'))).toBe('ask')
+  })
+
+  it('keeps a call that asks for itself ahead of blanket approvals', () => {
+    const engine = createPermissionEngine({ write: 'allow' })
+    const write = tool('write', 'ask')
+    expect(engine.decide(write)).toBe('allow')
+    expect(engine.decide(write, 'ask')).toBe('ask')
+    engine.grantForSession('write')
+    engine.mode.set('accept')
+    expect(engine.decide(write, 'ask')).toBe('ask')
+    engine.bypass.enable()
+    expect(engine.decide(write, 'ask')).toBe('allow')
+  })
+
+  it('marks writes that would decide what runs later', () => {
+    const ctx = context()
+    for (const target of ['kitcode.json', 'sub/kitcode.json', '.kitcode/skills/x/SKILL.md', '.git/hooks/pre-commit', '.git/config', '.envrc']) {
+      expect(protectedWritePermission({ path: target }, ctx)).toBe('ask')
+    }
+    for (const target of ['src/app.ts', 'README.md', '.gitignore', 'docs/kitcode.md']) {
+      expect(protectedWritePermission({ path: target }, ctx)).toBeUndefined()
+    }
   })
 
   it('promotes ask to allow after a session grant', () => {

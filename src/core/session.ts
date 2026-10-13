@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
-import { readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { ensureDir, sessionsDir } from '../config/paths'
+import { checkpointsDir, ensureDir, sessionsDir } from '../config/paths'
 import { redactSecrets } from '../providers/errors'
 import type { ContentBlock, Message, Usage } from '../providers/types'
 import type { ContextUsage, SessionState, UsageEntry } from './types'
@@ -127,7 +127,15 @@ export async function deleteSession(query: string): Promise<string> {
     if (error.code === 'ENOENT') throw new Error(`Session no longer exists: ${id}`)
     throw error
   })
+  await removeCheckpoints(id)
   return id
+}
+
+// Undo checkpoints hold full copies of the files a session changed; they go
+// with the session instead of piling up in the home directory forever.
+async function removeCheckpoints(id: string): Promise<void> {
+  assertSessionId(id)
+  await rm(path.join(checkpointsDir, id), { recursive: true, force: true }).catch(() => undefined)
 }
 
 export async function deleteAllSessions(): Promise<DeleteAllSessionsResult> {
@@ -158,6 +166,7 @@ export async function deleteAllSessions(): Promise<DeleteAllSessionsResult> {
     const id = ids[index] as string
     if (result.status === 'fulfilled' || (result.reason as NodeJS.ErrnoException)?.code === 'ENOENT') {
       deleted.push(id)
+      await removeCheckpoints(id)
     } else {
       failed.push({
         id,

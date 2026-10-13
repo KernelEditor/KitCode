@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -21,7 +21,7 @@ const {
   deleteAllSessions,
   exportSession,
 } = await import('../src/core/session')
-const { getPrompt, listPrompts, savePrompt, searchPrompts, deletePrompt } = await import(
+const { getPrompt, listPrompts, promptSlug, savePrompt, searchPrompts, deletePrompt } = await import(
   '../src/prompts/library'
 )
 const { contextTokens, createUsageTracker, formatUsageCompact } = await import('../src/core/usage')
@@ -144,6 +144,30 @@ describe('prompt library', () => {
     expect((await searchPrompts('RELEASE')).map((prompt) => prompt.slug)).toEqual(['ship-it'])
     expect(await deletePrompt('ship-it')).toBe(true)
     expect(await deletePrompt('ship-it')).toBe(false)
+  })
+
+  it('names prompts in any script and never silently collapses them to one file', async () => {
+    expect(promptSlug('Ревью кода')).toBe('ревью-кода')
+    expect(promptSlug('Отчёт для команды!')).toBe('отчёт-для-команды')
+    expect(promptSlug('CON')).toBe('con-prompt')
+    expect(promptSlug('!!!')).toBe('')
+
+    await savePrompt({ name: 'Ревью кода', body: 'Проверь дифф.' })
+    await savePrompt({ name: 'Отчёт', body: 'Собери отчёт.' })
+    expect((await getPrompt('ревью-кода'))?.body).toBe('Проверь дифф.')
+    expect((await getPrompt('отчёт'))?.body).toBe('Собери отчёт.')
+    expect(await deletePrompt('ревью-кода')).toBe(true)
+    expect(await deletePrompt('отчёт')).toBe(true)
+  })
+
+  it('lists prompts even when a stray file sits in the folder', async () => {
+    await savePrompt({ name: 'Keep me', body: 'ok' })
+    await writeFile(path.join(promptsDir, 'Hand Made.md'), 'not a valid slug')
+    await mkdir(path.join(promptsDir, 'folder.md'))
+    expect((await listPrompts()).map((prompt) => prompt.name)).toContain('Keep me')
+    await rm(path.join(promptsDir, 'Hand Made.md'))
+    await rm(path.join(promptsDir, 'folder.md'), { recursive: true })
+    await deletePrompt('keep-me')
   })
 
   it('rejects path traversal ids and stores prompts privately', async () => {

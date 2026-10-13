@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
 import { startJob } from './jobs'
 import { brief } from './summary'
 import type { Tool, ToolResult } from './types'
@@ -79,9 +80,6 @@ export const bashTool: Tool = {
         cwd: ctx.cwd,
         detached: process.platform !== 'win32',
         stdio: ['ignore', 'pipe', 'pipe'],
-        
-        
-        
         windowsHide: true,
       })
 
@@ -102,15 +100,14 @@ export const bashTool: Tool = {
       }
       let captured = 0
       let truncated = false
-      const collect = (buf: Buffer) => {
-        if (truncated) return
-        
-        let text: string
-        try {
-          text = buf.toString('utf8')
-        } catch {
-          text = buf.toString()
-        }
+      // One decoder per stream: a multi-byte character (Cyrillic, emoji) split
+      // across two chunks would otherwise decode as replacement characters.
+      const collector = () => {
+        const decoder = new StringDecoder('utf8')
+        return (buf: Buffer) => collect(decoder.write(buf))
+      }
+      const collect = (text: string) => {
+        if (truncated || text === '') return
         progress(text)
         if (text.length > MAX_OUTPUT - captured) {
           chunks.push(text.slice(0, MAX_OUTPUT - captured))
@@ -120,8 +117,8 @@ export const bashTool: Tool = {
         chunks.push(text)
         captured += text.length
       }
-      child.stdout.on('data', collect)
-      child.stderr.on('data', collect)
+      child.stdout.on('data', collector())
+      child.stderr.on('data', collector())
 
       const killTree = () => {
         if (child.pid == null) return

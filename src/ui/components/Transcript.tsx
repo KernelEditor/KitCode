@@ -114,13 +114,7 @@ export const BubbleView = memo(function BubbleView({
   }
 
   if (bubble.kind === 'notice') {
-    const color =
-      bubble.level === 'error' ? theme.error : bubble.level === 'warn' ? theme.warn : theme.accent
-    return (
-      <Box marginTop={1}>
-        <Text color={color}>{bubble.text}</Text>
-      </Box>
-    )
+    return <NoticeView level={bubble.level} text={bubble.text} />
   }
 
   if (bubble.kind === 'assistant') {
@@ -220,6 +214,40 @@ function wrapVisualLine(line: string, columns: number): string[] {
   }
   if (current !== '' || rows.length === 0) rows.push(current)
   return rows
+}
+
+const NOTICE_ICONS = { warn: '▲', error: '✗' } as const
+
+// Errors and warnings get an icon and their colour on the headline; the
+// details below stay plain so a long provider message is still easy to read.
+// A one-line info ("model set", "attached x") is frequent and stays quiet; a
+// multi-line one is a listing the user asked for (/help, /usage) and stays
+// readable.
+function NoticeView({ level, text }: { level: 'info' | 'warn' | 'error'; text: string }) {
+  const theme = useTheme()
+  const newline = text.indexOf('\n')
+  const headline = newline === -1 ? text : text.slice(0, newline)
+  const details = newline === -1 ? '' : text.slice(newline + 1)
+
+  if (level === 'info') {
+    return (
+      <Box marginTop={1} paddingLeft={2}>
+        <Text dimColor={details === ''}>{text}</Text>
+      </Box>
+    )
+  }
+  const color = level === 'error' ? theme.error : theme.warn
+  return (
+    <Box marginTop={1}>
+      <Box width={2} flexShrink={0}>
+        <Text color={color} bold>{NOTICE_ICONS[level]}</Text>
+      </Box>
+      <Box flexDirection="column" flexShrink={1} minWidth={0}>
+        <Text color={color} bold={level === 'error'}>{headline}</Text>
+        {details !== '' && <Text>{details}</Text>}
+      </Box>
+    </Box>
+  )
 }
 
 function ToolView({ bubble }: { bubble: Extract<Bubble, { kind: 'tool' }> }) {

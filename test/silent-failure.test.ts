@@ -7,7 +7,7 @@ import type { AgentConfig } from '../src/core/agent'
 import type { AgentEvent, AgentHooks } from '../src/core/types'
 import { createAnthropicProvider } from '../src/providers/anthropic'
 import { createOpenAiProvider } from '../src/providers/openai-compat'
-import { ProviderError } from '../src/providers/types'
+import { INVALID_ARGUMENTS_KEY, ProviderError } from '../src/providers/types'
 import type { ChatRequest, Provider, StreamEvent } from '../src/providers/types'
 import type { Tool } from '../src/tools/types'
 
@@ -168,7 +168,7 @@ describe('legitimate turns still work', () => {
     expect(events.some((event) => event.type === 'tool_call')).toBe(true)
   })
 
-  it('rejects malformed tool arguments instead of executing an empty object', async () => {
+  it('marks malformed tool arguments instead of executing an empty object', async () => {
     const call = {
       index: 0,
       id: 'call_broken',
@@ -179,9 +179,12 @@ describe('legitimate turns still work', () => {
       await sseServer(sse({ tool_calls: [call] }, null) + sse({}, 'tool_calls')),
     )
 
-    const events = collect(provider.stream(chatRequest()))
-    await expect(events).rejects.toBeInstanceOf(ProviderError)
-    await expect(events).rejects.toThrow(/malformed JSON arguments; the tool was not run/)
+    // The reply survives; the agent answers the call with a tool error.
+    const events = await collect(provider.stream(chatRequest()))
+    expect(events.find((event) => event.type === 'done')).toMatchObject({
+      stopReason: 'tool_use',
+      content: [{ type: 'tool_use', id: 'call_broken', input: { [INVALID_ARGUMENTS_KEY]: '{"path":' } }],
+    })
   })
 
   it('treats a user cancellation during partial tool JSON as a normal cancellation', async () => {
@@ -204,7 +207,7 @@ describe('legitimate turns still work', () => {
     )
   })
 
-  it('rejects non-object JSON tool arguments', async () => {
+  it('marks non-object JSON tool arguments', async () => {
     const call = {
       index: 0,
       id: 'call_array',
@@ -215,9 +218,10 @@ describe('legitimate turns still work', () => {
       await sseServer(sse({ tool_calls: [call] }, null) + sse({}, 'tool_calls')),
     )
 
-    await expect(collect(provider.stream(chatRequest()))).rejects.toThrow(
-      /arguments must be a JSON object; the tool was not run/,
-    )
+    const events = await collect(provider.stream(chatRequest()))
+    expect(events.find((event) => event.type === 'done')).toMatchObject({
+      content: [{ type: 'tool_use', input: { [INVALID_ARGUMENTS_KEY]: '[]' } }],
+    })
   })
 
   it('accepts an SSE turn whose only text is whitespace', async () => {

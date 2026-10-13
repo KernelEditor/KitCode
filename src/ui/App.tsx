@@ -3,7 +3,7 @@ import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } fr
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTerminalSize } from './terminal-size'
 import { attachmentLabel, looksLikeAttachmentPath, splitAttachmentPaths } from '../core/attachments'
-import { parseMcpAddArgs } from '../mcp/add'
+import { parseMcpAddCommand } from '../mcp/add'
 import type { McpAddError } from '../mcp/add'
 import type { McpServerState } from '../mcp/client'
 import { createSpeedMeter, readSpeed, recordSpeed } from './speed'
@@ -41,6 +41,9 @@ const BELL_AFTER_MS = 15_000
 // Rows the hidden prompt input frees up for the sub-agent chat.
 const SUBAGENT_CHAT_EXTRA_ROWS = 4
 const MAX_ATTACHMENTS = 8
+// What one message may carry in attachments, as sent (base64 for images).
+// API requests are capped at 32 MB; past that the whole message is refused.
+const MAX_ATTACHMENT_PAYLOAD = 24_000_000
 
 // The windows every current frontier model is sold under. Anything else is still
 // reachable by typing the number: /context 400000
@@ -96,7 +99,7 @@ export function App({
   const { stdout } = useStdout()
   const { rows } = useTerminalSize()
   const [transcript, setTranscript] = useState(() =>
-    warnings.reduce((state, text) => pushNotice(state, 'warn', text), fromHistory(initialHistory)),
+    warnings.reduce((state, text) => pushNotice(state, 'warn', text), fromHistory(initialHistory, runtime.summarizeToolCall)),
   )
   const [transcriptRevision, setTranscriptRevision] = useState(0)
   const transcriptRef = useRef(transcript)
@@ -157,11 +160,17 @@ export function App({
 
   const appendAttachment = useCallback((block: ContentBlock): boolean => {
     if (attachmentsRef.current.length >= MAX_ATTACHMENTS) return false
+    // The same file dropped twice is one attachment, not two copies to pay for.
+    if (attachmentsRef.current.some((queued) => sameAttachment(queued, block))) return true
+    const payload = attachmentsRef.current.reduce((sum, queued) => sum + attachmentPayload(queued), 0)
+    if (payload + attachmentPayload(block) > MAX_ATTACHMENT_PAYLOAD) {
+      throw new Error(stringsFor(lang).attachmentsTooLarge(Math.round(MAX_ATTACHMENT_PAYLOAD / 1_000_000)))
+    }
     const next = [...attachmentsRef.current, block]
     attachmentsRef.current = next
     setAttachments(next)
     return true
-  }, [])
+  }, [lang])
 
   const flushTranscriptEvents = useCallback(() => {
     if (transcriptTimer.current !== null) {
@@ -400,10 +409,11 @@ export function App({
           try {
             const restored = await runtime.resumeSession(choice)
             history.current = restored
+            replaceAttachments([])
             setPromptHistory(inputHistoryFromMessages(restored))
             setTranscript(
               pushNotice(
-                fromHistory(restored),
+                fromHistory(restored, runtime.summarizeToolCall),
                 'info',
                 strings.resumed(choice.slice(-6), restored.length),
               ),
@@ -476,12 +486,21 @@ export function App({
             return
           }
 
+          const matching = (query: string) =>
+            items.filter((item) => item.key === query || item.key.includes(query))
           let id = action ? rest[1] : undefined
+          // The id is optional for rename and export: "/sessions rename New title"
+          // and "/sessions export ./out.md" pick the session from a list instead.
+          let argsFrom = 2
+          if (id && (action === 'rename' || action === 'export') && matching(id).length === 0) {
+            id = undefined
+            argsFrom = 1
+          }
           if (!id) id = (await pick(strings.titleSessions, items)) ?? undefined
           if (!id) return
-          const matches = items.filter((item) => item.key === id || item.key.includes(id as string))
+          const matches = matching(id)
           if (matches.length !== 1) {
-            notice('warn', `No saved session matches "${id}".`)
+            notice('warn', matches.length === 0 ? strings.sessionNoMatch(id) : strings.sessionAmbiguous(id, matches.length))
             return
           }
           id = matches[0]?.key ?? id
@@ -504,13 +523,13 @@ export function App({
               replaceAttachments([])
               setPromptHistory(inputHistoryFromMessages(restored))
               setTranscript(
-                pushNotice(fromHistory(restored), 'info', strings.resumed(id.slice(-6), restored.length)),
+                pushNotice(fromHistory(restored, runtime.summarizeToolCall), 'info', strings.resumed(id.slice(-6), restored.length)),
               )
               setTranscriptRevision((revision) => revision + 1)
               sessionStart.current = Date.now()
               turns.current = 0
             } else if (action === 'rename') {
-              const title = rest.slice(2).join(' ').trim()
+              const title = rest.slice(argsFrom).join(' ').trim()
               if (!title) {
                 setInput(`/sessions rename ${id} `)
                 notice('info', strings.sessionRenameUsage)
@@ -538,10 +557,10 @@ export function App({
                 notice('info', deletedMessage)
               }
             } else if (action === 'export') {
-              const destination = unquoteArg(rest.slice(2).join(' ').trim()) || undefined
+              const destination = unquoteArg(rest.slice(argsFrom).join(' ').trim()) || undefined
               notice('info', strings.sessionExported(await runtime.exportSession(id, destination)))
             } else {
-              notice('warn', 'Usage: /sessions [list|rename|delete [all]|export]')
+              notice('warn', strings.sessionsUsage)
               return
             }
           } catch (error) {
@@ -709,10 +728,13 @@ export function App({
         }
 
         case 'lang': {
-          const choice = await pick(
-            strings.titleLang,
-            LANGS.map((entry) => ({ key: entry.key, label: entry.label })),
-          )
+          const typed = rawRest.toLowerCase()
+          const choice = LANGS.some((entry) => entry.key === typed)
+            ? typed
+            : await pick(
+                strings.titleLang,
+                LANGS.map((entry) => ({ key: entry.key, label: entry.label })),
+              )
           if (!choice) return
           await runtime.setLang(choice as Lang)
           setLang(choice as Lang)
@@ -737,6 +759,36 @@ export function App({
             } catch (error) {
               notice('error', error instanceof Error ? error.message : String(error))
             }
+            return
+          }
+
+          if (action === 'remove' || action === 'uninstall') {
+            let name: string | undefined = rest[1]
+            if (!name) {
+              const installed = runtime.listSkills()
+              if (installed.length === 0) {
+                notice('info', strings.skillsEmpty)
+                return
+              }
+              name =
+                (await pick(
+                  strings.titleSkillsRemove,
+                  installed.map((skill) => ({ key: skill.name, label: skill.name, hint: skill.description || undefined })),
+                )) ?? undefined
+              if (!name) return
+            }
+            try {
+              await runtime.uninstallSkill(name)
+              notice('info', strings.skillsRemoved(name))
+              forceRender((n) => n + 1)
+            } catch (error) {
+              notice('error', error instanceof Error ? error.message : String(error))
+            }
+            return
+          }
+
+          if (action) {
+            notice('warn', strings.skillsInstallUsage)
             return
           }
 
@@ -814,7 +866,8 @@ export function App({
         case 'mcp': {
           const action = rest[0]?.toLowerCase()
           if (action === 'add') {
-            const parsed = parseMcpAddArgs(rest.slice(1))
+            // Quoted words keep their spaces: paths, header values, env values.
+            const parsed = parseMcpAddCommand(rawRest.replace(/^\S+\s*/, ''))
             if (!parsed.ok) {
               const problem = mcpAddProblem(strings, parsed.error)
               notice(
@@ -965,7 +1018,7 @@ export function App({
           }
           if (rawRest.toLowerCase() === 'clipboard') {
             if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
-              notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+              notice('warn', strings.attachmentsLimit(MAX_ATTACHMENTS))
               return
             }
             if (clipboardPasteTask.current) return
@@ -998,7 +1051,7 @@ export function App({
             return
           }
           if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
-            notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+            notice('warn', strings.attachmentsLimit(MAX_ATTACHMENTS))
             return
           }
           try {
@@ -1027,7 +1080,7 @@ export function App({
               history.current = result.history
               setPromptHistory(inputHistoryFromMessages(result.history))
               setTranscript(
-                pushNotice(fromHistory(result.history), 'info', strings.compactDone(result.removedMessages, result.clearedToolResults ?? 0, result.tokensBefore, result.tokensAfter)),
+                pushNotice(fromHistory(result.history, runtime.summarizeToolCall), 'info', strings.compactDone(result.removedMessages, result.clearedToolResults ?? 0, result.tokensBefore, result.tokensAfter)),
               )
               setTranscriptRevision((revision) => revision + 1)
               await runtime.persist(result.history)
@@ -1103,14 +1156,24 @@ export function App({
         }
 
         case 'bell': {
-          const next = rawRest === 'on' ? true : rawRest === 'off' ? false : !runtime.getBell()
+          const setting = rawRest.toLowerCase()
+          if (setting !== '' && setting !== 'on' && setting !== 'off') {
+            notice('warn', '/bell [on|off]')
+            return
+          }
+          const next = setting === 'on' ? true : setting === 'off' ? false : !runtime.getBell()
           await runtime.setBell(next)
           notice('info', strings.bellState(next))
           return
         }
 
         case 'thinking': {
-          const next = !runtime.getThinking()
+          const setting = rawRest.toLowerCase()
+          if (setting !== '' && setting !== 'on' && setting !== 'off') {
+            notice('warn', '/thinking [on|off]')
+            return
+          }
+          const next = setting === '' ? !runtime.getThinking() : setting === 'on'
           await runtime.setThinking(next)
           notice('info', strings.reasoning(next))
           forceRender((n) => n + 1)
@@ -1118,15 +1181,25 @@ export function App({
         }
 
         case 'memory': {
-          if (rawRest === 'clear') {
-            if (await ask(lang === 'ru' ? 'Очистить память проекта?' : 'Clear project memory?')) await runtime.clearMemory()
-          } else if (rawRest.startsWith('set ')) {
-            await runtime.saveMemory(rawRest.slice(4).trim())
-          } else if (rawRest !== '' && rawRest !== 'show') {
-            notice('warn', '/memory show | /memory set <text> | /memory clear')
+          const sub = rawRest.split(/\s+/)[0] ?? ''
+          const action = sub.toLowerCase()
+          if (action === 'clear') {
+            if (!(await ask(strings.memoryClearAsk, undefined, true))) return
+            await runtime.clearMemory()
+          } else if (action === 'set') {
+            const text = rawRest.slice(sub.length).trim()
+            if (!text) {
+              notice('warn', strings.memoryUsage)
+              return
+            }
+            // set replaces every note, including ones the agent saved.
+            if (runtime.readMemory() && !(await ask(strings.memoryReplaceAsk, undefined, true))) return
+            await runtime.saveMemory(text)
+          } else if (action !== '' && action !== 'show') {
+            notice('warn', strings.memoryUsage)
             return
           }
-          notice('info', runtime.readMemory() || (lang === 'ru' ? 'Память проекта пуста.' : 'Project memory is empty.'))
+          notice('info', runtime.readMemory() || strings.memoryEmpty)
           return
         }
 
@@ -1146,7 +1219,8 @@ export function App({
         case 'budget': {
           const current = runtime.getMaxTokensPerTurn()
           if (rest[0]) {
-            const tokens = Number(rest[0])
+            // Same notation as /context: 500000, 500k or 1.5m.
+            const tokens = rest[0] === '0' ? 0 : (parseContextTokens(rest[0]) ?? Number.NaN)
             if (tokens === 0) {
               await runtime.setMaxTokensPerTurn(0)
               notice('info', strings.budgetUnlimited)
@@ -1222,7 +1296,17 @@ export function App({
             notice('warn', strings.noModels)
             return
           }
-          const choice = await pick(strings.titleModel, items)
+          // "/model <ref>" or an unambiguous part of one picks it directly.
+          const typed = rawRest.toLowerCase()
+          const direct = typed
+            ? (items.find((item) => item.key.toLowerCase() === typed) ??
+               (() => {
+                 const partial = items.filter((item) => item.key.toLowerCase().includes(typed))
+                 return partial.length === 1 ? partial[0] : undefined
+               })())
+            : undefined
+          if (typed && !direct) notice('warn', strings.modelNoMatch(rawRest))
+          const choice = direct?.key ?? (await pick(strings.titleModel, items))
           if (!choice) return
           await runtime.setModelRef(choice)
           notice('info', strings.modelSet(choice))
@@ -1254,82 +1338,65 @@ export function App({
         case 'prompt': {
           const sub = rest[0]?.toLowerCase()
 
+          // Saving never replaces another prompt without asking first.
+          const savePromptAs = async (name: string, body: string) => {
+            if ((await runtime.promptExists(name)) && !(await ask(strings.promptOverwriteAsk(name), undefined, true))) {
+              return
+            }
+            await runtime.savePrompt(name, body)
+            notice('info', strings.promptSaved(name))
+          }
+
           if (sub === 'save') {
-            const name = rest.slice(1).join(' ').trim()
-            if (name) {
-              
-              const body = lastUserText(history.current)
-              if (!body) {
-                notice('warn', strings.promptNothing)
-                return
-              }
-              await runtime.savePrompt(name, body)
-              notice('info', strings.promptSaved(name))
+            // Newest first: the message just sent is the one usually wanted.
+            const recent = recentUserMessages(history.current, 20).reverse()
+            if (recent.length === 0) {
+              notice('warn', strings.promptNothing)
               return
             }
-            
-            const recent = recentUserMessages(history.current, 20)
-            if (recent.length > 0) {
-              const items: PickerItem[] = recent.map((text, i) => ({
-                key: `__recent_${i}__`,
+            const typedName = rest.slice(1).join(' ').trim()
+            if (typedName) {
+              await savePromptAs(typedName, lastUserText(history.current))
+              return
+            }
+            const choice = await pick(
+              strings.titlePrompts,
+              recent.map((text, index) => ({
+                key: String(index),
                 label: text.length > 60 ? `${text.slice(0, 60)}…` : text,
-                hint: text.length > 60 ? undefined : undefined,
-              }))
-              items.push({ key: '__custom__', label: '— type a custom prompt —' })
-              const choice = await pick(strings.titlePrompts, items)
-              if (!choice) return
-              if (choice === '__custom__') {
-                setInput('/prompt save ')
-                return
-              }
-              const index = parseInt(choice.replace('__recent_', '').replace('__', ''), 10)
-              const body = recent[index] ?? ''
-              if (!body) {
-                notice('warn', strings.promptNothing)
-                return
-              }
-              if (!(await ask(strings.promptSaveAsk, strings.promptSaveAskBody))) return
-              
-              const defaultName = body.split(/\s+/).slice(0, 4).join('-').replace(/[^a-z0-9-]/gi, '').toLowerCase()
-              const nameInput = `${defaultName || 'prompt'}`
-              
-              await runtime.savePrompt(nameInput, body)
-              notice('info', `${strings.promptSaved(nameInput)}\nRename the file if you want a different name.`)
-              return
-            }
-            notice('warn', strings.promptNothing)
+              })),
+            )
+            if (!choice) return
+            const body = recent[Number(choice)]
+            if (!body) return
+            const name = (await promptInput(strings.promptNameTitle))?.trim()
+            if (!name) return
+            await savePromptAs(name, body)
             return
           }
 
           if (sub === 'delete') {
-            const name = rest.slice(1).join(' ').trim()
-            if (name) {
-              try {
-                await runtime.deletePrompt(name)
-                notice('info', strings.promptDeleted(name))
-              } catch (error) {
-                notice('error', error instanceof Error ? error.message : String(error))
+            let name: string | undefined = rest.slice(1).join(' ').trim() || undefined
+            if (!name) {
+              const items = await runtime.listPromptItems()
+              if (items.length === 0) {
+                notice('info', strings.promptsEmpty)
+                return
               }
-              return
+              name = (await pick(strings.titlePrompts, items)) ?? undefined
+              if (!name) return
             }
-            const items = await runtime.listPromptItems()
-            if (items.length === 0) {
-              notice('info', strings.promptsEmpty)
-              return
-            }
-            const choice = await pick(strings.titlePrompts, items)
-            if (!choice) return
-            if (!(await ask(strings.promptDeleteUsage.replace('Usage: ', '').replace('<name>', choice || '') + '?', strings.sessionDeleteAsk, true))) return
-            try {
-              await runtime.deletePrompt(choice)
-              notice('info', strings.promptDeleted(choice))
-            } catch (error) {
-              notice('error', error instanceof Error ? error.message : String(error))
-            }
+            if (!(await ask(strings.promptDeleteAsk(name), undefined, true))) return
+            await runtime.deletePrompt(name)
+            notice('info', strings.promptDeleted(name))
             return
           }
 
-          
+          // "/prompt <name>" inserts that prompt straight away.
+          if (rawRest && (await runtime.promptExists(rawRest))) {
+            setInput(await runtime.readPrompt(rawRest))
+            return
+          }
           const items = await runtime.listPromptItems()
           if (items.length === 0) {
             notice('info', strings.promptsEmpty)
@@ -1453,11 +1520,12 @@ export function App({
   const tryQueueAutomaticAttachment = useCallback(
     (requestedPath: string): Promise<boolean> => {
       if (!looksLikeAttachmentPath(requestedPath)) return Promise.resolve(false)
-      if (automaticAttachmentTask.current) {
-        return automaticAttachmentTask.current.then(() => false)
-      }
+      // Two paths pasted in quick succession: the second waits for the first
+      // instead of falling through and being sent to the model as plain text.
+      const running = automaticAttachmentTask.current
+      if (running) return running.then(() => tryQueueAutomaticAttachmentRef.current(requestedPath))
       if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
-        notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+        notice('warn', strings.attachmentsLimit(MAX_ATTACHMENTS))
         return Promise.resolve(true)
       }
 
@@ -1472,7 +1540,7 @@ export function App({
             if (automaticAttachmentTask.current !== task) return true
             if (!block) continue
             if (!appendAttachment(block)) {
-              notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+              notice('warn', strings.attachmentsLimit(MAX_ATTACHMENTS))
               return true
             }
             added += 1
@@ -1499,6 +1567,9 @@ export function App({
     [appendAttachment, notice, runtime, strings],
   )
 
+  const tryQueueAutomaticAttachmentRef = useRef(tryQueueAutomaticAttachment)
+  tryQueueAutomaticAttachmentRef.current = tryQueueAutomaticAttachment
+
   const listWorkspaceFiles = useCallback(
     (query: string) => runtime.listWorkspaceFiles(query).catch(() => []),
     [runtime],
@@ -1507,7 +1578,7 @@ export function App({
   const pasteClipboardImage = useCallback(() => {
     if (clipboardPasteTask.current) return
     if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
-      notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+      notice('warn', strings.attachmentsLimit(MAX_ATTACHMENTS))
       return
     }
     const task = runtime
@@ -1515,7 +1586,7 @@ export function App({
       .then((block) => {
         if (clipboardPasteTask.current !== task) return
         if (!appendAttachment(block)) {
-          notice('warn', `At most ${MAX_ATTACHMENTS} attachments can be queued for one message.`)
+          notice('warn', strings.attachmentsLimit(MAX_ATTACHMENTS))
           return
         }
         notice('info', strings.attachmentAdded(attachmentLabel(block) ?? 'clipboard image'))
@@ -1585,9 +1656,14 @@ export function App({
       for (const path of extractMentions(text)) {
         if (queuedAttachments.length + mentioned.length >= MAX_ATTACHMENTS) break
         try {
-          mentioned.push(await runtime.loadAttachment(path))
-        } catch {
-          // Not a readable file — leave the word alone and send it as text.
+          const block = await runtime.loadMentionAttachment(path)
+          if (!block) continue
+          mentioned.push(block)
+          notice('info', strings.mentionAttached(attachmentLabel(block) ?? path))
+        } catch (error) {
+          // Credentials are refused out loud; anything else that is not a
+          // readable file simply stays a word in the text.
+          if (error instanceof Error && !(error as NodeJS.ErrnoException).code) notice('warn', error.message)
         }
       }
       if (generation !== attachmentGeneration.current) return
@@ -1892,6 +1968,12 @@ function mcpAddProblem(strings: Strings, error: McpAddError): string {
       return strings.mcpAddInvalidUrl
     case 'http-args':
       return strings.mcpAddHttpArgs
+    case 'invalid-env':
+      return strings.mcpAddInvalidEnv
+    case 'invalid-header':
+      return strings.mcpAddInvalidHeader
+    case 'option-mismatch':
+      return strings.mcpAddOptionMismatch
     case 'usage':
       return strings.mcpAddUsage
   }
@@ -1909,6 +1991,18 @@ function formatBalances(
   balances: Array<{ amount: string; currency: string }>,
 ): string {
   return balances.map((item) => `${item.amount} ${item.currency}`).join(' · ')
+}
+
+function attachmentPayload(block: ContentBlock): number {
+  if (block.type === 'image') return block.data.length
+  if (block.type === 'file') return Buffer.byteLength(block.text)
+  return 0
+}
+
+function sameAttachment(a: ContentBlock, b: ContentBlock): boolean {
+  if (a.type === 'image' && b.type === 'image') return a.name === b.name && a.data === b.data
+  if (a.type === 'file' && b.type === 'file') return a.name === b.name && a.text === b.text
+  return false
 }
 
 function lastUserText(messages: Message[]): string {
