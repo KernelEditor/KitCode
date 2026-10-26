@@ -421,6 +421,31 @@ describe('subagent runner', () => {
     expect(answer).toBe(summary)
   })
 
+  it('returns the findings even when the model calls a tool on its last step', async () => {
+    const calls: string[] = []
+    const { provider, requests } = scripted([
+      ...Array.from({ length: MAX_SUBAGENT_STEPS - 1 }, (_, index) =>
+        callTurn(`c${index}`, 'read', { path: 'src/a.ts' }),
+      ),
+      callTurn('clast', 'read', { path: 'src/b.ts' }, 'Almost done, one more file.'),
+      answerTurn('foo is defined in src/a.ts:1.'),
+    ])
+    const runner = createSubagentRunner(makeConfigWith(provider), lookupOf([fakeRead(calls)]))
+
+    const answer = await runner.run({
+      prompt: 'find foo',
+      signal: new AbortController().signal,
+      onProgress: () => {},
+    })
+
+    expect(requests).toHaveLength(MAX_SUBAGENT_STEPS + 1)
+    expect(calls).toHaveLength(MAX_SUBAGENT_STEPS - 1)
+    expect(requests.at(-1)?.messages.at(-1)?.content).toMatchObject([
+      { type: 'tool_result', toolUseId: 'clast', isError: true },
+    ])
+    expect(answer).toBe('foo is defined in src/a.ts:1.')
+  })
+
   it('caps a runaway tool loop instead of calling the model forever', async () => {
     let id = 0
     const calls: string[] = []

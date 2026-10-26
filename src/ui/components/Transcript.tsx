@@ -2,7 +2,6 @@ import { useTerminalSize } from '../terminal-size'
 import { Box, Static, Text } from 'ink'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import Spinner from 'ink-spinner'
 import stringWidth from 'string-width'
 import { diffLines, truncate } from '../diff'
 import { Markdown } from '../markdown'
@@ -180,9 +179,7 @@ function AssistantView({ bubble: source, maxRows }: { bubble: AssistantBubble; m
       )}
       {bubble.streaming ? <Text>{frameText}</Text> : <Markdown>{bubble.text}</Markdown>}
       {bubble.streaming && bubble.text === '' && (
-        <Text dimColor>
-          <Spinner type="dots" /> thinking
-        </Text>
+        <Text dimColor>thinking…</Text>
       )}
     </Box>
   )

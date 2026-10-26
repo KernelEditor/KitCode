@@ -97,6 +97,14 @@ export const configSchema = z.object({
   // Manual override for the model's context window. Unset means the window
   // comes from the provider catalogue or the endpoint's model list.
   contextWindow: z.number().int().min(1_000).max(10_000_000).optional(),
+  // Extra instructions appended to the built-in system prompt on every turn.
+  systemPrompt: z.string().max(20_000).optional(),
+  // When false, systemPrompt is kept in the config but not sent to the model.
+  systemPromptEnabled: z.boolean().default(true),
+  // Hard cap on model calls in one turn. Higher values let large refactors
+  // finish; 0 disables the cap entirely (use with care — a runaway loop will
+  // keep burning tokens until you press Esc).
+  maxTurnSteps: z.number().int().min(0).max(1_000).default(256),
   maxTokens: z.number().int().positive().max(200_000).default(64_000),
   budget: budgetSchema.default({
     maxTokensPerTurn: 10_000_000,

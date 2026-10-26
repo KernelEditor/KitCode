@@ -54,6 +54,7 @@ export function createSubagentRunner(
       if (request.signal.aborted) return SUBAGENT_CANCELLED
 
       let steps = 0
+      let finalCall = false
       const executionLane = createExecutionLane()
       const modelRequestLane = createExecutionLane()
       const base = makeConfig(SUBAGENT_SYSTEM, tools)
@@ -67,11 +68,12 @@ export function createSubagentRunner(
           kind: base.provider.kind,
           listModels: () => base.provider.listModels(),
           knownModels: () => base.provider.knownModels(),
-          // Keep the tool definitions on the last call: the history holds
+          // The final model call keeps the tool schemas (the history holds
           // tool_use/tool_result blocks, and providers reject those without
-          // tools (Anthropic: 400 "must define tools"). Calls made anyway are
-          // refused by tools.get below.
-          stream: (chat) => base.provider.stream(steps === MAX_SUBAGENT_STEPS
+          // tools), but the system prompt forbids more calls and tools.get
+          // returns a stopped stub: a call made anyway ends the turn with a
+          // tool_result, instead of aborting mid-request and losing the text.
+          stream: (chat) => base.provider.stream(finalCall
             ? {
                 ...chat,
                 system: `${chat.system}\n\nThis is your last model call. Do not call tools. Return your findings now, clearly stating any unfinished work.`,
@@ -79,8 +81,21 @@ export function createSubagentRunner(
             : chat),
         },
         tools: {
-          get: (name) =>
-            name === TASK_TOOL_NAME || steps >= MAX_SUBAGENT_STEPS ? undefined : base.tools.get(name),
+          get: (name) => {
+            if (name === TASK_TOOL_NAME) return undefined
+            const tool = base.tools.get(name)
+            if (!tool) return undefined
+            if (!finalCall) return tool
+            return {
+              ...tool,
+              permission: () => 'allow',
+              execute: () =>
+                Promise.resolve({
+                  content: 'Tool budget exhausted: this was your last model call. Write the final answer now from what you already gathered.',
+                  isError: true,
+                }),
+            }
+          },
           schemas: () =>
             base.tools.schemas().filter((schema) => schema.name !== TASK_TOOL_NAME),
         },
@@ -92,7 +107,11 @@ export function createSubagentRunner(
 
       const hooks: AgentHooks = {
         onEvent(event) {
-          if (event.type === 'turn_start' && ++steps > MAX_SUBAGENT_STEPS) limit.abort()
+          if (event.type === 'turn_start') {
+            ++steps
+            if (steps > MAX_SUBAGENT_STEPS + 1) limit.abort()
+            else if (steps >= MAX_SUBAGENT_STEPS) finalCall = true
+          }
           if (event.type === 'tool_start') request.onProgress(brief(event.summary, 80))
           if (event.type === 'subagent_start' || event.type === 'subagent_end' || event.type === 'subagent_event') return
           request.onEvent?.(event)

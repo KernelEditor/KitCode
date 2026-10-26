@@ -133,6 +133,9 @@ export function App({
   const [, tick] = useState(0)
   const [context, setContext] = useState(() => runtime.modelContext())
   const speedMeter = useRef(createSpeedMeter())
+  // Live-row budget measured by TerminalViewport against the real chrome, so a
+  // crowded prompt (queue, suggestions, agents) never pushes the status bar
+  // off the bottom edge. Initial value is the pre-measure estimate.
   // After /undo the model still believes its edits are in place; tell it with
   // the next message instead of adding a message of its own to the history.
   const undoNote = useRef<string | null>(null)
@@ -391,6 +394,7 @@ export function App({
           })
           sessionStart.current = Date.now()
           turns.current = 0
+          speedMeter.current = createSpeedMeter()
           void runtime
             .persist([])
             .catch((error) =>
@@ -1203,6 +1207,69 @@ export function App({
           return
         }
 
+        case 'systemp': {
+          const sub = rest[0]?.toLowerCase()
+          if (sub === 'set') {
+            const text = rawRest.replace(/^\S+\s*/, '').trim()
+            if (!text) {
+              const typed = await promptInput(strings.systemPromptTitle)
+              if (!typed || typed.trim() === '') return
+              await runtime.setSystemPrompt(typed)
+              notice('info', strings.systemPromptSet)
+              return
+            }
+            await runtime.setSystemPrompt(text)
+            notice('info', strings.systemPromptSet)
+            return
+          }
+          if (sub === 'load') {
+            const filePath = rawRest.replace(/^\S+\s*/, '').trim()
+            if (!filePath) {
+              notice('warn', strings.systemPromptUsage)
+              return
+            }
+            try {
+              const text = await runtime.loadSystemPromptFile(filePath)
+              await runtime.setSystemPrompt(text)
+              notice('info', strings.systemPromptSet)
+            } catch (error) {
+              notice('error', error instanceof Error ? error.message : String(error))
+            }
+            return
+          }
+          if (sub === 'clear') {
+            if (!runtime.getSystemPrompt()) {
+              notice('info', strings.systemPromptEmpty)
+              return
+            }
+            await runtime.setSystemPrompt('')
+            notice('info', strings.systemPromptCleared)
+            return
+          }
+          if (sub === 'on') {
+            await runtime.setSystemPromptEnabled(true)
+            notice('info', strings.systemPromptEnabled)
+            return
+          }
+          if (sub === 'off') {
+            await runtime.setSystemPromptEnabled(false)
+            notice('info', strings.systemPromptDisabled)
+            return
+          }
+          if (sub !== undefined && sub !== '' && sub !== 'show') {
+            notice('warn', strings.systemPromptUsage)
+            return
+          }
+          const current = runtime.getSystemPrompt()
+          if (!current) {
+            notice('info', strings.systemPromptEmpty)
+            return
+          }
+          const enabled = runtime.isSystemPromptEnabled()
+          notice('info', (enabled ? '' : '[disabled] ') + current)
+          return
+        }
+
         case 'effort': {
           notice('info', runtime.effortDescription(history.current))
           const choice = EFFORTS.includes(rawRest as Effort) ? rawRest : await pick(
@@ -1213,6 +1280,22 @@ export function App({
           await runtime.setEffort(choice as Effort)
           notice('info', `${strings.effortSet(choice)} · ${runtime.effortDescription(history.current)}`)
           forceRender((n) => n + 1)
+          return
+        }
+
+        case 'steps': {
+          const current = runtime.getMaxTurnSteps()
+          if (!rest[0]) {
+            notice('info', strings.stepsCurrent(current))
+            return
+          }
+          const parsed = Number(rest[0])
+          if (!Number.isInteger(parsed) || parsed < 0 || parsed > 1_000) {
+            notice('warn', strings.stepsInvalid)
+            return
+          }
+          await runtime.setMaxTurnSteps(parsed)
+          notice('info', parsed === 0 ? strings.stepsUnlimited : strings.stepsSet(parsed))
           return
         }
 
@@ -1773,6 +1856,9 @@ export function App({
           setSetup(false)
           notice('info', `${summary}\n${strings.configAt(runtime.configPath())}`)
           return summary
+        }}
+        onCancel={() => {
+          if (!runtime.needsSetup()) setSetup(false)
         }}
       />,
     )

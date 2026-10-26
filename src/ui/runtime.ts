@@ -56,6 +56,17 @@ export interface Runtime {
   setMaxTokensPerTurn(tokens: number): Promise<void>
   getLang(): Lang | undefined
   setLang(lang: Lang): Promise<void>
+  /** User-supplied extra instructions appended to the system prompt. */
+  getSystemPrompt(): string
+  /** True when a system prompt is set and not disabled. */
+  isSystemPromptEnabled(): boolean
+  setSystemPrompt(text: string): Promise<void>
+  setSystemPromptEnabled(enabled: boolean): Promise<void>
+  /** Reads a text file and returns its content for the system prompt. */
+  loadSystemPromptFile(path: string): Promise<string>
+  /** Hard cap on model calls per turn (default 256). */
+  getMaxTurnSteps(): number
+  setMaxTurnSteps(steps: number): Promise<void>
   getAccent(): string
   setAccent(value: string): Promise<void>
   getMode(): string

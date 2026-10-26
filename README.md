@@ -114,6 +114,8 @@ Press `/` to open the command list.
 | `/bell [on\|off]` | Toggle the beep when a long answer finishes or a permission prompt appears. |
 | `/context [tokens]` | Show or set the model context window used by the meter and automatic compaction. |
 | `/memory show` · `/memory set <text>` · `/memory clear` | View, replace, or clear this project's persistent notes. |
+| `/systemp [show]` · `/systemp set <text>` · `/systemp load <path>` · `/systemp on\|off` · `/systemp clear` | Append custom instructions to the system prompt; toggle without deleting. |
+| `/steps [0-1000]` | Cap model calls per turn (default 256, 0 = unlimited). |
 | `/resume` · `/clear` | Resume a session or start a new one. |
 | `/sessions` | Search sessions, then resume, rename, delete, or export one. |
 | `/sessions list` | List all saved sessions. |
@@ -213,6 +215,24 @@ and `max` to `high`; for GPT-5.2–5.4, it maps `max` to `xhigh`. It omits effor
 OpenAI-compatible model names. The Anthropic adapter sends the resolved level in `output_config`.
 Supported levels and their effect depend on the model and provider.
 
+## Custom system prompt
+
+`/systemp` appends your own instructions to the built-in system prompt on every turn. Set it once and it persists in the config:
+
+```text
+/systemp set Always answer in Russian. Never add comments that restate the code.
+/systemp load ./my-prompt.txt
+/systemp off
+/systemp on
+/systemp clear
+```
+
+`off` keeps the text in the config but stops sending it; `clear` removes it entirely. The addition appears at the end of the system prompt, after the built-in instructions and project memory.
+
+## Turn step cap
+
+`/steps` shows the current cap on model calls per turn (default 256). A turn that hits the cap stops with a warning instead of looping forever. Set `/steps 0` for no cap — the turn budget and token limits still apply.
+
 ## Project memory
 
 Project notes persist across chats, `/clear`, and restarts. Manage them with:
@@ -282,8 +302,8 @@ Minimal manual provider configuration:
 }
 ```
 
-The main settings are `model`, `effort`, `thinking`, `contextWindow`, `maxTokens`, `budget`,
-`diagnostics`, `theme`, `permissions`, `providers`, and `mcp`. `budget` controls local per-message
+The main settings are `model`, `effort`, `thinking`, `contextWindow`, `maxTokens`, `maxTurnSteps`,
+`systemPrompt`, `systemPromptEnabled`, `budget`, `diagnostics`, `theme`, `permissions`, `providers`, and `mcp`. `budget` controls local per-message
 safety limits for model requests, tokens, estimated cost (when model pricing is available), and
 subagents. These values are
 not the provider's account balance or rate limits. `diagnostics.autoRun`

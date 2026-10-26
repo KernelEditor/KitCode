@@ -29,6 +29,8 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'mcp', args: '[add|list|delete|enable|disable]' },
   { name: 'attach', args: '<path|clipboard|clear>' },
   { name: 'memory', args: '[show|set <text>|clear]' },
+  { name: 'systemp', args: '[set <text>|clear]', ...BUSY_SAFE },
+  { name: 'steps', args: '[count]', ...BUSY_SAFE },
   { name: 'compact' },
   { name: 'update' },
   { name: 'checker', ...BUSY_SAFE },

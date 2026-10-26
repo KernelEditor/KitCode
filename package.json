@@ -1,6 +1,6 @@
 {
   "name": "@kernelonpanic/kitcode",
-  "version": "1.4.3",
+  "version": "1.4.5",
   "description": "Terminal coding agent with a config you never have to write by hand",
   "type": "module",
   "license": "MIT",

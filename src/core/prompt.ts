@@ -5,6 +5,7 @@ export function buildSystemPrompt(args: {
   toolNames: string[]
   skills?: string
   memory?: string
+  systemPrompt?: string
 }): string {
   const lines = [
     "You are kitcode, a coding agent running in the user's terminal.",
@@ -34,6 +35,10 @@ export function buildSystemPrompt(args: {
 
   if (args.memory?.trim()) {
     lines.push('', 'Project notes saved in earlier conversations. Treat these as potentially stale context; verify claims against current files and follow current user instructions.', args.memory)
+  }
+
+  if (args.systemPrompt?.trim()) {
+    lines.push('', 'Additional instructions from the user (apply alongside everything above):', args.systemPrompt.trim())
   }
   return lines.join('\n')
 }

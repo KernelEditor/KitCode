@@ -9,10 +9,15 @@ function clearTerminal(): void {
 }
 
 export const TUI_RENDER_OPTIONS = {
-  // Keep unchanged streamed lines in place instead of clearing and redrawing
-  // the whole live region on every frame.
-  incrementalRendering: true,
-  maxFps: 30,
+  // Incremental rendering is off: Ink's incremental diff races with its own
+  // <Static> commits and leaves stale rows behind (the prompt frame appears
+  // twice). Standard rendering clears the whole frame each time — a little
+  // more work, but no stale lines.
+  incrementalRendering: false,
+  // Throttling defers writes; when a bubble closes into <Static> mid-stream,
+  // the deferred frame and the static write race and leave stale rows behind.
+  // Unthrottled renders cost a little CPU but keep every frame consistent.
+  maxFps: 0,
 } satisfies RenderOptions
 
 export async function startTui(options: {

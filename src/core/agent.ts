@@ -27,7 +27,7 @@ const MAX_PAUSE_RESUMES = 5
 const MAX_RETRIES = 3
 const INITIAL_BACKOFF_MS = 1000
 
-export const MAX_TURN_STEPS = 64
+export const DEFAULT_MAX_TURN_STEPS = 256
 
 export interface ToolLookup {
   get(name: string): Tool | undefined
@@ -77,6 +77,11 @@ export interface AgentConfig {
   executionLane?: ExecutionLane
   modelRequestLane?: ExecutionLane
   /**
+   * Hard cap on model calls in one turn, to stop a model that loops without
+   * finishing. Large projects legitimately need many read/edit cycles.
+   */
+  maxTurnSteps?: number
+  /**
    * Called before every follow-up model request of a turn. Returns a lighter
    * history (old tool output cleared) when the window is nearly full, or null.
    */
@@ -95,6 +100,10 @@ export async function runTurn(
   hooks: AgentHooks,
   signal: AbortSignal,
 ): Promise<Message[]> {
+  const maxTurnSteps = cfg.maxTurnSteps ?? DEFAULT_MAX_TURN_STEPS
+  // 0 means no cap: the loop runs until the model finishes, the budget stops
+  // it, or the user cancels.
+  const hasStepCap = maxTurnSteps > 0
   const permissionLane = cfg.permissionLane ?? createExecutionLane()
   const originalHooks = hooks
   hooks = {
@@ -111,11 +120,12 @@ export async function runTurn(
       hooks.onEvent({ type: 'turn_end', stopReason: 'aborted' })
       return sanitizeHistory(messages)
     }
-    if (++steps > MAX_TURN_STEPS) {
+    steps += 1
+    if (hasStepCap && steps > maxTurnSteps) {
       hooks.onEvent({
         type: 'notice',
         level: 'warn',
-        text: `Stopped after ${MAX_TURN_STEPS} model calls without finishing, to avoid burning tokens in a loop. Ask again with a narrower request.`,
+        text: `Stopped after ${maxTurnSteps} model calls without finishing, to avoid burning tokens in a loop. Ask again with a narrower request.`,
       })
       hooks.onEvent({ type: 'turn_end', stopReason: 'max_tokens' })
       return messages

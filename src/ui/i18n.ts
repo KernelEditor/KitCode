@@ -166,6 +166,17 @@ export interface Strings {
   memoryEmpty: string
   memoryClearAsk: string
   memoryReplaceAsk: string
+  systemPromptTitle: string
+  systemPromptUsage: string
+  systemPromptEmpty: string
+  systemPromptSet: string
+  systemPromptCleared: string
+  systemPromptEnabled: string
+  systemPromptDisabled: string
+  stepsCurrent: (n: number) => string
+  stepsSet: (n: number) => string
+  stepsUnlimited: string
+  stepsInvalid: string
   promptDeleted: (name: string) => string
   promptNotFound: (name: string) => string
   promptsEmpty: string
@@ -375,6 +386,17 @@ const en: Strings = {
   memoryEmpty: 'Project memory is empty.',
   memoryClearAsk: 'Clear project memory?',
   memoryReplaceAsk: 'Replace all project memory notes with this text?',
+  systemPromptTitle: 'System prompt addition',
+  systemPromptUsage: '/systemp [show] · /systemp set <text> · /systemp clear',
+  systemPromptEmpty: 'No extra system prompt. Set one with /systemp set <text>.',
+  systemPromptSet: 'System prompt addition saved.',
+  systemPromptCleared: 'System prompt addition cleared.',
+  systemPromptEnabled: 'System prompt enabled.',
+  systemPromptDisabled: 'System prompt disabled (kept in config).',
+  stepsCurrent: (n) => n === 0 ? 'Model calls per turn: unlimited' : `Model calls per turn: ${n}`,
+  stepsSet: (n) => `Model calls per turn set to ${n}`,
+  stepsUnlimited: 'Model calls per turn: unlimited (0). The turn budget still applies.',
+  stepsInvalid: 'Usage: /steps <0-1000> (0 = unlimited)',
   promptDeleted: (name) => `Deleted prompt "${name}"`,
   promptNotFound: (name) => `Prompt "${name}" not found.`,
   promptsEmpty: 'No saved prompts. Use /prompt save <name>.',
@@ -426,6 +448,8 @@ const en: Strings = {
     theme: 'change the accent colour',
     lang: 'change the interface language',
     memory: 'view, replace or clear project memory',
+    systemp: 'view, set, load from file, or toggle the extra system prompt',
+    steps: 'cap model calls per turn',
     prompt: 'insert or save a prompt',
     'prompt save': 'save the current or recent text as a prompt',
     'prompt delete': 'delete a saved prompt',
@@ -634,6 +658,17 @@ const ru: Strings = {
   memoryEmpty: 'Память проекта пуста.',
   memoryClearAsk: 'Очистить память проекта?',
   memoryReplaceAsk: 'Заменить все заметки памяти проекта этим текстом?',
+  systemPromptTitle: 'Дополнение к системному промпту',
+  systemPromptUsage: '/systemp [show] · /systemp set <текст> · /systemp clear',
+  systemPromptEmpty: 'Дополнения к системному промпту нет. Задай через /systemp set <текст>.',
+  systemPromptSet: 'Дополнение к системному промпту сохранено.',
+  systemPromptCleared: 'Дополнение к системному промпту удалено.',
+  systemPromptEnabled: 'Дополнение к системному промпту включено.',
+  systemPromptDisabled: 'Дополнение к системному промпту выключено (сохранено в конфиге).',
+  stepsCurrent: (n) => n === 0 ? 'Вызовов модели за ход: без лимита' : `Вызовов модели за ход: ${n}`,
+  stepsSet: (n) => `Вызовов модели за ход установлено: ${n}`,
+  stepsUnlimited: 'Вызовов модели за ход: без лимита (0). Бюджет токенов всё ещё действует.',
+  stepsInvalid: 'Использование: /steps <0-1000> (0 = без лимита)',
   promptDeleted: (name) => `Промт «${name}» удалён`,
   promptNotFound: (name) => `Промт «${name}» не найден.`,
   promptsEmpty: 'Сохранённых промтов нет. Используй /prompt save <имя>.',
@@ -685,6 +720,8 @@ const ru: Strings = {
     theme: 'сменить цвет акцента',
     lang: 'сменить язык интерфейса',
     memory: 'показать, заменить или очистить память проекта',
+    systemp: 'показать, задать, загрузить из файла или включить/выключить дополнение к системному промпту',
+    steps: 'лимит вызовов модели за ход',
     prompt: 'вставить или сохранить промт',
     skills: 'список установленных скиллов',
     'prompt delete': 'удалить сохранённый промт',

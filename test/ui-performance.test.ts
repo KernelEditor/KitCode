@@ -12,8 +12,8 @@ import { applyEvents, emptyTranscript } from '../src/ui/transcript'
 describe('stream rendering', () => {
   it('keeps unchanged streamed lines with bounded incremental rendering', () => {
     expect(TUI_RENDER_OPTIONS).toMatchObject({
-      incrementalRendering: true,
-      maxFps: 30,
+      incrementalRendering: false,
+      maxFps: 0,
     })
   })
 

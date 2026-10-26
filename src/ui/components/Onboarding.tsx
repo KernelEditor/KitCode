@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink'
+import { Box, Text, useInput } from 'ink'
 import Spinner from 'ink-spinner'
 import TextInput from 'ink-text-input'
 import { useState } from 'react'
@@ -9,13 +9,29 @@ import { Logo } from './Logo'
 
 type Step = 'url' | 'key' | 'working'
 
-export function Onboarding({ onSubmit }: { onSubmit(url: string, key: string): Promise<string> }) {
+export function Onboarding({
+  onSubmit,
+  onCancel,
+}: {
+  onSubmit(url: string, key: string): Promise<string>
+  onCancel?: () => void
+}) {
   const theme = useTheme()
   const strings = useStrings()
   const [step, setStep] = useState<Step>('url')
   const [url, setUrl] = useState('')
   const [key, setKey] = useState('')
   const [error, setError] = useState('')
+
+  useInput((_input, inputKey) => {
+    if (!inputKey.escape || step === 'working') return
+    if (step === 'key') {
+      setError('')
+      setStep('url')
+    } else {
+      onCancel?.()
+    }
+  })
 
   const submitKey = async (value: string) => {
     if (value.trim() === '') return

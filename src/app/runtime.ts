@@ -187,6 +187,7 @@ export async function boot(options: {
       toolNames: tools.list().map((tool) => tool.name),
       skills: skillCatalogue,
       memory: projectMemory,
+      systemPrompt: config.systemPromptEnabled ? config.systemPrompt : undefined,
     })
 
   let modelRef = session.model || config.model || ''
@@ -273,6 +274,7 @@ export async function boot(options: {
       maxTokens: config.maxTokens,
       effort: config.effort,
       thinking: config.thinking,
+      maxTurnSteps: config.maxTurnSteps,
       budget: activeBudget,
       checkpoint: activeCheckpoint,
       trimContext: (messages) => trimForWindow(resolved.provider.kind, messages),
@@ -714,6 +716,33 @@ export async function boot(options: {
     async setLang(lang: Lang) {
       await persistConfig((draft) => {
         draft.lang = lang
+      })
+    },
+
+    getSystemPrompt: () => config.systemPrompt ?? '',
+    isSystemPromptEnabled: () => config.systemPromptEnabled && config.systemPrompt !== undefined && config.systemPrompt.trim() !== '',
+    async setSystemPrompt(text: string) {
+      const trimmed = text.trim()
+      await persistConfig((draft) => {
+        if (trimmed === '') delete draft.systemPrompt
+        else draft.systemPrompt = trimmed
+      })
+    },
+    async setSystemPromptEnabled(enabled: boolean) {
+      await persistConfig((draft) => {
+        draft.systemPromptEnabled = enabled
+      })
+    },
+    async loadSystemPromptFile(requestedPath: string) {
+      const { readFile } = await import('node:fs/promises')
+      const resolved = path.resolve(options.cwd, requestedPath)
+      return readFile(resolved, 'utf8')
+    },
+
+    getMaxTurnSteps: () => config.maxTurnSteps,
+    async setMaxTurnSteps(steps: number) {
+      await persistConfig((draft) => {
+        draft.maxTurnSteps = steps
       })
     },
 

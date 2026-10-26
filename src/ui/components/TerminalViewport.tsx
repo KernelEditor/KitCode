@@ -10,18 +10,27 @@ export function interactiveViewportRows(rows: number): number {
   return Math.max(1, Math.floor(rows) - 2)
 }
 
-// Prompt (5) + one-line status bar (3) + margins, with two rows to spare.
-// The status bar used to take 6 rows; those went to the live answer instead.
-const INTERACTIVE_CHROME_ROWS = 11
+// Fixed, conservative estimate of the prompt + status bar + slack. A measured
+// value used to cause a visible jump when the real height was discovered after
+// the first frame; a constant never moves, so the chrome never jumps.
+// Prompt (up to 6 input rows + 2 borders + margin + hint) + status bar (3)
+// + queue/autocomplete allowance (4) = 16.
+const CHROME_ROWS = 16
 const MAX_LIVE_ROWS = 11
 const MIN_LIVE_ROWS = 4
+// Free rows between the frame and the bottom of the terminal: Ink's trailing
+// newline plus one row of slack so a frame never reaches the bottom edge and
+// flips Ink into fullscreen repaint mode (which on Windows clears the whole
+// terminal and replays the chat for a frame).
+const BOTTOM_SLACK_ROWS = 3
 
-export function liveTranscriptRows(rows: number): number {
+export function liveTranscriptRows(rows: number, chromeRows?: number): number {
   if (!Number.isFinite(rows)) return MAX_LIVE_ROWS
-  // Fixed band, and always at least two rows below the terminal: a frame at or
-  // above the terminal height flips Ink into full-clear reprint mode on
-  // Windows, which replays the whole chat history on every streamed frame.
-  return Math.max(MIN_LIVE_ROWS, Math.min(MAX_LIVE_ROWS, Math.floor(rows) - INTERACTIVE_CHROME_ROWS - 2))
+  const chrome = chromeRows ?? CHROME_ROWS
+  // Strictly below the terminal: one extra row of margin so the equality case
+  // (live + chrome + slack === rows) never occurs.
+  const budget = Math.floor(rows) - chrome - BOTTOM_SLACK_ROWS - 1
+  return Math.max(MIN_LIVE_ROWS, Math.min(MAX_LIVE_ROWS, budget))
 }
 
 /**
@@ -31,14 +40,28 @@ export function liveTranscriptRows(rows: number): number {
  */
 export function TerminalViewport({ children, rows }: { children: ReactNode; rows: number }) {
   const { columns } = useTerminalSize()
+  const liveRows = liveTranscriptRows(rows)
+  const items = Array.isArray(children) ? children : [children]
+  const [transcript, ...chromeChildren] = items
   return (
     <Box
-      width={columns} maxWidth="100%"
+      width={columns - 1} maxWidth="100%"
       flexDirection="column"
-      maxHeight={liveTranscriptRows(rows) + INTERACTIVE_CHROME_ROWS}
+      maxHeight={liveRows + CHROME_ROWS}
       overflowY="hidden"
     >
-      {children}
+      <Box
+        flexDirection="column"
+        flexShrink={1}
+        minHeight={0}
+        maxHeight={liveRows}
+        overflowY="hidden"
+      >
+        {transcript}
+      </Box>
+      <Box flexDirection="column" flexShrink={0}>
+        {chromeChildren}
+      </Box>
     </Box>
   )
 }

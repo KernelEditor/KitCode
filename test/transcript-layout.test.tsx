@@ -184,7 +184,7 @@ describe('terminal viewport', () => {
     expect(interactiveViewportRows(Number.NaN)).toBe(22)
     expect(interactiveViewportRows(3)).toBe(1)
     expect(interactiveViewportRows(1)).toBe(1)
-    expect(liveTranscriptRows(24)).toBe(11)
+    expect(liveTranscriptRows(24)).toBe(4)
   })
 
   it('keeps the live row budget inside a fixed band as rows change', () => {
@@ -217,9 +217,9 @@ describe('terminal viewport', () => {
       { columns: 80 },
     )
 
-    // rows=30 → live budget 8 + chrome 14 = 22 rows of changing output; the
-    // Static header is written to scrollback outside Yoga's live box.
-    expect(frame.split('\n')).toHaveLength(22)
+    // rows=30 → live budget 30−16−3−1=10; the single child is treated as
+    // the transcript and clipped to it.
+    expect(frame.split('\n')).toHaveLength(10)
     expect(frame).not.toContain('line 0')
     expect(frame).toContain('line 23')
   })
@@ -248,7 +248,7 @@ describe('terminal viewport', () => {
     )
     const lines = frame.split('\n')
 
-    expect(lines).toHaveLength(22)
+    expect(lines).toHaveLength(10 + 2)
     expect(frame).not.toContain('stream 0')
     expect(frame).toContain('stream 21')
     expect(lines.at(-2)).toContain('prompt')
