@@ -47,7 +47,8 @@ export function TerminalViewport({ children, rows }: { children: ReactNode; rows
     <Box
       width={columns - 1} maxWidth="100%"
       flexDirection="column"
-      maxHeight={liveRows + CHROME_ROWS}
+      maxHeight={Math.min(liveRows + CHROME_ROWS, interactiveViewportRows(rows))}
+      justifyContent="flex-end"
       overflowY="hidden"
     >
       <Box

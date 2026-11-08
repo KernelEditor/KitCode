@@ -20,6 +20,18 @@ import { sanitizeThinkingText } from '../src/ui/sanitize'
 import type { Bubble } from '../src/ui/types'
 
 describe('transcript layout', () => {
+  it.each([8, 10, 16, 20])('keeps a small %s-row terminal below fullscreen and preserves the footer', (rows) => {
+    const output = renderToString(
+      <TerminalViewport rows={rows}>
+        <Text>{'live\n'.repeat(15)}</Text>
+        <Box flexDirection="column"><Text>{'chrome\n'.repeat(12)}</Text><Text>status bottom</Text></Box>
+      </TerminalViewport>,
+      { columns: 80 },
+    )
+    expect(output.split('\n').length).toBeLessThan(rows)
+    expect(output).toContain('status bottom')
+  })
+
   it('separates tagged thinking from the answer and hides partial opening tags', () => {
     expect(splitThinkingPrefix('<think>**Checking**</think>Answer', false)).toEqual({ thinking: '**Checking**', text: 'Answer' })
     expect(splitThinkingPrefix('<thinking>Checking</thi', true)).toEqual({ thinking: 'Checking', text: '' })

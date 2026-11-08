@@ -28,6 +28,7 @@ import { appendInputHistory } from './history'
 import { LANGS, StringsContext, stringsFor } from './i18n'
 import type { Lang, Strings } from './i18n'
 import { useTerminalInput } from './input'
+import { clearTerminal } from './clear-terminal'
 import type { Runtime } from './runtime'
 import { PRESETS, ThemeContext, makeTheme, parseAccent, resolveAccent } from './theme'
 import { formatDuration } from './time'
@@ -36,6 +37,7 @@ import type { Bubble, PickerItem } from './types'
 
 const EFFORTS: Effort[] = ['auto', 'low', 'medium', 'high', 'xhigh', 'max']
 const STREAM_FRAME_MS = 50
+const RESIZE_SETTLE_MS = 120
 // Picker key for typing an arbitrary hex accent; not a valid colour itself.
 const CUSTOM_ACCENT = '__custom__'
 // Turns shorter than this finish while you are still watching: no beep.
@@ -97,13 +99,16 @@ export function App({
   initialHistory: Message[]
   warnings?: string[]
 }) {
-  const { exit, suspendTerminal } = useApp()
+  const { exit, suspendTerminal, waitUntilRenderFlush } = useApp()
   const { stdout } = useStdout()
-  const { rows } = useTerminalSize()
+  const { rows, columns } = useTerminalSize()
   const [transcript, setTranscript] = useState(() =>
     warnings.reduce((state, text) => pushNotice(state, 'warn', text), fromHistory(initialHistory, runtime.summarizeToolCall)),
   )
   const [transcriptRevision, setTranscriptRevision] = useState(0)
+  const [resettingTranscript, setResettingTranscript] = useState(false)
+  const terminalResetQueue = useRef<Promise<void>>(Promise.resolve())
+  const previousTerminalSize = useRef({ rows, columns })
   const transcriptRef = useRef(transcript)
   transcriptRef.current = transcript
   const [input, setInput] = useState('')
@@ -157,13 +162,17 @@ export function App({
     if (stdout.isTTY && runtime.getBell()) stdout.write('\x07')
   }, [runtime, stdout])
 
-  const clearScreen = useCallback(() => {
-    if (stdout.isTTY) stdout.write('\x1b[2J\x1b[3J\x1b[H')
-  }, [stdout])
   const replaceAttachments = useCallback((next: ContentBlock[]) => {
     attachmentsRef.current = next
     setAttachments(next)
   }, [])
+
+  const clearQueuedAttachments = useCallback(() => {
+    attachmentGeneration.current += 1
+    automaticAttachmentTask.current = null
+    clipboardPasteTask.current = null
+    replaceAttachments([])
+  }, [replaceAttachments])
 
   const appendAttachment = useCallback((block: ContentBlock): boolean => {
     if (attachmentsRef.current.length >= MAX_ATTACHMENTS) return false
@@ -189,6 +198,32 @@ export function App({
     transcriptEvents.current = []
     setTranscript((state) => applyEvents(state, events))
   }, [])
+
+  const replaceTranscript = useCallback((next?: typeof transcript) => {
+    const reset = terminalResetQueue.current.catch(() => undefined).then(async () => {
+      flushTranscriptEvents()
+      try {
+        await suspendTerminal(async () => {
+          // First detach Static and commit its removal. Otherwise Ink can replay
+          // cached output from the previous session after the terminal is cleared.
+          setResettingTranscript(true)
+          // A resize rebuilds only the terminal output. Stream events arriving
+          // during the reset must keep updating the existing conversation.
+          if (next !== undefined) setTranscript(next)
+          setTranscriptRevision((revision) => revision + 1)
+          await waitUntilRenderFlush()
+          clearTerminal(stdout)
+        })
+      } finally {
+        // Mount the fresh Static only after rendering resumes, so its first
+        // items are printed rather than consumed while output is suspended.
+        setResettingTranscript(false)
+      }
+      await waitUntilRenderFlush()
+    })
+    terminalResetQueue.current = reset
+    return reset
+  }, [flushTranscriptEvents, stdout, suspendTerminal, waitUntilRenderFlush])
 
   const queueTranscriptEvent = useCallback(
     (event: AgentEvent) => {
@@ -232,6 +267,22 @@ export function App({
     },
     [flushTranscriptEvents],
   )
+
+  useEffect(() => {
+    const previous = previousTerminalSize.current
+    previousTerminalSize.current = { rows, columns }
+    if (!stdout.isTTY || (previous.rows === rows && previous.columns === columns)) return
+    // The terminal has already reflowed the old frame. Erasing the number of
+    // rows remembered by Ink leaves fragments behind, especially on Windows.
+    // Wait for the resize gesture to settle, then rebuild output once using
+    // the same conversation and prompt components.
+    const timer = setTimeout(() => {
+      void replaceTranscript().catch((error) =>
+        notice('error', error instanceof Error ? error.message : String(error)),
+      )
+    }, RESIZE_SETTLE_MS)
+    return () => clearTimeout(timer)
+  }, [rows, columns, stdout, replaceTranscript, notice])
 
   useEffect(() => {
     const check = runtime.startupUpdateCheck()
@@ -391,13 +442,10 @@ export function App({
           setPendingCount(0)
           await runtime.newSession()
           history.current = []
-          replaceAttachments([])
+          undoNote.current = null
+          clearQueuedAttachments()
           setPromptHistory([])
-          await suspendTerminal(async () => {
-            setTranscript(emptyTranscript())
-            setTranscriptRevision((revision) => revision + 1)
-            clearScreen()
-          })
+          await replaceTranscript(emptyTranscript())
           sessionStart.current = Date.now()
           turns.current = 0
           speedMeter.current = createSpeedMeter()
@@ -419,16 +467,16 @@ export function App({
           try {
             const restored = await runtime.resumeSession(choice)
             history.current = restored
-            replaceAttachments([])
+            undoNote.current = null
+            clearQueuedAttachments()
             setPromptHistory(inputHistoryFromMessages(restored))
-            setTranscript(
+            await replaceTranscript(
               pushNotice(
                 fromHistory(restored, runtime.summarizeToolCall),
                 'info',
                 strings.resumed(choice.slice(-6), restored.length),
               ),
             )
-            setTranscriptRevision((revision) => revision + 1)
             sessionStart.current = Date.now()
             turns.current = 0
           } catch (error) {
@@ -470,7 +518,8 @@ export function App({
             try {
               const result = await runtime.deleteAllSessions()
               history.current = []
-              replaceAttachments([])
+              undoNote.current = null
+              clearQueuedAttachments()
               setPromptHistory([])
               const message =
                 result.failed.length === 0
@@ -479,14 +528,13 @@ export function App({
                       strings.sessionsDeleteAllFailed(result.deleted, result.failed.length),
                       ...result.failed.slice(0, 5).map((failure) => `${failure.id}: ${failure.error}`),
                     ].join('\n')
-              setTranscript(
+              await replaceTranscript(
                 pushNotice(
                   emptyTranscript(),
                   result.failed.length === 0 ? 'info' : 'error',
                   message,
                 ),
               )
-              setTranscriptRevision((revision) => revision + 1)
               sessionStart.current = Date.now()
               turns.current = 0
             } catch (error) {
@@ -530,12 +578,12 @@ export function App({
             if (action === 'resume') {
               const restored = await runtime.resumeSession(id)
               history.current = restored
-              replaceAttachments([])
+              undoNote.current = null
+              clearQueuedAttachments()
               setPromptHistory(inputHistoryFromMessages(restored))
-              setTranscript(
+              await replaceTranscript(
                 pushNotice(fromHistory(restored, runtime.summarizeToolCall), 'info', strings.resumed(id.slice(-6), restored.length)),
               )
-              setTranscriptRevision((revision) => revision + 1)
               sessionStart.current = Date.now()
               turns.current = 0
             } else if (action === 'rename') {
@@ -554,10 +602,10 @@ export function App({
               const deletedMessage = strings.sessionDeleted(result.id.slice(-6))
               if (result.wasActive) {
                 history.current = []
-                replaceAttachments([])
+                undoNote.current = null
+                clearQueuedAttachments()
                 setPromptHistory([])
-                setTranscript(pushNotice(emptyTranscript(), 'info', deletedMessage))
-                setTranscriptRevision((revision) => revision + 1)
+                await replaceTranscript(pushNotice(emptyTranscript(), 'info', deletedMessage))
                 sessionStart.current = Date.now()
                 turns.current = 0
                 void runtime.persist([]).catch((error) =>
@@ -657,10 +705,10 @@ export function App({
             if (result.wasActive) {
               await runtime.newSession()
               history.current = []
-              replaceAttachments([])
+              undoNote.current = null
+              clearQueuedAttachments()
               setPromptHistory([])
-              setTranscript(pushNotice(emptyTranscript(), 'info', message))
-              setTranscriptRevision((revision) => revision + 1)
+              await replaceTranscript(pushNotice(emptyTranscript(), 'info', message))
               sessionStart.current = Date.now()
               turns.current = 0
               void runtime.persist([]).catch((error) =>
@@ -1019,10 +1067,7 @@ export function App({
 
         case 'attach': {
           if (rawRest.toLowerCase() === 'clear') {
-            attachmentGeneration.current += 1
-            automaticAttachmentTask.current = null
-            clipboardPasteTask.current = null
-            replaceAttachments([])
+            clearQueuedAttachments()
             notice('info', strings.attachmentsCleared)
             return
           }
@@ -1089,10 +1134,9 @@ export function App({
             } else {
               history.current = result.history
               setPromptHistory(inputHistoryFromMessages(result.history))
-              setTranscript(
+              await replaceTranscript(
                 pushNotice(fromHistory(result.history, runtime.summarizeToolCall), 'info', strings.compactDone(result.removedMessages, result.clearedToolResults ?? 0, result.tokensBefore, result.tokensAfter)),
               )
-              setTranscriptRevision((revision) => revision + 1)
               await runtime.persist(result.history)
             }
           } catch (error) {
@@ -1523,7 +1567,7 @@ export function App({
         }
       }
     },
-    [applyAccent, appendAttachment, ask, exit, notice, pick, replaceAttachments, runtime, strings, hiddenSubagents, flushTranscriptEvents],
+    [applyAccent, appendAttachment, ask, exit, notice, pick, replaceAttachments, runtime, strings, hiddenSubagents, flushTranscriptEvents, replaceTranscript, clearQueuedAttachments],
   )
 
   const runSlash = useCallback(
@@ -1629,7 +1673,12 @@ export function App({
       // Two paths pasted in quick succession: the second waits for the first
       // instead of falling through and being sent to the model as plain text.
       const running = automaticAttachmentTask.current
-      if (running) return running.then(() => tryQueueAutomaticAttachmentRef.current(requestedPath))
+      if (running) {
+        const generation = attachmentGeneration.current
+        return running.then(() => generation === attachmentGeneration.current
+          ? tryQueueAutomaticAttachmentRef.current(requestedPath)
+          : true)
+      }
       if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
         notice('warn', strings.attachmentsLimit(MAX_ATTACHMENTS))
         return Promise.resolve(true)
@@ -1711,7 +1760,7 @@ export function App({
   const submit = useCallback(
     async (raw: string) => {
       const generation = attachmentGeneration.current
-      const pendingAttachments = [automaticAttachmentTask.current, clipboardPasteTask.current].filter(
+      const pendingAttachments = (raw.trim().startsWith('/') ? [] : [automaticAttachmentTask.current, clipboardPasteTask.current]).filter(
         (task): task is Promise<boolean> | Promise<void> => task !== null,
       )
       const detachedInput = pendingAttachments.length > 0
@@ -1869,32 +1918,31 @@ export function App({
     )
   }
 
-  if (setup) {
-    return shell(
-      <Onboarding
-        onSubmit={async (url, key) => {
-          const summary = await runtime.addProvider(url, key)
-          setSetup(false)
-          notice('info', `${summary}\n${strings.configAt(runtime.configPath())}`)
-          return summary
-        }}
-        onCancel={() => {
-          if (!runtime.needsSetup()) setSetup(false)
-        }}
-      />,
-    )
-  }
-
   return shell(
     <TerminalViewport rows={rows}>
-      <Transcript
+      {!resettingTranscript && <Transcript
         key={transcriptRevision}
         bubbles={transcript.bubbles}
         workspace={runtime.cwd}
-        maxLiveRows={overlay.kind === 'subagent' ? 0 : liveTranscriptRows(rows)}
-      />
+        maxLiveRows={setup || overlay.kind === 'subagent' ? 0 : liveTranscriptRows(rows)}
+      />}
 
-      {overlay.kind === 'permission' && (
+      {setup && (
+        <Onboarding
+          showLogo={false}
+          onSubmit={async (url, key) => {
+            const summary = await runtime.addProvider(url, key)
+            setSetup(false)
+            notice('info', `${summary}\n${strings.configAt(runtime.configPath())}`)
+            return summary
+          }}
+          onCancel={() => {
+            if (!runtime.needsSetup()) setSetup(false)
+          }}
+        />
+      )}
+
+      {!setup && overlay.kind === 'permission' && (
         <PermissionPrompt
           request={overlay.request}
           onDecide={(decision) => {
@@ -1904,7 +1952,7 @@ export function App({
         />
       )}
 
-      {overlay.kind === 'picker' && (
+      {!setup && overlay.kind === 'picker' && (
         <Picker
           title={overlay.title}
           items={overlay.items}
@@ -1919,7 +1967,7 @@ export function App({
         />
       )}
 
-      {overlay.kind === 'subagent' && (
+      {!setup && overlay.kind === 'subagent' && (
         <SubagentChat
           bubble={transcript.bubbles.find(
             (bubble): bubble is Extract<Bubble, { kind: 'subagent' }> =>
@@ -1930,7 +1978,7 @@ export function App({
         />
       )}
 
-      {overlay.kind === 'confirm' && (
+      {!setup && overlay.kind === 'confirm' && (
         <Confirm
           title={overlay.title}
           body={overlay.body}
@@ -1942,7 +1990,7 @@ export function App({
         />
       )}
 
-      {overlay.kind === 'textinput' && (
+      {!setup && overlay.kind === 'textinput' && (
         <TextInputOverlay
           title={overlay.title}
           mask={overlay.mask}
@@ -1957,7 +2005,7 @@ export function App({
         />
       )}
 
-      {overlay.kind === 'none' && (
+      {!setup && overlay.kind === 'none' && (
         <PromptInput
           value={input}
           onChange={setInput}
@@ -1980,7 +2028,7 @@ export function App({
         />
       )}
 
-      <StatusBar
+      {!setup && <StatusBar
         status={{
           modelRef: runtime.getModelRef() || strings.noModel,
           effort: runtime.getEffort(),
@@ -1997,7 +2045,7 @@ export function App({
           agents: runtime.activeAgentsList().map((agent) => agent.description),
           context,
         }}
-      />
+      />}
     </TerminalViewport>,
   )
 }

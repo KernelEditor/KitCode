@@ -3,10 +3,7 @@ import type { RenderOptions } from 'ink'
 import { App } from '../ui/App'
 import type { AgentMode } from '../tools/permissions'
 import { boot } from './runtime'
-
-function clearTerminal(): void {
-  if (process.stdout.isTTY) process.stdout.write('\x1b[2J\x1b[3J\x1b[H')
-}
+import { clearTerminal } from '../ui/clear-terminal'
 
 export const TUI_RENDER_OPTIONS = {
   // Incremental rendering is off: Ink's incremental diff races with its own
@@ -36,7 +33,7 @@ export async function startTui(options: {
     mode: options.mode,
   })
 
-  clearTerminal()
+  clearTerminal(process.stdout)
 
   const instance = render(
     <App runtime={runtime} initialHistory={history} warnings={warnings} />,

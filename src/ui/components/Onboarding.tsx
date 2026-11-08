@@ -12,9 +12,11 @@ type Step = 'url' | 'key' | 'working'
 export function Onboarding({
   onSubmit,
   onCancel,
+  showLogo = true,
 }: {
   onSubmit(url: string, key: string): Promise<string>
   onCancel?: () => void
+  showLogo?: boolean
 }) {
   const theme = useTheme()
   const strings = useStrings()
@@ -48,7 +50,7 @@ export function Onboarding({
 
   return (
     <Box flexDirection="column">
-      <Logo subtitle={strings.noProvider} />
+      {showLogo && <Logo subtitle={strings.noProvider} />}
 
       <Box flexDirection="column" marginBottom={1}>
         <Text dimColor>{strings.onboardIntro}</Text>

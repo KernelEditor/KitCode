@@ -148,6 +148,24 @@ describe('slash commands', () => {
 
 
 describe('terminal safety and subagent history', () => {
+  it('clears a session without waiting for clipboard loading and ignores its late result', async () => {
+    let finish!: (value: unknown) => void
+    const pending = new Promise((resolve) => { finish = resolve })
+    const newSession = vi.fn(async () => undefined)
+    await withApp({ newSession, loadClipboardImage: () => pending }, async () => {
+      captured.prompt!.onPasteImage!()
+      await tick()
+      try {
+        await submit('/clear')
+        expect(newSession).toHaveBeenCalledOnce()
+      } finally {
+        finish({ type: 'image', mediaType: 'image/png', data: 'aGVsbG8=', name: 'old-clipboard.png' })
+        await tick()
+      }
+      expect(captured.prompt!.attachments).toEqual([])
+    })
+  })
+
   it('persists completed tool work and reuses it after a failed request', async () => {
     const completed: Message[] = [
       { role: 'user', content: [{ type: 'text', text: 'work' }] },
