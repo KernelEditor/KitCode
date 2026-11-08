@@ -7,6 +7,7 @@ import {
   withoutThinkingReplay,
 } from '../src/core/compact'
 import { runTurn } from '../src/core/agent'
+import { ProviderError } from '../src/providers/types'
 import type { ChatRequest, Message, Provider, StreamEvent } from '../src/providers/types'
 
 const bigOutput = (index: number) => `output ${index}\n${'x'.repeat(2_000)}`
@@ -77,6 +78,64 @@ describe('summary compaction', () => {
     expect(sent?.type === 'text' && sent.text.includes('requirement '.repeat(1_900))).toBe(true)
     expect(requests[0]!.maxTokens).toBeGreaterThanOrEqual(3_000)
     expect(result.clearedToolResults).toBe(10 - KEEP_RECENT_TOOL_RESULTS)
+  })
+})
+
+describe('compaction request retries', () => {
+  it.each(['max_tokens', 'refusal', 'aborted', 'missing'] as const)('preserves history when the summary ends with %s', async (stop) => {
+    const history: Message[] = Array.from({ length: 8 }, (_, i) => ({
+      role: i % 2 === 0 ? 'user' : 'assistant', content: [{ type: 'text', text: `important requirement ${i}` }],
+    }))
+    const original = structuredClone(history)
+    const provider: Provider = {
+      id: 'test', kind: 'openai', knownModels: () => [], listModels: async () => [],
+      async *stream() {
+        yield { type: 'text_delta', text: 'incomplete summary' }
+        if (stop !== 'missing') yield { type: 'done', stopReason: stop, content: [{ type: 'text', text: 'incomplete summary' }] }
+      },
+    }
+    await expect(compactHistory({ provider, model: 'm', history, maxTokens: 3000, signal: new AbortController().signal }))
+      .rejects.toThrow(/summary.*incomplete/i)
+    expect(history).toEqual(original)
+  })
+
+  it('retries a rate-limited summary with the same request before replacing history', async () => {
+    const history: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'first task' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'first answer' }] },
+      { role: 'user', content: [{ type: 'text', text: 'second task' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'second answer' }] },
+      { role: 'user', content: [{ type: 'text', text: 'current task' }] },
+    ]
+    const requests: ChatRequest[] = []
+    const provider: Provider = {
+      id: 'limited',
+      kind: 'openai',
+      knownModels: () => [],
+      listModels: async () => [],
+      async *stream(request): AsyncIterable<StreamEvent> {
+        requests.push(request)
+        if (requests.length < 4) {
+          throw new ProviderError('rate limited', 'limited', 429, {
+            cause: { headers: new Headers({ 'retry-after-ms': '1' }) },
+          })
+        }
+        yield { type: 'done', stopReason: 'end_turn', content: [{ type: 'text', text: 'summary' }] }
+      },
+    }
+
+    const result = await compactHistory({
+      provider,
+      model: 'model',
+      history,
+      maxTokens: 3_000,
+      signal: new AbortController().signal,
+    })
+
+    expect(requests).toHaveLength(4)
+    expect(requests.slice(1)).toEqual(requests.slice(0, -1).map(() => requests[0]))
+    expect(result.compacted).toBe(true)
+    expect(result.history.at(-1)).toEqual(history.at(-1))
   })
 })
 

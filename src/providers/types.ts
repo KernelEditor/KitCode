@@ -85,6 +85,8 @@ export interface ChatRequest {
   maxTokens: number
   effort?: Effort
   thinking?: boolean
+  /** Omit provider-specific generation settings for a portable summary request. */
+  compaction?: boolean
   signal?: AbortSignal
 }
 
@@ -128,6 +130,7 @@ export type StreamEvent =
   | { type: 'usage'; usage: Usage }
   | { type: 'rate_limits'; limits: RateLimits }
   | { type: 'done'; stopReason: StopReason; content: ContentBlock[]; refusal?: RefusalInfo }
+| { type: 'retrying'; attempt: number; waitMs: number; reason: string }
 
 export type ProviderKind = 'anthropic' | 'openai'
 

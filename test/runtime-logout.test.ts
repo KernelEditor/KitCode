@@ -83,6 +83,26 @@ describe('provider logout', () => {
     }
   })
 
+  it('rejects an oversized system prompt without changing the saved config', async () => {
+    await seed()
+    const app = await boot({ cwd: home })
+    try {
+      await app.runtime.setSystemPrompt('keep this prompt')
+      await expect(app.runtime.setSystemPrompt('x'.repeat(20_001)))
+        .rejects.toThrow('System prompt must be at most 20,000 characters.')
+      expect(app.runtime.getSystemPrompt()).toBe('keep this prompt')
+
+      const reloaded = await boot({ cwd: home })
+      try {
+        expect(reloaded.runtime.getSystemPrompt()).toBe('keep this prompt')
+      } finally {
+        await reloaded.shutdown()
+      }
+    } finally {
+      await app.shutdown()
+    }
+  })
+
   it('applies a manual context window and keeps it after a restart', async () => {
     await seed()
     const first = await boot({ cwd: home })

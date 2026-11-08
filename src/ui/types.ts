@@ -1,4 +1,4 @@
-import type { PermissionDecision, PermissionRequest } from '../core/types'
+import type { PermissionDecision, PermissionRequest, SubagentStatus } from '../core/types'
 import type { UsageSummary } from '../core/usage'
 import type { SpeedReading } from './speed'
 import type { Effort } from '../providers/types'
@@ -26,7 +26,8 @@ export type Bubble =
       kind: 'subagent'
       id: string
       description: string
-      state: 'running' | 'done'
+      state: 'running' | SubagentStatus
+      reason?: string
       result?: string
       seq: number
       bubbles: Bubble[]

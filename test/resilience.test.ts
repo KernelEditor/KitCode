@@ -126,6 +126,35 @@ describe('openai token limit field', () => {
   })
 })
 
+describe('portable compaction request', () => {
+  it('omits reasoning, thinking and sampling settings', async () => {
+    const bodies: Record<string, unknown>[] = []
+    const baseUrl = await startServer((req, res) => {
+      let raw = ''
+      req.on('data', (chunk) => { raw += chunk.toString() })
+      req.on('end', () => {
+        bodies.push(JSON.parse(raw))
+        res.writeHead(200, { 'content-type': 'text/event-stream' })
+        res.end(sseChunk({ content: 'summary' }, 'stop') + 'data: [DONE]\n\n')
+      })
+    })
+    const provider = createOpenAiProvider({ id: 'gateway', apiKey: 'test', baseUrl })
+
+    await collect(provider.stream({
+      ...chatRequest(),
+      model: 'kimi-k2.5',
+      effort: 'high',
+      thinking: false,
+      compaction: true,
+    }))
+
+    expect(bodies[0]).not.toHaveProperty('temperature')
+    expect(bodies[0]).not.toHaveProperty('reasoning_effort')
+    expect(bodies[0]).not.toHaveProperty('enable_thinking')
+    expect(bodies[0]).not.toHaveProperty('thinking')
+  })
+})
+
 describe('anthropic request shape', () => {
   async function capture(model: string, thinking: boolean): Promise<Record<string, any>> {
     let body: Record<string, any> = {}

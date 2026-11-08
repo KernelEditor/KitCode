@@ -55,6 +55,7 @@ export function PermissionPrompt({ request, onDecide }: PermissionPromptProps) {
   }, [request])
 
   useTerminalInput((char, key) => {
+    if (key.ctrl || key.meta || key.super) return
     const c = normalizeHotkey(char)
     if (key.upArrow) setSelected((index) => (index - 1 + options.length) % options.length)
     else if (key.downArrow || key.tab) setSelected((index) => (index + 1) % options.length)

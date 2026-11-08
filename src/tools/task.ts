@@ -1,3 +1,4 @@
+import type { SubagentStatus } from '../core/types'
 import { randomBytes } from 'node:crypto'
 import { TASK_TOOL_NAME } from '../core/subagent'
 import type { SubagentRunner } from '../core/subagent'
@@ -45,8 +46,11 @@ export function createTaskTool(runner: SubagentRunner): Tool {
       const subagentId = `sa${randomBytes(4).toString('hex')}`
       const description = field(input, 'description') || 'subagent'
       ctx.onEvent?.({ type: 'subagent_start', id: subagentId, description })
+      let status: SubagentStatus = 'done'
+      let reason: string | undefined
       try {
-        const content = await runner.run({
+        let content = await runner.run({
+          onComplete: (outcome, detail) => { status = outcome; reason = detail },
           prompt: instruction,
           description,
           signal: ctx.signal,
@@ -55,10 +59,17 @@ export function createTaskTool(runner: SubagentRunner): Tool {
           confirm: ctx.confirm,
           requestPermission: ctx.requestPermission,
         })
-        ctx.onEvent?.({ type: 'subagent_end', id: subagentId, result: content })
-        if (progress.length === 0) return { content }
+        if (ctx.signal.aborted) {
+          status = 'cancelled'
+          reason = 'Cancelled by the user; any output is partial.'
+        }
+        if (status !== 'done' && reason) content = `${reason}\n\n${content}`
+        ctx.onEvent?.({ type: 'subagent_end', id: subagentId, result: content, status, reason })
+        const isError = status !== 'done'
+        if (progress.length === 0) return { content, isError }
         return {
           content,
+          isError,
           display: {
             kind: 'list',
             title: `task ${brief(field(input, 'description'), 40)}`,
@@ -67,8 +78,10 @@ export function createTaskTool(runner: SubagentRunner): Tool {
         }
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)
-        ctx.onEvent?.({ type: 'subagent_end', id: subagentId, result: `The subagent failed: ${reason}` })
-        return { content: `The subagent failed: ${reason}`, isError: true }
+        const cancelled = ctx.signal.aborted
+        const content = cancelled ? `The subagent was cancelled: ${reason}` : `The subagent failed: ${reason}`
+        ctx.onEvent?.({ type: 'subagent_end', id: subagentId, result: content, status: cancelled ? 'cancelled' : 'error', reason })
+        return { content, isError: true }
       }
     },
   }

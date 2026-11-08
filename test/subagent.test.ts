@@ -580,3 +580,57 @@ describe('task tool', () => {
     expect(task.readOnly).toBe(true)
   })
 })
+
+
+it.each(['cancelled', 'incomplete', 'error', 'done'] as const)('task emits an explicit %s outcome', async (status) => {
+  const events: import('../src/core/types').AgentEvent[] = []
+  const task = createTaskTool({
+    run: async (request) => {
+      if (status === 'error') throw new Error('provider unavailable')
+      request.onComplete?.(status, status === 'done' ? undefined : 'stopped before completion')
+      return 'partial findings'
+    },
+  })
+  const ctx = context(new AbortController().signal)
+  ctx.onEvent = (event) => events.push(event)
+  const result = await task.execute({ prompt: 'work', description: 'work' }, ctx)
+  expect(events.find((event) => event.type === 'subagent_end')).toMatchObject({ status })
+  expect(Boolean(result.isError)).toBe(status !== 'done')
+  if (status === 'cancelled' || status === 'incomplete') expect(result.content).toContain('stopped before completion')
+})
+
+it('marks a token-limited subagent with partial text as incomplete', async () => {
+  const { provider } = scripted([[
+    { type: 'text_delta', text: 'partial findings' },
+    { type: 'done', stopReason: 'max_tokens', content: [{ type: 'text', text: 'partial findings' }] },
+  ]])
+  const runner = createSubagentRunner(makeConfigWith(provider), lookupOf([]))
+  const outcomes: string[] = []
+  await runner.run({ prompt: 'work', signal: new AbortController().signal, onProgress: () => {}, onComplete: (status) => outcomes.push(status) })
+  expect(outcomes).toEqual(['incomplete'])
+})
+
+it('handles a rejected sibling immediately while a normal tool is still running', async () => {
+  let completed = false
+  const read: Tool = {
+    name: 'read', description: 'read', inputSchema: {}, defaultPermission: 'allow', summarize: () => 'read',
+    execute: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      completed = true
+      return { content: 'ok' }
+    },
+  }
+  const task: Tool = { ...read, name: 'task' }
+  const { provider } = scripted([[
+    { type: 'done', stopReason: 'tool_use', content: [
+      { type: 'tool_use', id: 'task', name: 'task', input: {} },
+      { type: 'tool_use', id: 'read', name: 'read', input: {} },
+    ] },
+  ]])
+  const cfg = makeConfigWith(provider)('', lookupOf([read, task]))
+  cfg.permissions = { decide: (tool) => tool.name === 'task' ? 'ask' : 'allow', grantForSession() {} }
+  await expect(runTurn(cfg, [], {
+    onEvent() {}, requestPermission: async () => { throw new Error('permission failed') },
+  }, new AbortController().signal)).rejects.toThrow('permission failed')
+  expect(completed).toBe(true)
+})

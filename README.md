@@ -126,7 +126,7 @@ Press `/` to open the command list.
 | `/attach <path>` · `/attach clipboard` · `/attach clear` | Manage attachments for the next message; type `@` in the prompt to find and attach a workspace file. |
 | `/compact` | Replace older conversation context with a concise model-generated summary. |
 | `/update` | Check npm for a newer KitCode version. |
-| `/subagents` | Show the current number of active sub-agents. |
+| `/subagents [clear]` | Open sub-agent chats with completion status and stop reasons. `clear` removes finished agents from the list while keeping running agents and the transcript. |
 | `/undo` | Undo built-in file edits from the latest message. |
 | `/usage` | Show tokens, requests, cost, balance/key limits, and response rate-limit headers when available. |
 | `/checker` | Check the local setup and provider model listing without sending a paid chat request. |
@@ -156,6 +156,7 @@ Press `/` to open the command list.
 | `Shift+Tab` | Cycle `normal → accept → plan`. |
 | `Ctrl+V` / `Cmd+V` | Attach an image from the system clipboard; `/attach clipboard` is the explicit fallback. |
 | `Esc` | Cancel the current request or close an overlay. |
+| `Ctrl+C` twice | Exit after a second press within 3 seconds. Any other key cancels the exit confirmation. |
 
 Messages entered while the agent is running are queued and processed in order; they are listed above the input, and ↑/↓ on an empty input pick one to edit. Status and settings
 commands — `/help`, `/usage`, `/context`, `/model`, `/effort`, `/thinking`, `/bell`, `/budget`, `/theme`,

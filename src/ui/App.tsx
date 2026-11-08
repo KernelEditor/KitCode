@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTerminalSize } from './terminal-size'
 import { attachmentLabel, looksLikeAttachmentPath, splitAttachmentPaths } from '../core/attachments'
 import { parseMcpAddCommand } from '../mcp/add'
+import { MAX_SYSTEM_PROMPT_CHARS } from '../config/schema'
 import type { McpAddError } from '../mcp/add'
 import type { McpServerState } from '../mcp/client'
 import { createSpeedMeter, readSpeed, recordSpeed } from './speed'
@@ -22,6 +23,7 @@ import { StatusBar } from './components/StatusBar'
 import { SubagentChat } from './components/SubagentChat'
 import { TerminalViewport, liveTranscriptRows } from './components/TerminalViewport'
 import { Transcript } from './components/Transcript'
+import { subagentStatusLabel } from './subagent-status'
 import { appendInputHistory } from './history'
 import { LANGS, StringsContext, stringsFor } from './i18n'
 import type { Lang, Strings } from './i18n'
@@ -29,7 +31,7 @@ import { useTerminalInput } from './input'
 import type { Runtime } from './runtime'
 import { PRESETS, ThemeContext, makeTheme, parseAccent, resolveAccent } from './theme'
 import { formatDuration } from './time'
-import { applyEvents, emptyTranscript, fromHistory, pushNotice, pushUser } from './transcript'
+import { applyEvents, emptyTranscript, fromHistory, isStreamDelta, pushNotice, pushUser } from './transcript'
 import type { Bubble, PickerItem } from './types'
 
 const EFFORTS: Effort[] = ['auto', 'low', 'medium', 'high', 'xhigh', 'max']
@@ -127,6 +129,8 @@ export function App({
   const [, forceRender] = useState(0)
   const history = useRef<Message[]>(initialHistory)
   const abort = useRef<AbortController | null>(null)
+  const exitArmedAt = useRef<number | null>(null)
+  const [hiddenSubagents, setHiddenSubagents] = useState<Set<string>>(() => new Set())
   const sessionStart = useRef(Date.now())
   const turns = useRef(0)
   const [turnStart, setTurnStart] = useState<number | null>(null)
@@ -190,7 +194,7 @@ export function App({
     (event: AgentEvent) => {
       recordSpeed(speedMeter.current, event)
       transcriptEvents.current.push(event)
-      if (event.type !== 'text_delta' && event.type !== 'thinking_delta') {
+      if (!isStreamDelta(event)) {
         flushTranscriptEvents()
         return
       }
@@ -281,6 +285,7 @@ export function App({
     turns.current += 1
     const hooks: AgentHooks = {
       onEvent: queueTranscriptEvent,
+      onHistory: (messages) => { history.current = messages },
       requestPermission: (request) =>
         new Promise<PermissionDecision>((resolve) => {
           let settled = false
@@ -322,13 +327,14 @@ export function App({
         notice('error', error instanceof Error ? error.message : String(error))
       }
       history.current = await runtime.run(history.current, hooks, controller.signal)
-      void runtime
-        .persist(history.current)
-        .catch((error) => notice('error', error instanceof Error ? error.message : String(error)))
     } catch (error) {
       notice('error', error instanceof Error ? error.message : String(error))
     } finally {
       // Long answers finish while you are elsewhere: a short beep says it is done.
+      // Save completed tool work even when the next provider request failed.
+      await runtime.persist(history.current).catch((error) =>
+        notice('error', error instanceof Error ? error.message : String(error)),
+      )
       if (!controller.signal.aborted && Date.now() - startedAt >= BELL_AFTER_MS) bell()
       flushTranscriptEvents()
       abort.current = null
@@ -1104,8 +1110,24 @@ export function App({
         }
 
         case 'subagents': {
+          flushTranscriptEvents()
+          const clearFinished = () => {
+            const finished = transcriptRef.current.bubbles.filter((bubble) =>
+              bubble.kind === 'subagent' && bubble.state !== 'running' && !hiddenSubagents.has(bubble.id),
+            )
+            if (finished.length === 0) {
+              notice('info', strings.noFinishedSubagents)
+              return
+            }
+            setHiddenSubagents((previous) => new Set([...previous, ...finished.map((bubble) => bubble.id)]))
+            notice('info', strings.subagentsCleared)
+          }
+          if (rawRest === 'clear') {
+            clearFinished()
+            return
+          }
           const agents = transcriptRef.current.bubbles.filter(
-            (bubble): bubble is Extract<Bubble, { kind: 'subagent' }> => bubble.kind === 'subagent',
+            (bubble): bubble is Extract<Bubble, { kind: 'subagent' }> => bubble.kind === 'subagent' && !hiddenSubagents.has(bubble.id),
           )
           if (agents.length === 0) {
             notice('info', strings.noSubagents)
@@ -1121,13 +1143,16 @@ export function App({
             ? running[0]!.id
             : await pick(
                 strings.subagentsTitle,
-                ordered.slice(0, 20).map((agent) => ({
+                [...ordered.slice(0, 20).map((agent) => ({
                   key: agent.id,
                   label: agent.description || 'subagent',
-                  hint: agent.state === 'running' ? strings.subagentRunning : strings.subagentDone,
-                })),
+                  hint: subagentStatusLabel(agent.state, strings),
+                })), ...(ordered.some((agent) => agent.state !== 'running')
+                  ? [{ key: '__clear_finished__', label: strings.subagentsClear, hint: '/subagents clear' }]
+                  : [])],
               )
-          if (id) setOverlay({ kind: 'subagent', id })
+          if (id === '__clear_finished__') clearFinished()
+          else if (id) setOverlay({ kind: 'subagent', id })
           return
         }
 
@@ -1209,27 +1234,25 @@ export function App({
 
         case 'systemp': {
           const sub = rest[0]?.toLowerCase()
-          if (sub === 'set') {
-            const text = rawRest.replace(/^\S+\s*/, '').trim()
-            if (!text) {
-              const typed = await promptInput(strings.systemPromptTitle)
-              if (!typed || typed.trim() === '') return
-              await runtime.setSystemPrompt(typed)
-              notice('info', strings.systemPromptSet)
-              return
-            }
-            await runtime.setSystemPrompt(text)
-            notice('info', strings.systemPromptSet)
-            return
-          }
-          if (sub === 'load') {
-            const filePath = rawRest.replace(/^\S+\s*/, '').trim()
-            if (!filePath) {
+          if (sub === 'set' || sub === 'load') {
+            const argument = rawRest.replace(/^\S+\s*/, '').trim()
+            if (!argument && sub === 'load') {
               notice('warn', strings.systemPromptUsage)
               return
             }
             try {
-              const text = await runtime.loadSystemPromptFile(filePath)
+              const text =
+                sub === 'set'
+                  ? argument ||
+                    // No inline text: fall back to a full-screen input prompt.
+                    ((await promptInput(strings.systemPromptTitle)) ?? '').trim()
+                  : await runtime.loadSystemPromptFile(argument)
+              if (!text) return
+              // Check before the runtime so the reason shows in the UI language.
+              if (text.length > MAX_SYSTEM_PROMPT_CHARS) {
+                notice('error', strings.systemPromptTooLong(MAX_SYSTEM_PROMPT_CHARS.toLocaleString(lang ?? 'en')))
+                return
+              }
               await runtime.setSystemPrompt(text)
               notice('info', strings.systemPromptSet)
             } catch (error) {
@@ -1500,7 +1523,7 @@ export function App({
         }
       }
     },
-    [applyAccent, appendAttachment, ask, exit, notice, pick, replaceAttachments, runtime, strings],
+    [applyAccent, appendAttachment, ask, exit, notice, pick, replaceAttachments, runtime, strings, hiddenSubagents, flushTranscriptEvents],
   )
 
   const runSlash = useCallback(
@@ -1701,6 +1724,7 @@ export function App({
       }
       const text = raw.trim()
       const submitSlash = () => {
+        setPromptHistory((state) => appendInputHistory(state, text))
         
         
         if (!detachedInput) setInput('')
@@ -1773,6 +1797,18 @@ export function App({
   )
 
   useTerminalInput((_char, key) => {
+    if (key.ctrl && _char === 'c') {
+      const now = Date.now()
+      if (exitArmedAt.current !== null && now - exitArmedAt.current < 3000) {
+        abort.current?.abort()
+        exit()
+      } else {
+        exitArmedAt.current = now
+        notice('warn', strings.confirmExit)
+      }
+      return
+    }
+    exitArmedAt.current = null
     if (key.tab && key.shift) {
       const next = runtime.cycleMode()
       notice('info', strings.modeChanged(strings.modeLabel[next] ?? next))
@@ -1780,8 +1816,8 @@ export function App({
       return
     }
     if (!key.escape) return
-    // The sub-agent chat closes itself on Esc; it must not cancel the run.
-    if (overlay.kind === 'subagent') return
+    // Overlays handle Esc themselves; closing one must not cancel the run.
+    if (overlay.kind !== 'none') return
     // Editing a queued message: Esc leaves the queue edit (the message goes
     // back to its place, edits kept) instead of cancelling the running answer.
     if (checkedOut.current && overlay.kind === 'none') {
@@ -1811,21 +1847,6 @@ export function App({
       replaceAttachments([])
       if (automaticAttachmentTask.current) automaticAttachmentTask.current = null
       if (clipboardPasteTask.current) clipboardPasteTask.current = null
-      return
-    }
-    if (overlay.kind === 'permission') {
-      overlay.resolve('deny')
-      setOverlay({ kind: 'none' })
-      return
-    }
-    if (overlay.kind === 'confirm') {
-      overlay.resolve(false)
-      setOverlay({ kind: 'none' })
-      return
-    }
-    if (overlay.kind === 'picker') {
-      overlay.select('')
-      setOverlay({ kind: 'none' })
       return
     }
     setInput('')

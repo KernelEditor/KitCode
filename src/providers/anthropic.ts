@@ -122,12 +122,12 @@ async function* streamOnce(
     messages: toMessageParams(req.messages),
     tools: toToolParams(req.tools),
   }
-  if (thinkingOn) {
+  if (thinkingOn && !req.compaction) {
     const thinking = thinkingParam(req.model, req.maxTokens)
     if (thinking) params.thinking = thinking
   }
   const effort = effectiveEffort('anthropic', req.model, req.effort, req.messages)
-  if (effort) params.output_config = { effort }
+  if (effort && !req.compaction) params.output_config = { effort }
 
   let thinking = ''
   let text = ''

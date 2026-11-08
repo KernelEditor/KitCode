@@ -21,11 +21,10 @@ import type {
 } from '../tools/types'
 import type { AgentHooks } from './types'
 import { sanitizeHistory } from './session'
+import { streamWithRetry } from './retry'
 import type { TurnBudget } from './budget'
 
 const MAX_PAUSE_RESUMES = 5
-const MAX_RETRIES = 3
-const INITIAL_BACKOFF_MS = 1000
 
 export const DEFAULT_MAX_TURN_STEPS = 256
 
@@ -144,6 +143,7 @@ export async function runTurn(
     }
 
     const request = async (): Promise<StreamOutcome | null> => {
+      hooks.onHistory?.(sanitizeHistory(messages))
       if (signal.aborted) return { content: [], stopReason: 'aborted' }
       const budgetDecision = cfg.budget?.beforeRequest({
         modelRef: cfg.modelRef,
@@ -168,6 +168,7 @@ export async function runTurn(
     const outcome = await (cfg.modelRequestLane?.run(request) ?? request())
     if (!outcome) return messages
     messages.push({ role: 'assistant', content: outcome.content })
+    hooks.onHistory?.(sanitizeHistory(messages))
 
     if (outcome.stopReason === 'aborted') {
       hooks.onEvent({ type: 'turn_end', stopReason: 'aborted' })
@@ -177,6 +178,7 @@ export async function runTurn(
     if (outcome.stopReason === 'tool_use') {
       const results = await runToolCalls(cfg, outcome.content, hooks, signal)
       if (results.length > 0) messages.push({ role: 'user', content: results })
+      hooks.onHistory?.(sanitizeHistory(messages))
       if (signal.aborted) {
         hooks.onEvent({ type: 'turn_end', stopReason: 'aborted' })
         return sanitizeHistory(messages)
@@ -239,7 +241,7 @@ async function consumeStream(
   const startedAt = Date.now()
   let firstTokenAt: number | undefined
 
-  for await (const event of streamWithRetry(cfg.provider, request, cfg.modelRef, signal)) {
+  for await (const event of streamWithRetry(cfg.provider, request, signal)) {
     switch (event.type) {
       case 'text_delta':
         firstTokenAt ??= Date.now()
@@ -262,6 +264,13 @@ async function consumeStream(
         break
       case 'rate_limits':
         hooks.onEvent({ type: 'rate_limits', model: cfg.modelRef, limits: event.limits })
+        break
+      case 'retrying':
+        hooks.onEvent({
+          type: 'notice',
+          level: 'warn',
+          text: `Rate limited; retrying the same request in ${Math.ceil(event.waitMs / 1000)}s (attempt ${event.attempt}). The conversation keeps its progress.`,
+        })
         break
       case 'tool_call':
         break
@@ -290,108 +299,6 @@ async function consumeStream(
   throw new Error(
     `"${cfg.provider.id}" ended the stream without completing the turn — nothing was generated. The endpoint answered, but not with a usable ${cfg.provider.kind} response.`,
   )
-}
-
-async function* streamWithRetry(
-  provider: Provider,
-  request: ChatRequest,
-  modelRef: string,
-  signal: AbortSignal,
-): AsyncGenerator<import('../providers/types').StreamEvent> {
-  let lastError: unknown
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    if (signal.aborted) return
-    try {
-      const stream = provider.stream(request)[Symbol.asyncIterator]()
-      let cancel!: () => void
-      let cancelTimer: ReturnType<typeof setTimeout> | undefined
-      const cancelled = new Promise<IteratorResult<import('../providers/types').StreamEvent>>((resolve) => {
-        // Let cooperative adapters flush final usage and partial content, but
-        // do not wait indefinitely for an endpoint that ignores cancellation.
-        cancel = () => {
-          cancelTimer ??= setTimeout(() => resolve({ done: true, value: undefined }), 100)
-        }
-        signal.addEventListener('abort', cancel, { once: true })
-        if (signal.aborted) cancel()
-      })
-      try {
-        for (;;) {
-          const next = await Promise.race([stream.next(), cancelled])
-          if (next.done) break
-          if (!signal.aborted || next.value.type === 'usage' || next.value.type === 'done') {
-            yield next.value
-          }
-          if (next.value.type === 'done') break
-        }
-      } finally {
-        signal.removeEventListener('abort', cancel)
-        if (cancelTimer !== undefined) clearTimeout(cancelTimer)
-        void stream.return?.().catch(() => undefined)
-      }
-      return
-    } catch (error) {
-      lastError = error
-      if (attempt >= MAX_RETRIES) break
-      const waitMs = retryBackoffMs(error, attempt)
-      if (waitMs > 0) {
-        try {
-          await sleep(waitMs, signal)
-        } catch (error) {
-          if (signal.aborted) return
-          throw error
-        }
-        continue
-      }
-      break
-    }
-  }
-  if (lastError) throw lastError
-}
-
-function retryBackoffMs(error: unknown, attempt: number): number {
-  if (!isRateLimitError(error)) return 0
-  const serverWait = retryAfterFromError(error)
-  if (serverWait > 0) return Math.min(serverWait, 60_000)
-  return Math.min(INITIAL_BACKOFF_MS * 2 ** attempt, 30_000)
-}
-
-function isRateLimitError(error: unknown): boolean {
-  if (!(error instanceof ProviderError)) return false
-  return error.status === 429
-}
-
-function retryAfterFromError(error: unknown): number {
-  const cause = (error as { cause?: unknown })?.cause
-  const headers = (cause as { headers?: unknown })?.headers
-  if (headers && typeof (headers as { get?: unknown }).get === 'function') {
-    const ms = Number((headers as { get: (k: string) => string | null }).get('retry-after-ms'))
-    if (Number.isFinite(ms) && ms > 0) return ms
-    const raw = (headers as { get: (k: string) => string | null }).get('retry-after')
-    if (raw) {
-      const s = Number(raw)
-      if (Number.isFinite(s) && s > 0) return s * 1000
-    }
-  }
-  return 0
-}
-
-function sleep(ms: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal.aborted) {
-      reject(signal.reason ?? new Error('Aborted'))
-      return
-    }
-    const finish = () => {
-      signal.removeEventListener('abort', onAbort)
-      resolve()
-    }
-    const onAbort = () => {
-      clearTimeout(id)
-      reject(signal.reason ?? new Error('Aborted'))
-    }
-    const id = setTimeout(finish, ms)
-    signal.addEventListener('abort', onAbort, { once: true })
-  })
 }
 
 // Characters per token, as the compactor estimates it. This used to return the
@@ -437,8 +344,10 @@ async function runToolCalls(
     return out
   })()
   // Drain siblings even if a permission hook fails, before committing the turn.
-  const [settledOthers] = await Promise.allSettled([others])
-  const settledTasks = await Promise.allSettled(tasks)
+  const [[settledOthers], settledTasks] = await Promise.all([
+    Promise.allSettled([others]),
+    Promise.allSettled(tasks),
+  ])
   for (const result of [settledOthers!, ...settledTasks]) {
     if (result.status === 'rejected') throw result.reason
   }

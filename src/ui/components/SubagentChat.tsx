@@ -1,4 +1,6 @@
-import { Box, Text, useInput } from 'ink'
+import { Box, Text } from 'ink'
+import { useTerminalInput } from '../input'
+import { subagentStatusLabel } from '../subagent-status'
 import { useState } from 'react'
 import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
@@ -6,6 +8,10 @@ import type { Bubble } from '../types'
 import { BubbleView } from './Transcript'
 
 type SubagentBubble = Extract<Bubble, { kind: 'subagent' }>
+
+// The body shows at most a screenful; re-rendering every finished step of a
+// long run on each stream frame ground the UI to a halt with several agents.
+const MAX_SHOWN_BUBBLES = 24
 
 /**
  * Live view of one sub-agent's own conversation. It reads the bubble from the
@@ -27,7 +33,7 @@ export function SubagentChat({
   const [offset, setOffset] = useState(0)
   const total = bubble?.bubbles.length ?? 0
 
-  useInput((_input, key) => {
+  useTerminalInput((_input, key) => {
     if (key.escape) onClose()
     else if (key.upArrow) setOffset((value) => Math.min(Math.max(0, total - 1), value + 1))
     else if (key.downArrow) setOffset((value) => Math.max(0, value - 1))
@@ -43,17 +49,18 @@ export function SubagentChat({
   }
 
   const running = bubble.state === 'running'
-  const shown = bubble.bubbles.slice(0, total - offset)
-  const bodyRows = Math.max(3, rows - 2)
+  const shown = bubble.bubbles.slice(Math.max(0, total - offset - MAX_SHOWN_BUBBLES), total - offset)
+  const bodyRows = Math.max(3, rows - (bubble.reason ? 3 : 2))
 
   return (
     <Box flexDirection="column" minWidth={0}>
-      <Text color={running ? theme.warn : theme.ok} bold wrap="truncate-end">
+      <Text color={running || bubble.state === 'cancelled' || bubble.state === 'incomplete' ? theme.warn : bubble.state === 'error' ? theme.error : theme.ok} bold wrap="truncate-end">
         {running ? '◌' : '●'} {bubble.description}
         <Text dimColor bold={false}>
-          {' · '}{running ? strings.subagentRunning : strings.subagentDone}
+          {' · '}{subagentStatusLabel(bubble.state, strings)}
         </Text>
       </Text>
+      {bubble.reason && <Text color={theme.warn} wrap="truncate-end">{bubble.reason}</Text>}
       <Box
         flexDirection="column"
         height={bodyRows}

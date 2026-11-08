@@ -1,3 +1,4 @@
+import { killTree } from './kill-tree'
 import { spawn } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
 import { startJob } from './jobs'
@@ -120,32 +121,15 @@ export const bashTool: Tool = {
       child.stdout.on('data', collector())
       child.stderr.on('data', collector())
 
-      const killTree = () => {
-        if (child.pid == null) return
-        if (process.platform === 'win32') {
-          try {
-            spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' })
-          } catch {
-            child.kill('SIGKILL')
-          }
-          return
-        }
-        try {
-          process.kill(-child.pid, 'SIGKILL')
-        } catch {
-          child.kill('SIGKILL')
-        }
-      }
-
       let timedOut = false
       let aborted = false
       const timer = setTimeout(() => {
         timedOut = true
-        killTree()
+        killTree(child)
       }, timeout)
       const onAbort = () => {
         aborted = true
-        killTree()
+        killTree(child)
       }
       ctx.signal.addEventListener('abort', onAbort, { once: true })
 

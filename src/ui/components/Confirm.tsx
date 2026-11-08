@@ -10,6 +10,7 @@ export function Confirm({ title, body, danger, onAnswer }: ConfirmProps) {
   const theme = useTheme()
   const strings = useStrings()
   useTerminalInput((char, key) => {
+    if (key.ctrl || key.meta || key.super) return
     const c = normalizeHotkey(char)
     if (c === 'y') onAnswer(true)
     else if (c === 'n' || key.escape || key.return) onAnswer(false)

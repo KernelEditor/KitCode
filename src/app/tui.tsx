@@ -14,6 +14,7 @@ export const TUI_RENDER_OPTIONS = {
   // twice). Standard rendering clears the whole frame each time — a little
   // more work, but no stale lines.
   incrementalRendering: false,
+  exitOnCtrlC: false,
   // Throttling defers writes; when a bubble closes into <Static> mid-stream,
   // the deferred frame and the static write race and leave stale rows behind.
   // Unthrottled renders cost a little CPU but keep every frame consistent.

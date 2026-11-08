@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { runTurn } from '../src/core/agent'
 import type { AgentConfig } from '../src/core/agent'
-import type { ContentBlock, Provider, StopReason } from '../src/providers/types'
+import type { ContentBlock, Message, Provider, StopReason } from '../src/providers/types'
 import { INVALID_ARGUMENTS_KEY } from '../src/providers/types'
 import type { Tool } from '../src/tools/types'
 
@@ -39,6 +39,22 @@ const hooks = { onEvent() {}, requestPermission: async () => 'deny' as const }
 const user = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'go' }] }]
 
 describe('turn history', () => {
+  it('retains completed tools for recovery when the next request fails', async () => {
+    let calls = 0
+    const provider = scripted([])
+    provider.stream = async function* () {
+      if (++calls > 1) throw new Error('provider unavailable')
+      yield { type: 'done', stopReason: 'tool_use', content: [{ type: 'tool_use', id: 't1', name: 'read', input: {} }] }
+    }
+    const tool: Tool = { name: 'read', description: '', inputSchema: {}, defaultPermission: 'allow', summarize: () => 'read', execute: async () => ({ content: 'important file contents' }) }
+    let latest: Message[] = []
+    await expect(runTurn(config(provider, tool), user, {
+      ...hooks, onHistory: (messages) => { latest = messages },
+    }, new AbortController().signal)).rejects.toThrow('provider unavailable')
+    expect(latest.at(-1)?.content).toContainEqual({ type: 'tool_result', toolUseId: 't1', content: 'important file contents', isError: undefined })
+    expect(latest[1]?.content).toContainEqual({ type: 'tool_use', id: 't1', name: 'read', input: {} })
+  })
+
   it('never ends on a tool call that did not run', async () => {
     const provider = scripted([
       { stopReason: 'max_tokens', content: [{ type: 'text', text: 'I will read' }, { type: 'tool_use', id: 't1', name: 'read', input: {} }] },

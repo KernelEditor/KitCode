@@ -1,3 +1,4 @@
+import { killTree } from './kill-tree'
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
@@ -172,22 +173,5 @@ function summary(job: Job): JobSummary {
     state: job.state,
     exitCode: job.exitCode,
     signal: job.signal,
-  }
-}
-
-function killTree(child: ChildProcess): void {
-  if (child.pid == null) return
-  if (process.platform === 'win32') {
-    try {
-      spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore' })
-    } catch {
-      child.kill('SIGKILL')
-    }
-    return
-  }
-  try {
-    process.kill(-child.pid, 'SIGKILL')
-  } catch {
-    child.kill('SIGKILL')
   }
 }

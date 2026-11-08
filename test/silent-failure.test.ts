@@ -8,7 +8,7 @@ import type { AgentEvent, AgentHooks } from '../src/core/types'
 import { createAnthropicProvider } from '../src/providers/anthropic'
 import { createOpenAiProvider } from '../src/providers/openai-compat'
 import { INVALID_ARGUMENTS_KEY, ProviderError } from '../src/providers/types'
-import type { ChatRequest, Provider, StreamEvent } from '../src/providers/types'
+import type { ChatRequest, Message, Provider, StreamEvent } from '../src/providers/types'
 import type { Tool } from '../src/tools/types'
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void
@@ -294,6 +294,56 @@ describe('runTurn refuses to fabricate a finished turn', () => {
     expect(calls).toBe(1)
     expect(events).toContainEqual({ type: 'turn_end', stopReason: 'aborted' })
   })
+  it('retries a rate limit with completed tool calls still in the request history', async () => {
+    const { hooks } = recordingHooks()
+    const requests: Message[][] = []
+    let toolRuns = 0
+    const provider = stubProvider([])
+    provider.stream = async function* (request) {
+      requests.push(request.messages)
+      if (requests.length === 1) {
+        yield { type: 'done', stopReason: 'tool_use', content: [{ type: 'tool_use', id: 'call', name: 'read', input: {} }] }
+        return
+      }
+      if (requests.length === 2) {
+        throw new ProviderError('rate limited', 'gateway', 429, {
+          cause: { headers: new Headers({ 'retry-after-ms': '1' }) },
+        })
+      }
+      yield { type: 'done', stopReason: 'end_turn', content: [{ type: 'text', text: 'continued' }] }
+    }
+    const config = agentConfig(provider)
+    config.tools = {
+      get: () => ({
+        name: 'read',
+        description: 'read',
+        inputSchema: { type: 'object' },
+        defaultPermission: 'allow',
+        readOnly: true,
+        summarize: () => 'read',
+        execute: async () => {
+          toolRuns += 1
+          return { content: 'file contents' }
+        },
+      }),
+      schemas: () => [],
+    }
+
+    const result = await runTurn(
+      config,
+      [{ role: 'user', content: [{ type: 'text', text: 'continue' }] }],
+      hooks,
+      new AbortController().signal,
+    )
+
+    expect(toolRuns).toBe(1)
+    expect(requests).toHaveLength(3)
+    expect(requests[2]).toEqual(requests[1])
+    expect(requests[2]?.findLast((message) => message.role === 'user')?.content)
+      .toContainEqual({ type: 'tool_result', toolUseId: 'call', content: 'file contents' })
+    expect(result.at(-1)?.content).toContainEqual({ type: 'text', text: 'continued' })
+  })
+
   it('surfaces the body of a non-streaming 200 through a whole turn', async () => {
     const { hooks, events } = recordingHooks()
     const provider = openAi(await jsonServer(denialBody))

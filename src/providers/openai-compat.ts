@@ -180,8 +180,8 @@ async function* streamOnce(
       {
         model: req.model,
         [tokenField]: req.maxTokens,
-        ...(effort ? { reasoning_effort: effort } : {}),
-        ...thinkingOff,
+        ...(effort && !req.compaction ? { reasoning_effort: effort } : {}),
+        ...(req.compaction ? {} : thinkingOff),
         messages: toChatMessages(req.system, req.messages),
         ...(req.tools.length > 0 ? { tools: toChatTools(req.tools) } : {}),
         stream: true,

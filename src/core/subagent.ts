@@ -2,7 +2,7 @@ import type { Message } from '../providers/types'
 import { brief } from '../tools/summary'
 import type { AgentConfig, ToolLookup } from './agent'
 import { createExecutionLane, runTurn } from './agent'
-import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest } from './types'
+import type { AgentEvent, AgentHooks, PermissionDecision, PermissionRequest, SubagentStatus } from './types'
 
 export const TASK_TOOL_NAME = 'task'
 
@@ -33,6 +33,7 @@ export interface SubagentRequest {
   signal: AbortSignal
   onProgress(summary: string): void
   onEvent?(event: AgentEvent): void
+  onComplete?(status: SubagentStatus, reason?: string): void
   confirm?(question: string): Promise<boolean>
   requestPermission?(request: PermissionRequest): Promise<PermissionDecision>
 }
@@ -51,7 +52,11 @@ export function createSubagentRunner(
   const permissionLane = createExecutionLane()
   return {
     async run(request) {
-      if (request.signal.aborted) return SUBAGENT_CANCELLED
+      if (request.signal.aborted) {
+        request.onComplete?.('cancelled', 'Cancelled by the user.')
+        return SUBAGENT_CANCELLED
+      }
+      let stopReason = ''
 
       let steps = 0
       let finalCall = false
@@ -107,6 +112,7 @@ export function createSubagentRunner(
 
       const hooks: AgentHooks = {
         onEvent(event) {
+          if (event.type === 'turn_end') stopReason = event.stopReason
           if (event.type === 'turn_start') {
             ++steps
             if (steps > MAX_SUBAGENT_STEPS + 1) limit.abort()
@@ -133,9 +139,20 @@ export function createSubagentRunner(
       ]
       const text = finalText(await runTurn(cfg, history, hooks, signal))
 
-      if (!limit.signal.aborted) return text
-      if (request.signal.aborted && text === SUBAGENT_NO_ANSWER) return SUBAGENT_CANCELLED
-      return text === SUBAGENT_NO_ANSWER ? STEP_LIMIT_NOTE : `${text}\n\n${STEP_LIMIT_NOTE}`
+      if (request.signal.aborted || (stopReason === 'aborted' && !limit.signal.aborted)) {
+        request.onComplete?.('cancelled', 'Cancelled before the task finished; any output is partial.')
+        return text === SUBAGENT_NO_ANSWER ? SUBAGENT_CANCELLED : text
+      }
+      if (limit.signal.aborted || (finalCall && (stopReason === 'tool_use' || text === SUBAGENT_NO_ANSWER))) {
+        request.onComplete?.('incomplete', STEP_LIMIT_NOTE)
+        return text === SUBAGENT_NO_ANSWER ? STEP_LIMIT_NOTE : `${text}\n\n${STEP_LIMIT_NOTE}`
+      }
+      if (text === SUBAGENT_NO_ANSWER || stopReason === 'max_tokens' || stopReason === 'refusal' || stopReason === 'pause_turn') {
+        request.onComplete?.('incomplete', text === SUBAGENT_NO_ANSWER ? SUBAGENT_NO_ANSWER : `Task stopped (${stopReason}); output may be partial.`)
+      } else {
+        request.onComplete?.('done')
+      }
+      return text
     },
   }
 }

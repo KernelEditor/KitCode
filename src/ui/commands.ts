@@ -39,7 +39,7 @@ export const COMMANDS: SlashCommand[] = [
   { name: 'resume' },
   { name: 'undo' },
   { name: 'clear' },
-  { name: 'subagents', ...BUSY_SAFE },
+  { name: 'subagents', args: '[clear]', ...BUSY_SAFE },
   { name: 'help', ...BUSY_SAFE },
   { name: 'exit', ...BUSY_SAFE },
 ]

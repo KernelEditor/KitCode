@@ -112,7 +112,7 @@ export function applyEvent(state: TranscriptState, event: AgentEvent): Transcrip
         ...state,
         bubbles: state.bubbles.map((bubble) =>
           bubble.kind === 'subagent' && bubble.id === event.id
-            ? { ...bubble, state: 'done', result: sanitizeTerminalText(event.result) }
+            ? { ...bubble, state: event.status ?? 'done', reason: event.reason ? sanitizeTerminalText(event.reason) : undefined, result: sanitizeTerminalText(event.result) }
             : bubble,
         ),
       }
@@ -151,6 +151,17 @@ export function applyEvent(state: TranscriptState, event: AgentEvent): Transcrip
 
 export function applyEvents(state: TranscriptState, events: AgentEvent[]): TranscriptState {
   return coalesceDeltas(events).reduce(applyEvent, state)
+}
+
+/**
+ * Streamed text, including the deltas wrapped from a subagent. These flush on
+ * a timer instead of immediately: concurrent subagents emit hundreds of deltas
+ * per second, and one full Ink render per delta starves the event loop until
+ * provider streams stop being read.
+ */
+export function isStreamDelta(event: AgentEvent): boolean {
+  if (event.type === 'text_delta' || event.type === 'thinking_delta') return true
+  return event.type === 'subagent_event' && isStreamDelta(event.event)
 }
 
 function coalesceDeltas(events: AgentEvent[]): AgentEvent[] {

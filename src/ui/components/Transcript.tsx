@@ -5,6 +5,8 @@ import type { ReactNode } from 'react'
 import stringWidth from 'string-width'
 import { diffLines, truncate } from '../diff'
 import { Markdown } from '../markdown'
+import { subagentStatusLabel } from '../subagent-status'
+import { useStrings } from '../i18n'
 import { useTheme } from '../theme'
 import { sanitizeThinkingText } from '../sanitize'
 import { formatDuration } from '../time'
@@ -188,8 +190,14 @@ function AssistantView({ bubble: source, maxRows }: { bubble: AssistantBubble; m
 export function clipTextToRows(text: string, maxRows: number, columns: number): string {
   if (text === '' || maxRows <= 0) return ''
   const width = Number.isFinite(columns) ? Math.max(1, Math.floor(columns)) : 80
-  const rows = text.replace(/\r\n?/g, '\n').split('\n').flatMap((line) => wrapVisualLine(line, width))
-  if (rows.length <= maxRows) return rows.join('\n')
+  // Streams re-render several times a second while they grow: never walk the
+  // whole text. Past this bound the tail alone spans more visual lines than
+  // maxRows, so the clipped result is identical to clipping the full text.
+  const bound = (maxRows + 1) * width
+  const sliced = text.length > bound
+  const source = sliced ? text.slice(text.length - bound) : text
+  const rows = source.replace(/\r\n?/g, '\n').split('\n').flatMap((line) => wrapVisualLine(line, width))
+  if (!sliced && rows.length <= maxRows) return rows.join('\n')
   const tail = rows.slice(-Math.max(1, maxRows - 1))
   return maxRows === 1 ? (tail.at(-1) ?? '') : ['…', ...tail].join('\n')
 }
@@ -334,18 +342,29 @@ function previewLines(content: string): string[] {
 
 const VISIBLE_SUBAGENTS = 3
 
+// The live view only ever shows a subagent's tail; clipping before sanitizing
+// keeps a frame cheap no matter how much text the agent has streamed.
+const PROGRESS_TAIL_CHARS = 4_000
+
+function progressTail(text: string): string {
+  if (text.length <= PROGRESS_TAIL_CHARS) return text
+  const cut = text.slice(text.length - PROGRESS_TAIL_CHARS)
+  const newline = cut.indexOf('\n')
+  return newline === -1 ? cut : cut.slice(newline + 1)
+}
+
 function SubagentSummary({ agents }: { agents: Extract<Bubble, { kind: 'subagent' }>[] }) {
   const theme = useTheme()
   const running = agents.filter((agent) => agent.state === 'running')
   return (
     <Box flexDirection="column" marginTop={1} minWidth={0}>
       <Text color={theme.accent} wrap="truncate-end">
-        Subagents: {running.length} running · {agents.length - running.length} done
+        Subagents: {running.length} running · {agents.filter((agent) => agent.state === 'done').length} done / {agents.filter((agent) => agent.state !== 'running' && agent.state !== 'done').length} stopped
       </Text>
       {running.slice(0, VISIBLE_SUBAGENTS).map((agent) => {
         const latest = agent.bubbles.at(-1)
         const progress = latest?.kind === 'tool' ? latest.summary
-          : latest?.kind === 'assistant' ? sanitizeThinkingText(latest.text || latest.thinking, latest.streaming)
+          : latest?.kind === 'assistant' ? sanitizeThinkingText(progressTail(latest.text || latest.thinking), latest.streaming)
           : 'waiting'
         return (
           <Text key={agent.id} dimColor wrap="truncate-end">
@@ -360,19 +379,21 @@ function SubagentSummary({ agents }: { agents: Extract<Bubble, { kind: 'subagent
 
 function SubagentView({ bubble, maxRows }: { bubble: Extract<Bubble, { kind: 'subagent' }>; maxRows?: number }) {
   const theme = useTheme()
+  const strings = useStrings()
   const { columns } = useTerminalSize()
   const mark = bubble.state === 'running' ? '◌' : '●'
-  const color = bubble.state === 'running' ? theme.warn : theme.ok
+  const color = bubble.state === 'error' ? theme.error : bubble.state === 'done' ? theme.ok : theme.warn
   const latest = bubble.bubbles.at(-1)
   const progress = latest?.kind === 'assistant'
-    ? sanitizeThinkingText(latest.text || latest.thinking, latest.streaming)
+    ? sanitizeThinkingText(progressTail(latest.text || latest.thinking), latest.streaming)
     : latest?.kind === 'tool' ? latest.summary : ''
 
   return (
     <Box flexDirection="column" marginTop={1} minWidth={0}>
       <Text color={color} bold wrap="truncate-end">
-        {mark} subagent: {bubble.description}
+        {mark} subagent: {bubble.description} - {subagentStatusLabel(bubble.state, strings)}
       </Text>
+      {bubble.reason && <Text color={theme.warn}>{bubble.reason}</Text>}
       <Box marginLeft={2} flexDirection="column" minWidth={0}>
         {bubble.state === 'running' ? (
           <Box flexDirection="column" maxHeight={Math.max(1, (maxRows ?? 6) - 2)} overflowY="hidden">

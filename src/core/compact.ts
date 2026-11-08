@@ -1,3 +1,4 @@
+import { streamWithRetry } from './retry'
 import type {
   ContentBlock,
   Message,
@@ -539,24 +540,25 @@ async function summarizeText(
   if (signal.aborted) throw signal.reason ?? new Error('Context compaction was cancelled.')
   let summary = ''
   let finalText = ''
+  let stopReason: string | undefined
   let usage: Usage | undefined
   let rateLimits: RateLimits | undefined
 
-  const stream = provider.stream({
+  const stream = streamWithRetry(provider, {
     model,
     system: systemPrompt,
     messages: [{ role: 'user', content: [{ type: 'text', text: source }] }],
     tools: [],
     maxTokens: Math.max(1, Math.floor(Math.min(maxOutputTokens, maxTokens))),
-    thinking: false,
-    signal,
-  })
+    compaction: true,
+  }, signal)
 
   for await (const event of stream) {
     if (event.type === 'text_delta') summary += event.text
     else if (event.type === 'usage') usage = event.usage
     else if (event.type === 'rate_limits') rateLimits = event.limits
     else if (event.type === 'done') {
+      stopReason = event.stopReason
       finalText = event.content
         .filter((block) => block.type === 'text')
         .map((block) => (block.type === 'text' ? block.text : ''))
@@ -565,6 +567,11 @@ async function summarizeText(
   }
 
   if (signal.aborted) throw signal.reason ?? new Error('Context compaction was cancelled.')
+
+  if (stopReason !== 'end_turn') {
+    throw new Error(`Context summary is incomplete (${stopReason ?? 'stream ended without a final response'}); original history was kept.`)
+  }
+  if (!(finalText || summary).trim()) throw new Error('The provider returned an empty context summary.')
 
   return { text: (finalText || summary).trim(), usage, rateLimits }
 }

@@ -5,7 +5,7 @@ import { readProjectMemory, saveProjectMemory, clearProjectMemory } from '../cor
 import { effectiveEffort } from '../providers/effort'
 import { detectProvider } from '../config/detect'
 import type { DetectedProvider } from '../config/detect'
-import { formatModelRef, parseModelRef } from '../config/schema'
+import { formatModelRef, MAX_SYSTEM_PROMPT_CHARS, parseModelRef } from '../config/schema'
 import type { Config } from '../config/schema'
 import path from 'node:path'
 import { mkdir } from 'node:fs/promises'
@@ -723,6 +723,9 @@ export async function boot(options: {
     isSystemPromptEnabled: () => config.systemPromptEnabled && config.systemPrompt !== undefined && config.systemPrompt.trim() !== '',
     async setSystemPrompt(text: string) {
       const trimmed = text.trim()
+      if (trimmed.length > MAX_SYSTEM_PROMPT_CHARS) {
+        throw new Error(`System prompt must be at most ${MAX_SYSTEM_PROMPT_CHARS.toLocaleString('en-US')} characters.`)
+      }
       await persistConfig((draft) => {
         if (trimmed === '') delete draft.systemPrompt
         else draft.systemPrompt = trimmed

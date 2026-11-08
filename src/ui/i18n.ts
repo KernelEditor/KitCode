@@ -95,6 +95,13 @@ export interface Strings {
   subagentsTitle: string
   subagentRunning: string
   subagentDone: string
+  subagentCancelled: string
+  subagentError: string
+  subagentIncomplete: string
+  subagentsCleared: string
+  noFinishedSubagents: string
+  subagentsClear: string
+  confirmExit: string
   subagentWaiting: string
   subagentBack: string
   attachUsage: string
@@ -173,6 +180,7 @@ export interface Strings {
   systemPromptCleared: string
   systemPromptEnabled: string
   systemPromptDisabled: string
+  systemPromptTooLong: (max: string) => string
   stepsCurrent: (n: number) => string
   stepsSet: (n: number) => string
   stepsUnlimited: string
@@ -305,6 +313,13 @@ const en: Strings = {
   subagentsTitle: 'Open a sub-agent chat',
   subagentRunning: 'running',
   subagentDone: 'done',
+  subagentCancelled: 'cancelled',
+  subagentError: 'error',
+  subagentIncomplete: 'incomplete',
+  subagentsCleared: 'Finished subagents cleared from the list.',
+  noFinishedSubagents: 'No finished subagents to clear.',
+  subagentsClear: 'Clear finished subagents',
+  confirmExit: 'Press Ctrl+C again within 3 seconds to exit. Any other key cancels.',
   subagentWaiting: 'waiting for the first step…',
   subagentBack: 'esc back',
   attachUsage:
@@ -393,6 +408,7 @@ const en: Strings = {
   systemPromptCleared: 'System prompt addition cleared.',
   systemPromptEnabled: 'System prompt enabled.',
   systemPromptDisabled: 'System prompt disabled (kept in config).',
+  systemPromptTooLong: (max) => `System prompt must be at most ${max} characters.`,
   stepsCurrent: (n) => n === 0 ? 'Model calls per turn: unlimited' : `Model calls per turn: ${n}`,
   stepsSet: (n) => `Model calls per turn set to ${n}`,
   stepsUnlimited: 'Model calls per turn: unlimited (0). The turn budget still applies.',
@@ -577,6 +593,13 @@ const ru: Strings = {
   subagentsTitle: 'Открыть чат суб-агента',
   subagentRunning: 'работает',
   subagentDone: 'готово',
+  subagentCancelled: 'отменено',
+  subagentError: 'ошибка',
+  subagentIncomplete: 'не завершено',
+  subagentsCleared: 'Завершённые субагенты удалены из списка.',
+  noFinishedSubagents: 'Нет завершённых субагентов для очистки.',
+  subagentsClear: 'Очистить завершённых субагентов',
+  confirmExit: 'Нажмите Ctrl+C ещё раз в течение 3 секунд для выхода. Любая другая клавиша отменяет выход.',
   subagentWaiting: 'ждём первый шаг…',
   subagentBack: 'esc — назад',
   attachUsage:
@@ -665,6 +688,7 @@ const ru: Strings = {
   systemPromptCleared: 'Дополнение к системному промпту удалено.',
   systemPromptEnabled: 'Дополнение к системному промпту включено.',
   systemPromptDisabled: 'Дополнение к системному промпту выключено (сохранено в конфиге).',
+  systemPromptTooLong: (max) => `Дополнение к системному промпту не должно быть длиннее ${max} символов.`,
   stepsCurrent: (n) => n === 0 ? 'Вызовов модели за ход: без лимита' : `Вызовов модели за ход: ${n}`,
   stepsSet: (n) => `Вызовов модели за ход установлено: ${n}`,
   stepsUnlimited: 'Вызовов модели за ход: без лимита (0). Бюджет токенов всё ещё действует.',

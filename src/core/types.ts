@@ -11,6 +11,8 @@ export interface PermissionRequest {
 
 export type PermissionDecision = 'once' | 'always' | 'deny'
 
+export type SubagentStatus = 'done' | 'cancelled' | 'error' | 'incomplete'
+
 export type AgentEvent =
   | { type: 'turn_start' }
   | { type: 'text_delta'; text: string }
@@ -25,11 +27,13 @@ export type AgentEvent =
   | { type: 'turn_end'; stopReason: StopReason }
   | { type: 'notice'; level: 'info' | 'warn' | 'error'; text: string }
   | { type: 'subagent_start'; id: string; description: string }
-  | { type: 'subagent_end'; id: string; result: string }
+  | { type: 'subagent_end'; id: string; result: string; status?: SubagentStatus; reason?: string }
   | { type: 'subagent_event'; id: string; event: AgentEvent }
 
 export interface AgentHooks {
   onEvent(event: AgentEvent): void
+  /** Latest replayable history, including completed tools, even if a later request fails. */
+  onHistory?(messages: Message[]): void
   requestPermission(request: PermissionRequest): Promise<PermissionDecision>
 }
 
