@@ -5,10 +5,10 @@ import { readProjectMemory, saveProjectMemory, clearProjectMemory } from '../cor
 import { effectiveEffort } from '../providers/effort'
 import { detectProvider } from '../config/detect'
 import type { DetectedProvider } from '../config/detect'
-import { formatModelRef, MAX_SYSTEM_PROMPT_CHARS, parseModelRef } from '../config/schema'
+import { formatModelRef, parseModelRef } from '../config/schema'
 import type { Config } from '../config/schema'
 import path from 'node:path'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { projectSkillsDir, skillsDir } from '../config/paths'
 import {
   configLocation,
@@ -44,6 +44,7 @@ import {
 } from '../core/compact'
 import { buildSystemPrompt } from '../core/prompt'
 import {
+  assertSessionWorkspace,
   createSession,
   deleteAllSessions as deleteAllStoredSessions,
   deleteSession as deleteStoredSession,
@@ -109,6 +110,9 @@ export async function boot(options: {
   mode?: AgentMode
   modelRef?: string
 }): Promise<Boot> {
+  const resumedSession = options.resumeId
+    ? await loadSession(await resolveSessionId(options.resumeId)) : undefined
+  if (resumedSession) await assertSessionWorkspace(resumedSession, options.cwd)
   const loadedConfig = await loadRuntimeConfig(options.cwd)
   const config = loadedConfig.config
   const auth = await loadAuth()
@@ -164,14 +168,9 @@ export async function boot(options: {
     if (state.status === 'error') warnings.push(`MCP "${state.name}": ${state.error ?? 'failed'}`)
   }
 
-  let session: SessionState
-  if (options.resumeId) {
-    session = await loadSession(await resolveSessionId(options.resumeId))
-  } else {
-    session =
-      (options.continueSession ? await latestSessionFor(options.cwd) : null) ??
-      createSession(options.cwd, config.model ?? '')
-  }
+  let session: SessionState = resumedSession ??
+    (options.continueSession ? await latestSessionFor(options.cwd) : null) ??
+    createSession(options.cwd, config.model ?? '')
 
   const usage = createUsageTracker(session.usage, resolvePricing)
   let skillCatalogue = formatSkillCatalogue(skills)
@@ -181,13 +180,45 @@ export async function boot(options: {
     projectMemory = await readProjectMemory(workspaceRoot)
   }
   tools.register([createMemoryTool({ read: () => projectMemory, save: saveMemory })])
+  const promptFile = path.resolve(path.dirname(location.path), config.systemPromptFile ??
+    (location.scope === 'project' ? '.kitcode/AGENTS.md' : 'AGENTS.md'))
+  const readInstructionFile = async (file: string): Promise<string> => {
+    try {
+      return await readFile(file, 'utf8')
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+      throw error
+    }
+  }
+  const projectPromptFile = path.join(workspaceRoot, '.kitcode', 'AGENTS.md')
+  let projectInstructions = ''
+  const reloadProjectInstructions = async () => {
+    projectInstructions = workspaceTrusted && path.resolve(projectPromptFile) !== path.resolve(promptFile)
+      ? await readInstructionFile(projectPromptFile) : ''
+  }
+  await reloadProjectInstructions()
+  let customInstructions = await readInstructionFile(promptFile)
+  if (config.systemPrompt !== undefined) {
+    const legacy = config.systemPrompt.trim()
+    if (legacy && !customInstructions.includes(legacy)) {
+      customInstructions = [customInstructions.trim(), legacy].filter(Boolean).join('\n\n')
+      await mkdir(path.dirname(promptFile), { recursive: true })
+      await writeFile(promptFile, customInstructions, { encoding: 'utf8', mode: 0o600 })
+    }
+    config.systemPromptFile = path.relative(path.dirname(location.path), promptFile)
+    delete config.systemPrompt
+    await saveConfig(config)
+  }
   const mainSystemPrompt = () =>
     buildSystemPrompt({
       cwd: options.cwd,
       toolNames: tools.list().map((tool) => tool.name),
       skills: skillCatalogue,
       memory: projectMemory,
-      systemPrompt: config.systemPromptEnabled ? config.systemPrompt : undefined,
+      systemPrompt: config.systemPromptEnabled
+        ? [customInstructions, projectInstructions.trim() ? `Project instructions (${projectPromptFile}):\n${projectInstructions}` : ''].filter(Boolean).join('\n\n')
+        : undefined,
+      systemPromptFile: promptFile,
     })
 
   let modelRef = session.model || config.model || ''
@@ -328,14 +359,11 @@ export async function boot(options: {
   let configQueue: Promise<void> = Promise.resolve()
   const persistConfig = (mutate: (draft: Config) => void): Promise<void> => {
     const save = configQueue.catch(() => undefined).then(async () => {
-      const before = structuredClone(config)
-      mutate(config)
-      try {
-        await saveConfig(config)
-      } catch (error) {
-        Object.assign(config, before)
-        throw error
-      }
+      const draft = structuredClone(config)
+      mutate(draft)
+      await saveConfig(draft)
+      for (const key of Object.keys(config)) Reflect.deleteProperty(config, key)
+      Object.assign(config, draft)
     })
     configQueue = save
     return save
@@ -582,7 +610,9 @@ export async function boot(options: {
     },
 
     async resumeSession(id) {
+      await persistQueue.catch(() => undefined)
       const loaded = await loadSession(await resolveSessionId(id))
+      await assertSessionWorkspace(loaded, options.cwd)
       session = loaded
       usage.restore(loaded.usage)
       activateModel(loaded.model || modelRef, loaded.context)
@@ -719,16 +749,16 @@ export async function boot(options: {
       })
     },
 
-    getSystemPrompt: () => config.systemPrompt ?? '',
-    isSystemPromptEnabled: () => config.systemPromptEnabled && config.systemPrompt !== undefined && config.systemPrompt.trim() !== '',
+    getSystemPrompt: () => customInstructions,
+    isSystemPromptEnabled: () => config.systemPromptEnabled && customInstructions.trim() !== '',
     async setSystemPrompt(text: string) {
       const trimmed = text.trim()
-      if (trimmed.length > MAX_SYSTEM_PROMPT_CHARS) {
-        throw new Error(`System prompt must be at most ${MAX_SYSTEM_PROMPT_CHARS.toLocaleString('en-US')} characters.`)
-      }
+      await mkdir(path.dirname(promptFile), { recursive: true })
+      await writeFile(promptFile, trimmed, { encoding: 'utf8', mode: 0o600 })
+      customInstructions = trimmed
       await persistConfig((draft) => {
-        if (trimmed === '') delete draft.systemPrompt
-        else draft.systemPrompt = trimmed
+        draft.systemPromptFile = path.relative(path.dirname(location.path), promptFile)
+        delete draft.systemPrompt
       })
     },
     async setSystemPromptEnabled(enabled: boolean) {
@@ -1079,21 +1109,41 @@ export async function boot(options: {
         },
       }
       try {
-        const next = await runTurn(
+        customInstructions = await readInstructionFile(promptFile)
+        await reloadProjectInstructions()
+        let next = await runTurn(
           agentConfigFor(mainSystemPrompt(), tools),
           requestHistory,
           trackedHooks,
           signal,
         )
-        if (config.diagnostics.autoRun && !signal.aborted) {
-          await runAutomaticDiagnostics({
-            cwd: options.cwd,
-            changedFiles: checkpoint.changedPaths(),
-            configuredCommands: config.diagnostics.commands,
-            permissions,
-            hooks: trackedHooks,
-            signal,
-          })
+        if (config.diagnostics.autoRun) {
+          // Two repair attempts share the original turn's budget and checkpoint.
+          for (let attempt = 0; attempt <= 2 && !signal.aborted; attempt++) {
+            const report = await runAutomaticDiagnostics({
+              cwd: options.cwd,
+              changedFiles: checkpoint.changedPaths(),
+              configuredCommands: config.diagnostics.commands,
+              permissions,
+              hooks: trackedHooks,
+              signal,
+            })
+            if (report.skipped || report.results.length === 0) break
+            next = [...next, { role: 'user', content: [{ type: 'text', text:
+              'Automatic project check results:\n' + report.results.map((result) =>
+                `${result.command}: ${result.isError ? 'FAILED' : 'PASSED'}\n${result.content}`,
+              ).join('\n\n') + (report.failed.length > 0
+                ? '\nFix the failures caused by your changes, then report the verification result.' : ''),
+            }] }]
+            trackedHooks.onHistory?.(next)
+            if (report.failed.length === 0 || signal.aborted) break
+            if (attempt === 2) {
+              trackedHooks.onEvent({ type: 'notice', level: 'warn',
+                text: 'Automatic checks still fail after two repair attempts. Results were saved in the conversation.' })
+              break
+            }
+            next = await runTurn(agentConfigFor(mainSystemPrompt(), tools), next, trackedHooks, signal)
+          }
         }
         return next
       } catch (error) {

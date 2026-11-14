@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
+import { readFile, readdir, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { checkpointsDir, ensureDir, sessionsDir } from '../config/paths'
 import { redactSecrets } from '../providers/errors'
@@ -34,6 +34,19 @@ export function createSession(cwd: string, model: string): SessionState {
     messages: [],
     usage: [],
   }
+}
+
+export async function assertSessionWorkspace(session: SessionState, cwd: string): Promise<void> {
+  const canonical = async (dir: string) => {
+    const resolved = path.resolve(dir)
+    return realpath(resolved).catch(() => resolved)
+  }
+  const [stored, current] = await Promise.all([canonical(session.cwd), canonical(cwd)])
+  if (session.cwd && path.relative(stored, current) === '') return
+  throw new Error(
+    `Session workspace is "${session.cwd || '(unknown)'}", but the current workspace is "${cwd}". ` +
+    'Start KitCode in the session directory to resume it; no session was changed.',
+  )
 }
 
 export async function saveSession(state: SessionState): Promise<void> {

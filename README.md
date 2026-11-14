@@ -164,6 +164,8 @@ commands — `/help`, `/usage`, `/context`, `/model`, `/effort`, `/thinking`, `/
 change the running turn or the session (`/clear`, `/compact`, `/resume`, `/undo`, `/login`,
 `/provider`, `/logout`, `/key`, `/refresh`, `/mcp`, `/sessions`) wait for the turn to finish.
 
+Resume a session from its original working directory. `/resume` and `--resume` reject a different directory so an old conversation cannot edit the wrong project.
+
 ## Modes
 
 - `normal` — file changes, shell commands, and MCP calls request approval when needed;
@@ -303,8 +305,10 @@ Minimal manual provider configuration:
 }
 ```
 
+`/systemp`: `~/.kitcode/AGENTS.md` (project config: `.kitcode/AGENTS.md`). `systemPromptFile` references this file relative to the config. Legacy `systemPrompt` text migrates automatically. No character limit; instructions reload before each user turn. `/systemp off` keeps the file. A trusted project's local `.kitcode/AGENTS.md` also loads when using a global config.
+
 The main settings are `model`, `effort`, `thinking`, `contextWindow`, `maxTokens`, `maxTurnSteps`,
-`systemPrompt`, `systemPromptEnabled`, `budget`, `diagnostics`, `theme`, `permissions`, `providers`, and `mcp`. `budget` controls local per-message
+`systemPromptFile`, `systemPromptEnabled`, `budget`, `diagnostics`, `theme`, `permissions`, `providers`, and `mcp`. `budget` controls local per-message
 safety limits for model requests, tokens, estimated cost (when model pricing is available), and
 subagents. These values are
 not the provider's account balance or rate limits. `diagnostics.autoRun`

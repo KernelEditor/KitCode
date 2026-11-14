@@ -20,7 +20,7 @@ vi.mock('../src/ui/components/Onboarding', () => ({ Onboarding: (props: NonNulla
 import { App } from '../src/ui/App'
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 80))
-async function withApp(body: (io: { stdin: PassThrough; stdout: PassThrough & NodeJS.WriteStream; output(): string }) => Promise<void>, overrides: Record<string, unknown> = {}) {
+async function withApp(body: (io: { stdin: PassThrough; stdout: PassThrough & NodeJS.WriteStream; output(): string; flush(): Promise<void> }) => Promise<void>, overrides: Record<string, unknown> = {}, initialHistory?: Message[], slowOutput = false) {
   const runtime = {
     cwd: process.cwd(), getAccent: () => 'purple', getLang: () => 'en', needsSetup: () => false,
     modelContext: () => ({ window: null, used: 0, exact: false }), subscribeContext: () => () => {},
@@ -31,19 +31,21 @@ async function withApp(body: (io: { stdin: PassThrough; stdout: PassThrough & No
     addProvider: async () => 'provider added', configPath: () => 'config',
     ...overrides,
   } as unknown as Runtime
-  const history: Message[] = [
+  const history: Message[] = initialHistory ?? [
     { role: 'user', content: [{ type: 'text', text: 'OLD_CHAT_MARKER' }] },
     { role: 'assistant', content: [{ type: 'text', text: 'OLD_ANSWER_MARKER' }] },
   ]
   const stdin = new PassThrough() as PassThrough & NodeJS.ReadStream
-  const stdout = new PassThrough() as PassThrough & NodeJS.WriteStream
+  const stdout = new PassThrough(slowOutput ? {
+    transform(chunk, _encoding, callback) { setTimeout(() => callback(null, chunk), 3) },
+  } : {}) as PassThrough & NodeJS.WriteStream
   const stderr = new PassThrough() as PassThrough & NodeJS.WriteStream
   Object.assign(stdin, { isTTY: true, setRawMode: vi.fn(), ref: () => stdin, unref: () => stdin })
   Object.assign(stdout, { isTTY: true, columns: 100, rows: 60 })
   let output = ''
   stdout.on('data', (chunk) => { output += chunk.toString() })
   const app = render(<App runtime={runtime} initialHistory={history} />, { stdin, stdout, stderr, interactive: true, patchConsole: false, exitOnCtrlC: false, maxFps: 0, incrementalRendering: false })
-  try { await tick(); await body({ stdin, stdout, output: () => output }) }
+  try { await tick(); await app.waitUntilRenderFlush(); await body({ stdin, stdout, output: () => output, flush: () => app.waitUntilRenderFlush() }) }
   finally { app.cleanup(); stdin.destroy(); stdout.destroy(); stderr.destroy() }
 }
 
@@ -182,6 +184,126 @@ it.each(['/resume', '/sessions resume other'])('replaces scrollback rather than 
     listSessionItems: async () => [{ key: 'other', label: 'other session' }],
     resumeSession: async () => [{ role: 'user', content: [{ type: 'text', text: 'RESTORED_MARKER' }] }],
   })
+})
+
+it.each(['/clear', '/resume', '/sessions resume other'])('removes a long chat from the full scrollback with %s, including after resize', async (command) => {
+  const longHistory = (prefix: string): Message[] => Array.from({ length: 70 }, (_, index) => ({
+    role: index % 2 === 0 ? 'user' : 'assistant',
+    content: [{ type: 'text', text: `${prefix}_${String(index).padStart(2, '0')} ${'wrapped text '.repeat(12)}` }],
+  }))
+  const restored = longHistory('RESTORED_SCROLL_ROW')
+  await withApp(async ({ stdin, stdout, output }) => {
+    // Check the interpreted viewport AND saved lines, not just writes after
+    // the last erase sequence: this is what scrolling up exposes to the user.
+    const before = terminalScreen(output(), stdout.columns, stdout.rows)
+    expect(before).toContain('OLD_SCROLL_ROW_00')
+    expect(before.split('\n').length).toBeGreaterThan(stdout.rows)
+
+    captured.prompt!.onSubmit(command)
+    await tick()
+    if (command === '/resume') { stdin.write('\r'); await tick() }
+    await tick()
+
+    const checkScrollback = () => {
+      const screen = terminalScreen(output(), stdout.columns, stdout.rows)
+      expect(screen).not.toContain('OLD_SCROLL_ROW_')
+      expect(screen.match(/kitcode/g)).toHaveLength(1)
+      if (command === '/clear') expect(screen).not.toContain('RESTORED_SCROLL_ROW_')
+      else {
+        expect(screen.match(/RESTORED_SCROLL_ROW_00/g)).toHaveLength(1)
+        expect(screen.match(/RESTORED_SCROLL_ROW_69/g)).toHaveLength(1)
+      }
+    }
+    checkScrollback()
+    for (const [columns, rows] of [[45, 20], [100, 60]]) {
+      stdout.columns = columns!
+      stdout.rows = rows!
+      stdout.emit('resize')
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      checkScrollback()
+    }
+
+    // The restored conversation must not return after a subsequent /clear.
+    captured.prompt!.onSubmit('/clear')
+    await tick()
+    const cleared = terminalScreen(output(), stdout.columns, stdout.rows)
+    expect(cleared).not.toContain('OLD_SCROLL_ROW_')
+    expect(cleared).not.toContain('RESTORED_SCROLL_ROW_')
+  }, {
+    listSessionItems: async () => [{ key: 'other', label: 'other session' }],
+    resumeSession: async () => restored,
+  }, longHistory('OLD_SCROLL_ROW'))
+})
+
+it.each(['/clear', '/sessions resume other'])('does not bring back a finishing answer after queued %s', async (command) => {
+  let hooks!: AgentHooks
+  let finish!: () => void
+  const completion = new Promise<void>((resolve) => { finish = resolve })
+  const restored: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'RESTORED_MARKER' }] }]
+  const run = vi.fn(async (history: Message[], current: AgentHooks) => {
+    if (run.mock.calls.length > 1) return history
+    hooks = current
+    await completion
+    hooks.onEvent({ type: 'text_delta', text: 'OLD_FINAL_MARKER' })
+    hooks.onEvent({ type: 'turn_end', stopReason: 'end_turn' })
+    const next: Message[] = [...history, { role: 'assistant', content: [{ type: 'text', text: 'OLD_STREAM_MARKER OLD_FINAL_MARKER' }] }]
+    hooks.onHistory?.(next)
+    return next
+  })
+  try {
+    await withApp(async ({ stdout, output, flush }) => {
+      captured.prompt!.onSubmit('start')
+      await tick()
+      // Leave a delta waiting on the 50 ms timer while the session switch
+      // queues behind the running answer. Finish and resize in the same turn.
+      hooks.onEvent({ type: 'text_delta', text: 'OLD_STREAM_MARKER ' })
+      captured.prompt!.onSubmit(command)
+      finish()
+      stdout.columns = 70
+      stdout.emit('resize')
+      await new Promise((resolve) => setTimeout(resolve, 350))
+      await flush()
+      const screen = terminalScreen(output(), stdout.columns, stdout.rows)
+      expect(screen).not.toMatch(/OLD_(?:CHAT|ANSWER|STREAM|FINAL)_MARKER/)
+      if (command !== '/clear') expect(screen).toContain('RESTORED_MARKER')
+
+      captured.prompt!.onSubmit('AFTER_SWITCH')
+      await tick()
+      await flush()
+      const nextHistory = run.mock.calls[1]![0]
+      expect(JSON.stringify(nextHistory)).not.toContain('OLD_')
+      expect(nextHistory).toHaveLength(command === '/clear' ? 1 : 2)
+    }, {
+      run,
+      listSessionItems: async () => [{ key: 'other', label: 'other session' }],
+      resumeSession: async () => restored,
+    })
+  } finally { finish() }
+})
+
+it('serializes resume, clear and a new message while terminal writes are delayed', async () => {
+  const run = vi.fn(async (history: Message[]) => history)
+  const newSession = vi.fn(async () => {})
+  captured.realPrompt = true
+  try {
+    await withApp(async ({ stdout, output, flush }) => {
+      captured.prompt!.onSubmit('/sessions resume other')
+      captured.prompt!.onSubmit('/clear')
+      captured.prompt!.onSubmit('AFTER_SLOW_CLEAR')
+      await vi.waitFor(() => expect(run).toHaveBeenCalledOnce(), { timeout: 3000 })
+      await flush()
+      const screen = terminalScreen(output(), stdout.columns, stdout.rows)
+      expect(screen).not.toMatch(/OLD_(?:CHAT|ANSWER)_MARKER|RESTORED_MARKER/)
+      expect(screen.match(/AFTER_SLOW_CLEAR/g)).toHaveLength(1)
+      expect(screen.match(/kitcode/g)).toHaveLength(1)
+      expect(newSession).toHaveBeenCalledOnce()
+      expect(run.mock.calls[0]![0]).toEqual([{ role: 'user', content: [{ type: 'text', text: 'AFTER_SLOW_CLEAR' }] }])
+    }, {
+      run, newSession,
+      listSessionItems: async () => [{ key: 'other', label: 'other session' }],
+      resumeSession: async () => [{ role: 'user', content: [{ type: 'text', text: 'RESTORED_MARKER' }] }],
+    }, undefined, true)
+  } finally { captured.realPrompt = false }
 })
 
 it('prints one fresh header after deleting the active provider and returning from setup', async () => {

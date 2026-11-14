@@ -19,7 +19,7 @@ export const bashOutputTool: Tool = {
     additionalProperties: false,
   },
   defaultPermission: 'allow',
-  readOnly: true,
+  readOnly: (input) => !(input as BashOutputInput | undefined)?.kill,
   summarize(input) {
     const { id, kill } = input as BashOutputInput
     if (!id) return 'bash_output(list)'

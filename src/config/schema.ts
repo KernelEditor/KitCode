@@ -85,8 +85,6 @@ export const diagnosticsSchema = z.object({
   commands: z.array(z.string().trim().min(1).max(20_000)).max(8).default([]),
 })
 
-export const MAX_SYSTEM_PROMPT_CHARS = 20_000
-
 export const configSchema = z.object({
   version: z.literal(1).default(1),
   model: z.string().optional(),
@@ -100,8 +98,10 @@ export const configSchema = z.object({
   // comes from the provider catalogue or the endpoint's model list.
   contextWindow: z.number().int().min(1_000).max(10_000_000).optional(),
   // Extra instructions appended to the built-in system prompt on every turn.
-  systemPrompt: z.string().max(MAX_SYSTEM_PROMPT_CHARS).optional(),
-  // When false, systemPrompt is kept in the config but not sent to the model.
+  systemPrompt: z.string().optional(),
+  // Path relative to the active config file; replaces legacy inline text.
+  systemPromptFile: z.string().min(1).optional(),
+  // When false, instructions stay on disk but are not sent to the model.
   systemPromptEnabled: z.boolean().default(true),
   // Hard cap on model calls in one turn. Higher values let large refactors
   // finish; 0 disables the cap entirely (use with care — a runaway loop will

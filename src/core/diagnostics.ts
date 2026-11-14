@@ -21,6 +21,7 @@ const diagnosticsTool: Tool = {
 
 export interface DiagnosticsSummary {
   commands: string[]
+  results: Array<{ command: string; content: string; isError: boolean }>
   failed: string[]
   skipped: boolean
 }
@@ -81,7 +82,7 @@ export async function runAutomaticDiagnostics(options: {
 }): Promise<DiagnosticsSummary> {
   const checks = await detectChecks(options.cwd, options.configuredCommands)
   const commands = checks.map((check) => check.command)
-  const summary: DiagnosticsSummary = { commands, failed: [], skipped: false }
+  const summary: DiagnosticsSummary = { commands, results: [], failed: [], skipped: false }
   if (options.changedFiles.length === 0 || commands.length === 0 || options.signal.aborted) {
     summary.skipped = true
     return summary
@@ -153,6 +154,7 @@ export async function runAutomaticDiagnostics(options: {
     options.hooks.onEvent({ type: 'tool_start', id, name: diagnosticsTool.name, summary: callSummary })
     try {
       const result = await execute(command, ctx)
+      summary.results.push({ command, content: result.content.slice(-20_000), isError: result.isError === true })
       if (result.isError) summary.failed.push(command)
       options.hooks.onEvent({
         type: 'tool_end',
@@ -163,6 +165,7 @@ export async function runAutomaticDiagnostics(options: {
       })
     } catch (error) {
       summary.failed.push(command)
+      summary.results.push({ command, content: String(error).slice(-20_000), isError: true })
       options.hooks.onEvent({
         type: 'tool_end',
         id,

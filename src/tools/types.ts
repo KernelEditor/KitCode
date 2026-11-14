@@ -35,7 +35,8 @@ export interface Tool {
   description: string
   inputSchema: JsonSchema
   defaultPermission: PermissionMode
-  readOnly?: boolean
+  /** A mixed tool can classify the requested operation for plan mode. */
+  readOnly?: boolean | ((input: unknown) => boolean)
   permission?(input: unknown, ctx?: ToolContext): PermissionMode | undefined
   summarize(input: unknown): string
   preview?(input: unknown, ctx: ToolContext): Promise<ToolDisplay | undefined>

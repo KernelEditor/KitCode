@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTerminalSize } from './terminal-size'
 import { attachmentLabel, looksLikeAttachmentPath, splitAttachmentPaths } from '../core/attachments'
 import { parseMcpAddCommand } from '../mcp/add'
-import { MAX_SYSTEM_PROMPT_CHARS } from '../config/schema'
 import type { McpAddError } from '../mcp/add'
 import type { McpServerState } from '../mcp/client'
 import { createSpeedMeter, readSpeed, recordSpeed } from './speed'
@@ -438,8 +437,8 @@ export function App({
           if (busyRef.current && abort.current) {
             abort.current.abort()
           }
-          queueRef.current = []
-          setPendingCount(0)
+          // Commands drain in order. Anything still queued was submitted after
+          // /clear and belongs to the new session; do not silently discard it.
           await runtime.newSession()
           history.current = []
           undoNote.current = null
@@ -1292,11 +1291,6 @@ export function App({
                     ((await promptInput(strings.systemPromptTitle)) ?? '').trim()
                   : await runtime.loadSystemPromptFile(argument)
               if (!text) return
-              // Check before the runtime so the reason shows in the UI language.
-              if (text.length > MAX_SYSTEM_PROMPT_CHARS) {
-                notice('error', strings.systemPromptTooLong(MAX_SYSTEM_PROMPT_CHARS.toLocaleString(lang ?? 'en')))
-                return
-              }
               await runtime.setSystemPrompt(text)
               notice('info', strings.systemPromptSet)
             } catch (error) {

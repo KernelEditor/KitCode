@@ -83,21 +83,41 @@ describe('provider logout', () => {
     }
   })
 
-  it('rejects an oversized system prompt without changing the saved config', async () => {
+  it('stores large system prompts in AGENTS.md with a config reference', async () => {
     await seed()
     const app = await boot({ cwd: home })
     try {
-      await app.runtime.setSystemPrompt('keep this prompt')
-      await expect(app.runtime.setSystemPrompt('x'.repeat(20_001)))
-        .rejects.toThrow('System prompt must be at most 20,000 characters.')
-      expect(app.runtime.getSystemPrompt()).toBe('keep this prompt')
+      const text = 'x'.repeat(40_000)
+      await app.runtime.setSystemPrompt(text)
+      expect(app.runtime.getSystemPrompt()).toBe(text)
+      expect(await readFile(path.join(home, 'AGENTS.md'), 'utf8')).toBe(text)
+      const saved = JSON.parse(await readFile(configPath, 'utf8'))
+      expect(saved.systemPromptFile).toBe('AGENTS.md')
+      expect(saved.systemPrompt).toBeUndefined()
 
       const reloaded = await boot({ cwd: home })
       try {
-        expect(reloaded.runtime.getSystemPrompt()).toBe('keep this prompt')
+        expect(reloaded.runtime.getSystemPrompt()).toBe(text)
       } finally {
         await reloaded.shutdown()
       }
+    } finally {
+      await app.shutdown()
+    }
+  })
+
+  it('migrates legacy instructions without losing an existing AGENTS.md', async () => {
+    await seed()
+    await writeFile(path.join(home, 'AGENTS.md'), 'Existing instructions', 'utf8')
+    const config = JSON.parse(await readFile(configPath, 'utf8'))
+    config.systemPrompt = 'Legacy instructions'
+    await writeFile(configPath, JSON.stringify(config), 'utf8')
+    const app = await boot({ cwd: home })
+    try {
+      expect(app.runtime.getSystemPrompt()).toBe('Existing instructions\n\nLegacy instructions')
+      const saved = JSON.parse(await readFile(configPath, 'utf8'))
+      expect(saved.systemPrompt).toBeUndefined()
+      expect(saved.systemPromptFile).toBe('AGENTS.md')
     } finally {
       await app.shutdown()
     }

@@ -4,6 +4,8 @@ import type { AgentConfig } from '../src/core/agent'
 import type { ContentBlock, Message, Provider, StopReason } from '../src/providers/types'
 import { INVALID_ARGUMENTS_KEY } from '../src/providers/types'
 import type { Tool } from '../src/tools/types'
+import { bashOutputTool } from '../src/tools/bash-output'
+import { createPermissionEngine, PLAN_REFUSAL } from '../src/tools/permissions'
 
 function scripted(replies: { stopReason: StopReason; content: ContentBlock[] }[]): Provider {
   let call = 0
@@ -39,6 +41,23 @@ const hooks = { onEvent() {}, requestPermission: async () => 'deny' as const }
 const user = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'go' }] }]
 
 describe('turn history', () => {
+  it('blocks killing a background job in plan mode but still allows collecting output', async () => {
+    const execute = vi.spyOn(bashOutputTool, 'execute').mockResolvedValue({ content: 'job output' })
+    const permissions = createPermissionEngine({ bash_output: 'allow' })
+    permissions.bypass.enable()
+    permissions.mode.set('plan')
+    const provider = scripted([{ stopReason: 'tool_use', content: [
+      { type: 'tool_use', id: 'kill', name: 'bash_output', input: { id: 'bg-1', kill: true } },
+      { type: 'tool_use', id: 'read', name: 'bash_output', input: { id: 'bg-1' } },
+    ] }])
+    try {
+      const history = await runTurn({ ...config(provider, bashOutputTool), permissions }, user, hooks, new AbortController().signal)
+      expect(history[2]?.content).toContainEqual({ type: 'tool_result', toolUseId: 'kill', isError: true, content: PLAN_REFUSAL })
+      expect(execute).toHaveBeenCalledOnce()
+      expect(execute.mock.calls[0]?.[0]).toEqual({ id: 'bg-1' })
+    } finally { execute.mockRestore() }
+  })
+
   it('retains completed tools for recovery when the next request fails', async () => {
     let calls = 0
     const provider = scripted([])

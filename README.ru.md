@@ -163,6 +163,8 @@ http://localhost:11434/v1
 Команды, которые меняют текущий ход или сессию (`/clear`, `/compact`, `/resume`, `/undo`, `/login`,
 `/provider`, `/logout`, `/key`, `/refresh`, `/mcp`, `/sessions`), ждут завершения хода.
 
+Восстанавливайте сессию из её исходной рабочей папки. `/resume` и `--resume` отклоняют другую папку, чтобы старый чат не привёл к изменениям в чужом проекте.
+
 ## Режимы
 
 - `normal` — изменения файлов, shell и MCP при необходимости запрашивают подтверждение;
@@ -302,8 +304,10 @@ OpenAI-совместимых моделей параметр не отправ�
 }
 ```
 
+Инструкции `/systemp` хранятся в `~/.kitcode/AGENTS.md`, а при проектном конфиге — в `.kitcode/AGENTS.md` рядом с ним. Поле `systemPromptFile` задаёт путь относительно конфига. Старый текст `systemPrompt` переносится автоматически. Лимита символов нет; файл перечитывается перед каждым сообщением пользователя. `/systemp off` отключает инструкции, сохраняя файл. В доверенном проекте локальный `.kitcode/AGENTS.md` подключается и при глобальном конфиге.
+
 Основные параметры: `model`, `effort`, `thinking`, `contextWindow`, `maxTokens`, `maxTurnSteps`,
-`systemPrompt`, `systemPromptEnabled`, `budget`, `diagnostics`, `theme`, `permissions`, `providers` и `mcp`. Секция `budget` задаёт лимиты запросов к
+`systemPromptFile`, `systemPromptEnabled`, `budget`, `diagnostics`, `theme`, `permissions`, `providers` и `mcp`. Секция `budget` задаёт лимиты запросов к
 модели, токенов, примерной стоимости (если провайдер сообщает цены) и субагентов на одно сообщение.
 `diagnostics.autoRun` включает проверки после правок, а `diagnostics.commands` позволяет заменить
 автоопределение списком до восьми команд. При каждом входе KitCode проверяет новую версию в npm и,

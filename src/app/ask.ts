@@ -3,6 +3,7 @@ import type { AgentHooks, PermissionRequest } from '../core/types'
 import type { AgentMode } from '../tools/permissions'
 import { sanitizeTerminalText } from '../ui/sanitize'
 import { boot } from './runtime'
+import type { Message } from '../providers/types'
 
 const RU_YES = new Set(['y', 'н'])
 
@@ -29,7 +30,9 @@ export async function ask(
   const onInterrupt = () => controller.abort()
   process.on('SIGINT', onInterrupt)
 
+  let latestHistory: Message[] = [...history, { role: 'user', content: [{ type: 'text', text }] }]
   const hooks: AgentHooks = {
+    onHistory(messages) { latestHistory = messages },
     onEvent(event) {
       if (event.type === 'text_delta') process.stdout.write(sanitizeTerminalText(event.text))
       else if (event.type === 'tool_start') {
@@ -39,28 +42,36 @@ export async function ask(
       }
     },
     async requestPermission(request) {
+      if (controller.signal.aborted) return 'deny'
       if (options.yes) return 'once'
       if (!process.stdin.isTTY) return 'deny'
       const rl = createInterface({ input: process.stdin, output: process.stderr })
+      rl.on('SIGINT', onInterrupt)
       try {
         const details = permissionDetails(request)
         const answer = await rl.question(
           `\nallow ${sanitizeTerminalText(request.summary)}?${details ? `\n${details}` : ''}\n[y/N] `,
+          { signal: controller.signal },
         )
         return RU_YES.has(answer.trim().toLowerCase().charAt(0)) ? 'once' : 'deny'
+      } catch (error) {
+        if (controller.signal.aborted) return 'deny'
+        throw error
       } finally {
+        rl.off('SIGINT', onInterrupt)
         rl.close()
       }
     },
   }
 
   try {
-    const next = await runtime.run(
-      [...history, { role: 'user', content: [{ type: 'text', text }] }],
-      hooks,
-      controller.signal,
-    )
-    await runtime.persist(next)
+    await runtime.persist(latestHistory)
+    try {
+      latestHistory = await runtime.run(latestHistory, hooks, controller.signal)
+    } finally {
+      // A failed follow-up request must not discard completed tool work.
+      await runtime.persist(latestHistory)
+    }
     process.stdout.write('\n')
     console.error(runtime.usageLine())
   } finally {

@@ -5,6 +5,7 @@ export function buildSystemPrompt(args: {
   toolNames: string[]
   skills?: string
   memory?: string
+  systemPromptFile?: string
   systemPrompt?: string
 }): string {
   const lines = [
@@ -38,7 +39,7 @@ export function buildSystemPrompt(args: {
   }
 
   if (args.systemPrompt?.trim()) {
-    lines.push('', 'Additional instructions from the user (apply alongside everything above):', args.systemPrompt.trim())
+    lines.push('', 'Additional instructions from the user (apply alongside everything above):', ...(args.systemPromptFile ? [`Source: ${args.systemPromptFile}`] : []), args.systemPrompt.trim())
   }
   return lines.join('\n')
 }

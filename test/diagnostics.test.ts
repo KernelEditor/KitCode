@@ -94,6 +94,10 @@ describe('automatic diagnostics', () => {
     expect(grantForSession).toHaveBeenCalledWith(expect.stringMatching(/^diagnostics#[0-9a-f]{16}$/))
     expect(execute).toHaveBeenCalledTimes(2)
     expect(result.failed).toEqual(['test command'])
+    expect(result.results).toEqual([
+      { command: 'typecheck command', content: 'ok', isError: false },
+      { command: 'test command', content: 'failed', isError: true },
+    ])
     expect(events.filter((event) => event.type === 'tool_start')).toHaveLength(2)
     expect(events.filter((event) => event.type === 'tool_end')).toHaveLength(2)
   })

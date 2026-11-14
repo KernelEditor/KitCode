@@ -313,6 +313,15 @@ describe('write', () => {
 })
 
 describe('file size limits', () => {
+  it('reports an oversized single line instead of telling the model to read the same offset forever', async () => {
+    await writeFile(join(cwd, 'minified.js'), 'x'.repeat(200_001) + '\nlast line')
+    const result = await readTool.execute({ path: 'minified.js' }, context())
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('Line 1')
+    expect(result.content).not.toContain('Continue with offset 1')
+    expect(await readTool.execute({ path: 'minified.js', offset: 2 }, context())).toMatchObject({ content: '2\tlast line' })
+  })
+
   it('rejects oversized reads before loading the file into memory', async () => {
     const file = join(cwd, 'huge.txt')
     await writeFile(file, '')

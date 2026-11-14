@@ -34,9 +34,9 @@ export interface ToolLookup {
 }
 
 export interface PermissionGate {
-  decide(tool: Tool, requested?: PermissionMode): PermissionMode
+  decide(tool: Tool, requested?: PermissionMode, input?: unknown): PermissionMode
   grantForSession(name: string): void
-  denyReason?(tool: Tool, requested?: PermissionMode): string | undefined
+  denyReason?(tool: Tool, requested?: PermissionMode, input?: unknown): string | undefined
 }
 
 export interface UsageSink {
@@ -397,11 +397,11 @@ async function runOneCall(
 
   const requestedPermission = requestedPermissionFor(tool, call.input, ctx)
   const permission = async (): Promise<ToolResultBlock | undefined> => {
-    const gate = cfg.permissions.decide(tool, requestedPermission)
+    const gate = cfg.permissions.decide(tool, requestedPermission, call.input)
     if (gate === 'deny') {
       return toolError(
         call.id,
-        cfg.permissions.denyReason?.(tool, requestedPermission) ??
+        cfg.permissions.denyReason?.(tool, requestedPermission, call.input) ??
           `Tool "${tool.name}" is disabled by the user's configuration. Do not retry it; find another way or ask.`,
       )
     }

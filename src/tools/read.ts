@@ -75,7 +75,15 @@ export const readTool: Tool = {
     let chars = 0
     for (const [index, line] of window.entries()) {
       const numbered = `${start + index + 1}\t${line}`
-      if (chars + numbered.length > MAX_CHARS) break
+      if (chars + numbered.length > MAX_CHARS) {
+        if (rendered.length === 0) {
+          return {
+            content: `Line ${start + index + 1} in ${path} exceeds the ${MAX_CHARS.toLocaleString('en-US')} character output limit. Use grep for targeted matches or a shell command to inspect part of this line.`,
+            isError: true,
+          }
+        }
+        break
+      }
       chars += numbered.length + 1
       rendered.push(numbered)
     }
